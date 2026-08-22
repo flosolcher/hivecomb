@@ -62,21 +62,27 @@ fn no_parser_panics_on_hostile_bytes() {
         // A transaction from another client, or a corrupted one.
         let _ = Transaction::from_body_bytes(&bytes, Chain::Hive);
 
-        // An operation off the wire.
-        let _ = Operation::from_wire(&bytes);
+        // An operation off the wire, via the deserializer trait.
+        {
+            let mut reader = hivecomb::Reader::new(&bytes, Chain::Hive);
+            let _ = <Operation as hivecomb::GrapheneDeserialize>::read_from(&mut reader);
+        }
 
         // A public key from a node response.
         let _ = PublicKey::from_bytes(&bytes);
 
         // Anything that takes text, given bytes that may not even be UTF-8.
         if let Ok(text) = std::str::from_utf8(&bytes) {
-            let _ = PublicKey::from_str_any_prefix(text);
+            let _ = PublicKey::from_prefixed_any(text);
+            let _ = PublicKey::from_hex(text);
             let _ = PrivateKey::from_wif(text);
             let _ = hivecomb::base58::decode_check(text);
 
             #[cfg(feature = "memo")]
             {
-                let _ = hivecomb::memo::decode_memo_str(text, &test_key());
+                let _ = hivecomb::memo::decode(&test_key(), text);
+                let _ = hivecomb::memo::EncryptedMemo::from_memo_string(text);
+                let _ = hivecomb::memo::is_encrypted(text);
             }
         }
 
