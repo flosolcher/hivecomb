@@ -262,6 +262,57 @@ a month against this project's zero. It is beem's designated successor and says 
 | beem's crypto-critical defects | fixed | fixed |
 | beem's serialization defects | 13 carried forward | fixed |
 
+### Measured, on the same machine in the same interpreter
+
+Both libraries installed side by side on CPython 3.12, signing identical operations
+from identical inputs. Median of seven one-second windows, because signature grinding
+— retrying until the signature is canonical — makes any single window noisy.
+
+|  | hivecomb | hive-nectar | |
+|---|---|---|---|
+| sign a message (raw ECDSA) | 74 µs | 155 µs | 2.1× |
+| sign a `custom_json` | 75 µs | 260 µs | 3.5× |
+| sign a `transfer` | 116 µs | 275 µs | 2.4× |
+| serialize and digest, no signing | **8.7 µs** | **65 µs** | **7.4×** |
+
+The last row is the honest one, and it is the only one that measures what actually
+differs. Both libraries hand the elliptic curve arithmetic to libsecp256k1, so the
+signature itself costs the same in each; the gap in the signing rows is the work
+*around* it — decoding the WIF, hashing, and grinding for a canonical signature — done
+in Rust rather than in Python. The gap in the last row is serialization alone, with no
+cryptography in it at all, and that is where a compiled core is worth something.
+
+Before any of it was timed, both were asked for the digest of the same transaction:
+
+```
+hivecomb cef35a5b34e7ee9297de5153b363668245793c8ba719762ccacdde9fd85ad3d6
+nectar   cef35a5b34e7ee9297de5153b363668245793c8ba719762ccacdde9fd85ad3d6
+```
+
+That is a third independent implementation agreeing with `hivecomb` and with hived, and
+it is worth more than the timings: a benchmark of two things that disagree measures
+nothing.
+
+### Would implementing the missing features make hivecomb more mature?
+
+No, and the question is worth separating into two.
+
+**Faster: already true, and measurably.** The table above is what it is regardless of
+which features exist.
+
+**More mature: not something that can be written.** Maturity here is a track record —
+downloads, years, bug reports from people who were not the author, the accumulated
+evidence of having survived contact with real use. nectar has roughly 700 downloads a
+month; `hivecomb` has none, has been accepted by the Hive network exactly once, and has
+no user who is not its author. Implementing HAF, `AccountSnapshot` and `Message` would
+close the *feature* gap and leave the maturity gap exactly where it is.
+
+What `hivecomb` can claim, and does, is **verification depth**: every operation checked
+byte for byte against hived itself, which no other Hive library in any language appears
+to do. That is a different axis from maturity and should not be presented as the same
+one. A library can be thoroughly verified and still unproven in production — this one
+is exactly that.
+
 ### Which one fits
 
 **nectar** if you are writing new Python, can change your imports, and want a maintained

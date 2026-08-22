@@ -183,6 +183,7 @@ tests/  differential_beem.py          the oracle against beem
         hived_serialization_oracle.py the oracle against hived itself
         hived_authority_oracle.py     which key each operation must be signed with
         hived_broadcast_check.py      the one thing that needs a real account
+        bench_vs_nectar.py            timings against hive-nectar, same interpreter
 
 README.md            you are here
 CONTRIBUTING.md      how to verify a change — read before touching serialization
