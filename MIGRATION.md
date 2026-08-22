@@ -465,6 +465,34 @@ generated corpus. `hivecomb/tests/live_fixtures.rs` parses real captured node re
 | `beem.exceptions` | the full hierarchy, names unchanged |
 | `beem.cli` (`beempy`) | every beem command registered, plus 9 new; see below |
 
+### `beem.message` — signed messages
+
+`Message`, `MessageV1` and `MessageV2`, with the same API beem had. The V1 envelope —
+`-----BEGIN HIVE SIGNED MESSAGE-----` — is a de-facto Hive standard for proving control
+of an account without broadcasting anything, so the signed payload is reproduced from
+beem's templates character for character rather than rewritten.
+
+```python
+from beem.message import Message
+
+envelope = Message("hello hive", blockchain_instance=hive).sign(account="alice")
+Message(envelope, blockchain_instance=hive).verify()      # True, or raises
+```
+
+Both formats sign with the account's **memo key**, which is beem's choice and a sound
+one: the memo key is not an authority, so proving control of it proves identity without
+proving spending power.
+
+Two things differ underneath. The signature comes from `hivecomb`, so the nonce is
+RFC 6979 rather than beem's wall-clock-seeded one ([finding 4](SECURITY_FINDINGS.md#4)).
+And `verify()` checks the recovered key against the account's memo key **and returns the
+result** — beem's `verify_message` computed a tautology and threw it away
+([finding 6](SECURITY_FINDINGS.md#6)).
+
+Verified interoperable with [hive-nectar](https://github.com/thecrazygm/hive-nectar) in
+both directions: nectar verifies a signature produced here, and this recovers the signer
+of one produced there.
+
 ### Raises `NotImplementedError`, naming an alternative
 
 | What | Why | Instead |
@@ -498,12 +526,9 @@ script that calls one gets an explanation instead of "unknown command".
 ### Not ported
 
 `beem.Snapshot`, `beem.conveyor`, `beem.hivesigner`, `beem.imageuploader`,
-`beem.profile`, `beem.asciichart`, `beemstorage`, and **`beem.message`** — the
-`-----BEGIN HIVE SIGNED MESSAGE-----` envelope used for account verification.
-`hivecomb.sign_message` and `verify_message` sign and check a raw string, which is the
-cryptography but not the envelope; if you need the envelope,
-[hive-nectar](https://github.com/thecrazygm/hive-nectar) implements it as
-`nectar.message.Message` (V1 and V2).
+`beem.profile`, `beem.asciichart`, `beemstorage`.
+
+`beem.message` **is** implemented — see below.
 
 If you are on beem and can change your imports, nectar is worth looking at generally —
 it is beem's maintained successor and has the wider API surface. `hivecomb-beem` exists

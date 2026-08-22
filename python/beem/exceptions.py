@@ -111,3 +111,18 @@ class KeyNotFound(BeemException):
 
 class OfflineHasNoRPC(OfflineHasNoRPCException):
     """Alias kept for compatibility."""
+
+class InvalidMessageSignature(BeemException):
+    """A signed message's signature does not match the memo key it names."""
+
+
+class BatchedCallsNotSupported(BeemException):
+    """This layer does not batch RPC calls; issue them individually."""
+
+
+class BlockWaitTimeExceeded(BeemException):
+    """Waited for a block that did not arrive within the timeout."""
+
+
+class VestingBalanceDoesNotExistsException(BeemException):
+    """No vesting balance for this account."""

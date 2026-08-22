@@ -35,6 +35,7 @@ def check(name):
 # --------------------------------------------------------------------------
 # Exactly the imports beem code writes.
 # --------------------------------------------------------------------------
+import hivecomb                                             # noqa: E402
 from beem import Hive                                       # noqa: E402
 from beembase.operationids import operations                 # noqa: E402
 from beembase.operations import (                            # noqa: E402
@@ -503,6 +504,63 @@ def _():
         account="alice", permission="active", keys=[WIF],
     )
     assert len(tx["signatures"]) == 1
+
+
+@check("beem.message: ADDITION -- the signed-message envelope beem had")
+def _():
+    from beem.message import Message, MessageV1, MessageV2
+
+    # The envelope is a de-facto Hive standard, so the markers and the signed
+    # payload layout have to match beem's character for character. A signature over
+    # a differently-shaped payload is one no other client will accept.
+    assert MessageV1.MESSAGE_SPLIT == (
+        "-----BEGIN HIVE SIGNED MESSAGE-----",
+        "-----BEGIN META-----",
+        "-----BEGIN SIGNATURE-----",
+        "-----END HIVE SIGNED MESSAGE-----",
+    )
+
+    memo_key = str(hivecomb.PrivateKey(WIF).public_key())
+    meta = {"timestamp": "2026-08-22T14:30:00", "block": 109242605,
+            "memokey": memo_key, "account": "alice"}
+    payload = MessageV1.SIGNED_MESSAGE_META.format(message="hello hive", meta=meta)
+
+    # What gets signed is the message plus four key=value lines, in this order.
+    assert payload == (
+        "hello hive\n"
+        "account=alice\n"
+        f"memokey={memo_key}\n"
+        "block=109242605\n"
+        "timestamp=2026-08-22T14:30:00"
+    ), repr(payload)
+
+    # Verified interoperable with hive-nectar in both directions on 2026-08-22:
+    # nectar verified this signature, and hivecomb recovered the signer of nectar's.
+    signature = hivecomb.sign_message(payload, WIF)
+    assert str(hivecomb.recover_message(payload, signature)) == memo_key
+
+    envelope = MessageV1.SIGNED_MESSAGE_ENCAPSULATED.format(
+        MESSAGE_SPLIT=MessageV1.MESSAGE_SPLIT, message="hello hive",
+        meta=meta, signature=signature,
+    )
+    for marker in MessageV1.MESSAGE_SPLIT:
+        assert marker in envelope
+
+    # Message dispatches across both formats, as beem's did.
+    assert issubclass(Message, MessageV1) and issubclass(Message, MessageV2)
+
+
+@check("beem.exceptions: every type beem defined is present")
+def _():
+    import beem.exceptions as exc
+    # Code that catches a beem exception type must keep working, including the four
+    # that were missing until beem.message needed one of them.
+    for name in ("InvalidMessageSignature", "BatchedCallsNotSupported",
+                 "BlockWaitTimeExceeded", "VestingBalanceDoesNotExistsException",
+                 "AccountDoesNotExistsException", "WrongMemoKey",
+                 "InvalidMemoKeyException", "MissingKeyError"):
+        assert hasattr(exc, name), name
+        assert issubclass(getattr(exc, name), Exception)
 
 
 # --------------------------------------------------------------------------
