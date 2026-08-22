@@ -8,6 +8,13 @@ library.
 npm install hivecomb
 ```
 
+<!-- PRE-RELEASE-NOTICE: delete this block when the first release is published.
+     RELEASING.md carries a checklist item for it. -->
+> **Not published yet.** This name is reserved for the first release. Until then, build
+> from the [repository](https://github.com/flosolcher/hivecomb) — see
+> [RELEASING.md](https://github.com/flosolcher/hivecomb/blob/main/RELEASING.md).
+<!-- /PRE-RELEASE-NOTICE -->
+
 Prebuilt binaries for linux x64/arm64, macOS x64/arm64 and Windows x64. Node 20+.
 TypeScript definitions are included; there is no `@types` package to install.
 

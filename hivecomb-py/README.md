@@ -7,6 +7,13 @@ extension module written in Rust.
 pip install hivecomb
 ```
 
+<!-- PRE-RELEASE-NOTICE: delete this block when the first release is published.
+     RELEASING.md carries a checklist item for it. -->
+> **Not published yet.** This name is reserved for the first release. Until then, build
+> from the [repository](https://github.com/flosolcher/hivecomb) — see
+> [RELEASING.md](https://github.com/flosolcher/hivecomb/blob/main/RELEASING.md).
+<!-- /PRE-RELEASE-NOTICE -->
+
 Wheels are `abi3`, so one per platform covers CPython 3.8 and up. No Python
 dependencies — where `beem` pulled in `requests`, `websocket-client`, `Click`,
 `click-shell`, `pycryptodomex` and `prettytable`, this pulls in nothing.

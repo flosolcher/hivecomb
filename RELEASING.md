@@ -42,6 +42,10 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 - [ ] The version matches in **three** places: `Cargo.toml` (workspace),
       `hivecomb-node/package.json`, and `python/pyproject.toml`. The workflow checks
       this too, but fixing it before tagging is cheaper than a failed release run.
+- [ ] Delete the pre-release notices. Each package landing page carries a block
+      marked `<!-- PRE-RELEASE-NOTICE ... -->` saying the name is not published yet;
+      those pages become crates.io, PyPI and npm, where the statement would be false.
+      Find them with `grep -rl PRE-RELEASE-NOTICE .`
 - [ ] Rehearse: **Actions → release → Run workflow**, dry run **true**. This builds
       every wheel, every addon, installs a wheel and checks the cross-binding digest
       vector, and runs `cargo publish --dry-run` and `npm publish --dry-run` — without

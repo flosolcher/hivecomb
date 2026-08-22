@@ -20,10 +20,33 @@ Nothing here silently does something different from what you asked. Every gap ra
 
 ## 1. Installing it as a drop-in
 
-The `python/` directory of this repository is a distribution that **provides the
-`beem`, `beemgraphenebase`, `beembase` and `beemapi` package names**, implemented on
-top of the `hivecomb` extension module. Installing it in place of beem makes existing
-`import beem` code work unchanged.
+Two distributions do this, and you want both:
+
+| package | what it gives you |
+|---|---|
+| [`hivecomb`](https://pypi.org/project/hivecomb/) | the extension module — keys, signing, memos, all operations |
+| [`hivecomb-beem`](https://pypi.org/project/hivecomb-beem/) | the `beem`, `beemgraphenebase`, `beembase` and `beemapi` package names, and the `beempy` console script |
+
+```sh
+pip uninstall -y beem            # they deliberately collide; beem must go first
+pip install hivecomb hivecomb-beem
+```
+
+`hivecomb-beem` depends on `hivecomb`, so installing the first pulls in the second —
+both are named above only to make the split explicit. Wheels are `abi3`: one per
+platform covers CPython 3.8 and up, and there is nothing to compile.
+
+Installing `hivecomb-beem` **in place of** beem makes existing `import beem` code work
+unchanged. It is not safe alongside beem: it provides the same four package names on
+purpose, and pip will let one silently overwrite the other.
+
+> **Not published yet.** Those two names are reserved for the first release; until it
+> happens, use the source build below. See
+> [RELEASING.md](RELEASING.md) for what is still outstanding.
+
+### From source
+
+Also the path to use if you want to run against an unreleased change.
 
 ```sh
 pip uninstall -y beem

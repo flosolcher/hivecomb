@@ -13,6 +13,13 @@ pip uninstall -y beem
 pip install hivecomb hivecomb-beem
 ```
 
+<!-- PRE-RELEASE-NOTICE: delete this block when the first release is published.
+     RELEASING.md carries a checklist item for it. -->
+> **Not published yet.** This name is reserved for the first release. Until then, build
+> from the [repository](https://github.com/flosolcher/hivecomb) — see
+> [RELEASING.md](https://github.com/flosolcher/hivecomb/blob/main/RELEASING.md).
+<!-- /PRE-RELEASE-NOTICE -->
+
 It deliberately shadows beem's package names, so **do not install it alongside beem**.
 
 Full detail — what was fixed, what diverges on purpose, what was added, what is not
