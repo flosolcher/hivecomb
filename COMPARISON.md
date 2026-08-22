@@ -217,8 +217,29 @@ Everything else in that module is right, including the part beem gets wrong: xyl
 ## The Python comparison: hive-nectar
 
 The Rust comparison above is only half the picture, because `hivecomb` also ships a
-Python module and a beem-compatible layer — and there the competitor is not xylem but
+Python module and a beem-compatible layer. The other library in that space is
 [hive-nectar](https://github.com/thecrazygm/hive-nectar) 1.0.7, by Michael Garcia.
+
+It is worth being precise about the relationship, because the obvious framing — pure
+Python against Rust — is wrong.
+
+**Both libraries do their elliptic curve arithmetic in the same C library.** nectar
+depends on [`coincurve`](https://github.com/ofek/coincurve) `>= 20`, a binding to
+libsecp256k1, imported unconditionally with no fallback; `hivecomb` uses the
+`secp256k1` Rust crate, which links the same library. A signature costs about the same
+in both, because in both it is the same C code doing the work.
+
+What differs is everything around it. nectar builds and serializes operations in
+Python; `hivecomb` does it in Rust and hands Python a finished envelope. So any speed
+difference is in serialization, object construction and interpreter overhead — not in
+the cryptography, where there is nothing to win.
+
+Both also ship compiled artifacts: `coincurve` and `cryptography` are wheels per
+platform, exactly as `hivecomb` is. "No toolchain needed" is true of neither.
+
+These are **alternatives, not rivals**. The real distinction is where the protocol
+logic lives — readable and patchable in place in nectar, faster and memory-safe in
+`hivecomb` — and which of those matters more depends on who is holding it.
 
 **nectar is more mature than `hivecomb`'s Python side by every measure that can be
 counted.** It is published, at 1.0.7 rather than 0.1.0, and takes roughly 700 downloads
@@ -229,7 +250,9 @@ a month against this project's zero. It is beem's designated successor and says 
 | published | PyPI, 1.0.7 | no |
 | downloads / month | ~700 | 0 |
 | keeps beem's package names | **no** — `import beem` must be rewritten | **yes** — `import beem` unchanged |
-| implementation | pure Python | Rust core, `abi3` wheels |
+| protocol logic | Python | Rust |
+| elliptic curve arithmetic | libsecp256k1 (via `coincurve`) | libsecp256k1 (via `secp256k1`) |
+| compiled artifacts | `coincurve`, `cryptography` | the `hivecomb` wheel |
 | Python | 3.10+ | 3.8+ |
 | HAF client | yes | no |
 | `AccountSnapshot` | yes (1,023 lines) | no |
@@ -239,16 +262,17 @@ a month against this project's zero. It is beem's designated successor and says 
 | beem's crypto-critical defects | fixed | fixed |
 | beem's serialization defects | 13 carried forward | fixed |
 
-### Where each one is the right answer
+### Which one fits
 
-**Choose nectar** if you are writing new Python, can change your imports, and want a
-maintained library with the broader API surface — HAF, snapshots, signed messages,
-discussions. It is the safer default today, and this project would say so to anyone
-asking.
+**nectar** if you are writing new Python, can change your imports, and want a maintained
+library with the broader API surface — HAF, snapshots, signed messages, discussions. It
+is the safer default today, and this project would say so to anyone asking.
 
-**Choose `hivecomb-beem`** if you have an existing beem program you cannot rewrite, or
-if you want the signing path to be Rust — verified byte-for-byte against hived, and
-about 20,000 signatures a second where a pure-Python implementation is far slower.
+**`hivecomb-beem`** if you have an existing beem program you cannot rewrite — that is
+the case it exists for, and nectar does not cover it. Also if you want the protocol
+logic in Rust: verified byte for byte against hived, about 19,000 signed transactions a
+second, and no possibility of a memory-safety bug in the part that handles keys. Not,
+however, because the cryptography is faster; it is the same library underneath.
 
 ### What this project found in nectar, and what nectar found first
 

@@ -102,11 +102,16 @@ real post-HF24 value rather than working around it), the discarded verification 
 and the timezone handling. That was done without reference to this project, and several
 of those are the findings `hivecomb` treats as its reason to exist.
 
-The one thing it does not do is keep beem's package names: it ships `nectar`,
-`nectarbase`, `nectarapi`, `nectargraphenebase` and `nectarstorage`, so existing
-`import beem` code has to be rewritten. That is a defensible choice — a clean break
-from a decade of legacy — and it is the single reason `hivecomb-beem` exists as a
-separate thing rather than being redundant. See [COMPARISON.md](COMPARISON.md), which
+The two projects are alternatives rather than rivals, and they differ less than the
+obvious framing suggests: **both do their elliptic curve arithmetic in libsecp256k1** —
+nectar through `coincurve`, `hivecomb` through the `secp256k1` crate. What differs is
+where the protocol logic lives, Python or Rust.
+
+nectar also does not keep beem's package names — it ships `nectar`, `nectarbase`,
+`nectarapi`, `nectargraphenebase` and `nectarstorage`, so existing `import beem` code
+has to be rewritten. That is a defensible choice, a clean break from a decade of
+legacy, and it is the reason `hivecomb-beem` exists as a separate thing rather than
+being redundant. See [COMPARISON.md](COMPARISON.md), which
 compares the two honestly, including where nectar leads.
 
 ## Honourable mention — other Rust work on Hive
