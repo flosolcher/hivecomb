@@ -214,6 +214,58 @@ Everything else in that module is right, including the part beem gets wrong: xyl
 
 ---
 
+## The Python comparison: hive-nectar
+
+The Rust comparison above is only half the picture, because `hivecomb` also ships a
+Python module and a beem-compatible layer — and there the competitor is not xylem but
+[hive-nectar](https://github.com/thecrazygm/hive-nectar) 1.0.7, by Michael Garcia.
+
+**nectar is more mature than `hivecomb`'s Python side by every measure that can be
+counted.** It is published, at 1.0.7 rather than 0.1.0, and takes roughly 700 downloads
+a month against this project's zero. It is beem's designated successor and says so.
+
+| | hive-nectar | hivecomb + hivecomb-beem |
+|---|---|---|
+| published | PyPI, 1.0.7 | no |
+| downloads / month | ~700 | 0 |
+| keeps beem's package names | **no** — `import beem` must be rewritten | **yes** — `import beem` unchanged |
+| implementation | pure Python | Rust core, `abi3` wheels |
+| Python | 3.10+ | 3.8+ |
+| HAF client | yes | no |
+| `AccountSnapshot` | yes (1,023 lines) | no |
+| signed-message envelope (`Message`) | yes, V1 and V2 | no |
+| image upload | yes | no |
+| verified against hived itself | no | 57/57 operations |
+| beem's crypto-critical defects | fixed | fixed |
+| beem's serialization defects | 13 carried forward | fixed |
+
+### Where each one is the right answer
+
+**Choose nectar** if you are writing new Python, can change your imports, and want a
+maintained library with the broader API surface — HAF, snapshots, signed messages,
+discussions. It is the safer default today, and this project would say so to anyone
+asking.
+
+**Choose `hivecomb-beem`** if you have an existing beem program you cannot rewrite, or
+if you want the signing path to be Rust — verified byte-for-byte against hived, and
+about 20,000 signatures a second where a pure-Python implementation is far slower.
+
+### What this project found in nectar, and what nectar found first
+
+An audit of nectar 1.0.7 at commit `06f743d` is in
+[SECURITY_FINDINGS.md](SECURITY_FINDINGS.md), which records which of beem's defects
+survive into it — thirteen do, including `escrow_release` missing the field naming who
+receives the funds, `custom_binary` serializing two of six fields, and unsorted
+`flat_set` auth lists. Those are reported to its maintainer rather than only published
+here.
+
+It is worth stating the other direction with equal weight. Nectar **independently fixed
+the entire crypto-critical set** before this project existed, and did the chain-id fix
+more thoroughly than a workaround. And one finding this project published against beem
+— that `unicodify` corrupts control characters — was **wrong**; beem and nectar are both
+right, and `hivecomb` had "fixed" correct behaviour into a real bug of its own. That
+retraction is in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md#8).
+
 ## What hivecomb deliberately does not do
 
 **Async by default.** `hivecomb`'s core is synchronous and its async layer is a feature,

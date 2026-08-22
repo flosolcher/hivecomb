@@ -83,6 +83,32 @@ forward from beem's `Mnemonic`, which was itself taken from
 Pavol Rusnak, (c) 2017 mruddy. `hivecomb/src/bip39.rs` is cross-checked against that
 implementation's output.
 
+## Honourable mention — hive-nectar
+
+**[hive-nectar](https://github.com/thecrazygm/hive-nectar)** — by **Michael Garcia**
+(`thecrazygm`). MIT. 1.0.7 at the time of writing.
+
+beem's actively maintained successor, and the one this project owes the most to after
+beem itself. Its own README puts it plainly: *"If you are using beem, Nectar is where
+you go next."* For anyone on beem today it is the obvious destination, and it is
+published, maintained and in real use where `hivecomb` is none of those things yet.
+
+It deserves saying clearly, because this project's other document about nectar is an
+audit and audits only record what is wrong: **nectar independently fixed the whole
+crypto-critical set of beem's defects** — the missing comma in the operation id list,
+the operation table itself, the pure-Python ECDSA fall-through, the wall-clock nonce,
+the all-zero chain id fallback (removed properly, by making `known_chains["HIVE"]` the
+real post-HF24 value rather than working around it), the discarded verification result,
+and the timezone handling. That was done without reference to this project, and several
+of those are the findings `hivecomb` treats as its reason to exist.
+
+The one thing it does not do is keep beem's package names: it ships `nectar`,
+`nectarbase`, `nectarapi`, `nectargraphenebase` and `nectarstorage`, so existing
+`import beem` code has to be rewritten. That is a defensible choice — a clean break
+from a decade of legacy — and it is the single reason `hivecomb-beem` exists as a
+separate thing rather than being redundant. See [COMPARISON.md](COMPARISON.md), which
+compares the two honestly, including where nectar leads.
+
 ## Honourable mention — other Rust work on Hive
 
 `hivecomb` is not the first Rust library for Hive, and it is better for the ones that came

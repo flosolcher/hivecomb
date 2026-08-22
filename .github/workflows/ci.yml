@@ -36,7 +36,7 @@ jobs:
           - os: ubuntu-latest
             rust: "1.88"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
@@ -52,7 +52,7 @@ jobs:
     name: feature combinations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # The signing core must keep building with no HTTP client and no executor.
@@ -78,7 +78,7 @@ jobs:
     name: fmt and clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -101,7 +101,7 @@ jobs:
         # accidental dependency on a version-specific detail.
         python: ["3.8", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-python@v5
@@ -126,19 +126,22 @@ jobs:
         run: python python/test_cli.py
 
   node:
-    name: node on ${{ matrix.os }}
+    name: node ${{ matrix.node }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Node 20's LTS maintenance ended in April 2026, so it is not tested and
+        # `engines` no longer claims it. 22 is in maintenance, 24 is current LTS.
+        node: [22, 24]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
       - run: npm install
         working-directory: hivecomb-node
       - run: npm run build
@@ -150,7 +153,7 @@ jobs:
     name: dependency advisories
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # A signing library inherits its dependencies' vulnerabilities. This checks the
       # tree against the RustSec advisory database.
       - uses: rustsec/audit-check@v2
@@ -161,7 +164,7 @@ jobs:
     name: crate packages cleanly
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Catches a file that only exists locally, or one that should not ship.

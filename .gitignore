@@ -1,6 +1,10 @@
 /target
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock IS committed, deliberately. The old advice not to commit it for a
+# library is out of date: it is ignored by downstream consumers either way, and
+# committing it makes CI reproducible, lets `cargo audit` see exact versions, and
+# makes the declared MSRV mean something -- without it, dependencies resolve to
+# whatever is newest and the floor moves on its own.
 .idea/
 __pycache__/
 *.so

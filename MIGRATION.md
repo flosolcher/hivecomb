@@ -498,7 +498,17 @@ script that calls one gets an explanation instead of "unknown command".
 ### Not ported
 
 `beem.Snapshot`, `beem.conveyor`, `beem.hivesigner`, `beem.imageuploader`,
-`beem.profile`, `beem.asciichart`, `beemstorage`.
+`beem.profile`, `beem.asciichart`, `beemstorage`, and **`beem.message`** — the
+`-----BEGIN HIVE SIGNED MESSAGE-----` envelope used for account verification.
+`hivecomb.sign_message` and `verify_message` sign and check a raw string, which is the
+cryptography but not the envelope; if you need the envelope,
+[hive-nectar](https://github.com/thecrazygm/hive-nectar) implements it as
+`nectar.message.Message` (V1 and V2).
+
+If you are on beem and can change your imports, nectar is worth looking at generally —
+it is beem's maintained successor and has the wider API surface. `hivecomb-beem` exists
+for the case where you cannot change them. [COMPARISON.md](COMPARISON.md) puts the two
+side by side, including where nectar leads.
 
 The RPC surface is reachable through `rpc.call(method, params)` exactly as beem's
 `__getattr__` proxy made it, so anything hived exposes is still available untyped. If

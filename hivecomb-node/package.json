@@ -10,7 +10,7 @@
     "url": "git+https://github.com/flosolcher/hivecomb.git"
   },
   "keywords": ["hive", "blockchain", "graphene", "secp256k1", "signing", "memo", "napi-rs"],
-  "engines": { "node": ">= 20" },
+  "engines": { "node": ">= 22" },
   "napi": {
     "binaryName": "hivecomb",
     "targets": [
