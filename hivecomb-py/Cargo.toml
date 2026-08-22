@@ -16,6 +16,12 @@ crate-type = ["cdylib"]
 [dependencies]
 # Aliased because `[lib] name = "hivecomb"` (the Python module name) would otherwise
 # shadow the dependency inside this crate.
-hivecomb_core = { package = "hivecomb", path = "../hivecomb", version = "0.1.0" }
+# No RPC: this module exposes keys, signing, memos, mnemonics, authorities and
+# the wallet, and nothing that talks to a node -- Python has `requests`. Taking
+# the default features pulled in ureq -> rustls -> ring, which fails to
+# cross-compile for aarch64 ("ARM assembler must define __ARM_ARCH") and broke
+# the linux-aarch64 wheel. It also put an HTTP stack in a wheel that never
+# calls it. The Node addon has always been built this way.
+hivecomb_core = { package = "hivecomb", path = "../hivecomb", version = "0.1.0", default-features = false, features = ["memo", "bip32", "bip38", "wallet"] }
 serde_json = { workspace = true }
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py38"] }

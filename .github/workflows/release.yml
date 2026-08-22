@@ -228,6 +228,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      # `contents: read` must be repeated here. A job-level permissions block
+      # REPLACES the workflow-level one rather than adding to it, so declaring only
+      # id-token left this job with no read access and actions/checkout failed with
+      # "Repository not found" -- which reads like a missing repo, not a permission.
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
