@@ -29,6 +29,16 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
+#![warn(missing_docs)]
+
+/// Doctests the crate README, so the code on the crates.io landing page is compiled
+/// and run by `cargo test` like any other example. Documentation that is never
+/// executed drifts from the API it describes; this one cannot.
+///
+/// `#[cfg(doctest)]` keeps it out of the rendered docs — it exists only to be tested.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
 
 pub mod asset;
 pub mod authority;
@@ -39,12 +49,20 @@ pub mod bip32;
 pub mod bip38;
 #[cfg(feature = "bip32")]
 pub mod bip39;
+// The fields of these types are hived's schema, name for name, and their meaning is
+// the chain's rather than this crate's. Documenting each one individually would be
+// transcription rather than explanation, and it would bury the cases that genuinely do
+// need a note -- which carry one. The types themselves are documented; so is every
+// field whose meaning is not its name.
+#[allow(missing_docs)]
 pub mod chain;
 pub mod chains;
 pub mod error;
 pub mod keys;
 #[cfg(feature = "memo")]
 pub mod memo;
+/// See the note on [`chain`] for why the fields here are not individually documented.
+#[allow(missing_docs)]
 pub mod operations;
 pub mod reader;
 #[cfg(feature = "rpc")]

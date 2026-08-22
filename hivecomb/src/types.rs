@@ -124,30 +124,37 @@ fn write_len(out: &mut Vec<u8>, len: usize, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write one byte.
 pub fn write_u8(out: &mut Vec<u8>, v: u8) {
     out.push(v);
 }
 
+/// Write a bool as one byte: `0` or `1`. hived rejects any other value.
 pub fn write_bool(out: &mut Vec<u8>, v: bool) {
     out.push(u8::from(v));
 }
 
+/// Write a signed 16-bit integer, little-endian (vote weights).
 pub fn write_i16(out: &mut Vec<u8>, v: i16) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
+/// Write an unsigned 16-bit integer, little-endian.
 pub fn write_u16(out: &mut Vec<u8>, v: u16) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
+/// Write an unsigned 32-bit integer, little-endian.
 pub fn write_u32(out: &mut Vec<u8>, v: u32) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
+/// Write a signed 64-bit integer, little-endian (asset amounts).
 pub fn write_i64(out: &mut Vec<u8>, v: i64) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
+/// Write an unsigned 64-bit integer, little-endian.
 pub fn write_u64(out: &mut Vec<u8>, v: u64) {
     out.extend_from_slice(&v.to_le_bytes());
 }

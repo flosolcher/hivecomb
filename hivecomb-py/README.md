@@ -1,0 +1,156 @@
+# hivecomb
+
+Hive blockchain keys, serialization and **offline** transaction signing. A Python
+extension module written in Rust.
+
+```sh
+pip install hivecomb
+```
+
+Wheels are `abi3`, so one per platform covers CPython 3.8 and up. No Python
+dependencies — where `beem` pulled in `requests`, `websocket-client`, `Click`,
+`click-shell`, `pycryptodomex` and `prettytable`, this pulls in nothing.
+
+**Replacing beem in an existing program?** Install
+[`hivecomb-beem`](https://pypi.org/project/hivecomb-beem/) instead and keep writing
+`import beem`. This package is the layer underneath it.
+
+---
+
+## Signing needs no network
+
+A transaction needs exactly two things from outside itself: the chain id, which is a
+compile-time constant, and a recent block reference, which stays valid far longer than
+any submit window. So the signing key never has to live on a machine that talks to a
+node.
+
+```python
+import hivecomb
+
+# The only input from the chain. From any node, or carried across an air gap.
+ref = hivecomb.BlockRef.from_block_id(head_block_id)
+
+tx = hivecomb.sign_transaction(
+    [("custom_json", {
+        "required_auths": [],
+        "required_posting_auths": ["alice"],
+        "id": "my_app",
+        "json": {"hello": "hive"},
+    })],
+    ref,
+    [posting_wif],
+)
+# tx is the exact envelope condenser_api.broadcast_transaction wants
+```
+
+`sign_transaction` takes `(operations, block_ref, wifs)` and returns a dict with
+`ref_block_num`, `ref_block_prefix`, `expiration`, `operations`, `extensions`,
+`signatures` and `trx_id`. Pass `expiration_seconds=` to change the default 60s window,
+and `chain=` to sign for a testnet.
+
+## API
+
+### Keys
+
+```python
+key = hivecomb.PrivateKey(wif)                    # WIF or 64-char hex
+key = hivecomb.PrivateKey.generate()              # from the OS CSPRNG
+key = hivecomb.PrivateKey.from_login("alice", "posting", master_password)
+
+key.public_key()          # -> PublicKey
+str(key.public_key())     # 'STM8...'
+repr(key)                 # '<PrivateKey redacted>' — never the secret
+```
+
+A private key is redacted in `repr()`, `str()` and f-strings, so it cannot reach a log
+line or a crash report by accident. `beem` returned the raw scalar from `__repr__`.
+
+BIP-39 mnemonics: `generate_mnemonic(words=12)`, `validate_mnemonic(phrase)`.
+
+### Messages
+
+```python
+sig = hivecomb.sign_message("login challenge", wif)   # hex, same shape as beem's
+hivecomb.verify_message("login challenge", sig, str(pubkey))   # -> bool
+hivecomb.recover_message("login challenge", sig)               # -> the signing key
+```
+
+`verify_message` returns a bool that you must check. `beem`'s equivalent computed the
+answer and discarded it.
+
+### Memos
+
+```python
+cipher = hivecomb.encode_memo("hello", sender_memo_wif, recipient_memo_pubkey)
+plain  = hivecomb.decode_memo(cipher, recipient_memo_wif)
+hivecomb.is_encrypted_memo(cipher)     # leading '#'
+```
+
+Interoperable with Keychain, hive-js, dhive and beem: the plaintext carries the varint
+length prefix the rest of the ecosystem writes.
+
+### Authorities
+
+```python
+check = hivecomb.check_authority(account["posting"], [str(pubkey)])
+check["satisfied"]            # met from these keys alone
+check["conclusive"]           # False => depends on accounts not looked up
+check["unresolved_accounts"]  # the delegations not followed
+```
+
+The three-way answer matters: most active Hive accounts share posting rights with an
+app account, and "not from these keys alone" is not the same as "no".
+
+### Block references and TaPoS
+
+```python
+ref = hivecomb.BlockRef.from_block_id(head_block_id)
+
+cache = hivecomb.TaposCache(max_age_seconds=600)   # refresh out of band
+cache.store_block_id(head_block_id)
+ref = cache.block_ref()                            # raises once stale
+```
+
+### Wallet
+
+```python
+w = hivecomb.Wallet(path)
+w.create(passphrase); w.unlock(passphrase)
+w.add_key(wif); w.get_key(str(pubkey))
+```
+
+scrypt for the key derivation, AES-256-GCM for the contents — authenticated, so a
+tampered file fails to open rather than decrypting to garbage.
+
+## Things worth knowing
+
+- **Amounts are exact.** `"50000000000.123456 VESTS"` is parsed as a decimal, never
+  through a float. beem's `float()` path loses digits past 2⁵³ units.
+- **Timestamps are UTC**, parsed strictly. hived's "never" sentinel — printed as
+  `1969-12-31T23:59:59` — reads as `None` rather than a date in 1969.
+- **`custom_json` auth lists are sorted**, because hived declares them `flat_set` and
+  reconstructs them sorted before checking the signature. An unsorted list yields a
+  signature the chain will not accept.
+- **Every post-HF25 operation is available**, including `recurrent_transfer` with the
+  HF28 `pair_id`, `collateralized_convert` and the DHF proposal operations.
+
+## How this is verified
+
+- **Against hived itself** — a node is asked to serialize each of the 48 operations and
+  the digests are compared. 57/57 identical.
+- **Against beem** — 150-case differential digest corpus, 0 unexpected divergences.
+- **On the live chain** — a transaction signed by this library was accepted into block
+  [109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f).
+
+One accepted transaction is a proof, not a track record. What is and is not established
+is written down in
+[BROADCAST.md](https://github.com/flosolcher/hivecomb/blob/main/BROADCAST.md).
+
+## Credit
+
+A reimplementation of [`beem`](https://github.com/holgern/beem) by Holger Nahrstaedt,
+which descends from `python-bitshares` and `python-graphenelib` by Fabian Schuh. The
+protocol knowledge is theirs. See
+[CREDITS.md](https://github.com/flosolcher/hivecomb/blob/main/CREDITS.md).
+
+MIT.

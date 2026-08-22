@@ -97,9 +97,13 @@ impl BlockRef {
 /// An unsigned transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
+    /// Low 16 bits of the referenced block number (TaPoS).
     pub ref_block_num: u16,
+    /// Bytes 4..8 of that block's id, read little-endian (TaPoS).
     pub ref_block_prefix: u32,
+    /// When the chain stops accepting this transaction. hived allows at most one hour.
     pub expiration: PointInTime,
+    /// Applied in order, all-or-nothing.
     pub operations: Vec<Operation>,
 }
 
@@ -209,7 +213,10 @@ impl Transaction {
 /// A transaction with its signatures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignedTransaction {
+    /// The transaction the signatures cover. Changing it invalidates them.
     pub transaction: Transaction,
+    /// Canonical 65-byte compact signatures. hived accepts more than it needs, so an
+    /// extra one is harmless; a missing or wrong one is not.
     pub signatures: Vec<Signature>,
 }
 

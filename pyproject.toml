@@ -5,7 +5,9 @@ build-backend = "maturin"
 [project]
 name = "hivecomb"
 description = "Hive blockchain keys, serialization and offline transaction signing, in Rust."
-readme = "README.md"
+# The Python landing page, not the repository one: a `pip install hivecomb` user
+# should not open on a page of Rust.
+readme = "hivecomb-py/README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
 keywords = ["hive", "blockchain", "graphene", "secp256k1", "signing", "beem"]

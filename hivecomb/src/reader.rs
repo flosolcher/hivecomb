@@ -31,6 +31,7 @@ pub struct Reader<'a> {
 
 /// Anything that can be read back from the Graphene wire format.
 pub trait GrapheneDeserialize: Sized {
+    /// Read one value, advancing the reader past its bytes.
     fn read_from(r: &mut Reader<'_>) -> Result<Self>;
 }
 
@@ -91,10 +92,12 @@ impl<'a> Reader<'a> {
         Ok(slice)
     }
 
+    /// Read one byte.
     pub fn u8(&mut self) -> Result<u8> {
         Ok(self.take(1)?[0])
     }
 
+    /// Read a bool. Any byte other than `0` or `1` is an error, as in hived.
     pub fn bool(&mut self) -> Result<bool> {
         match self.u8()? {
             0 => Ok(false),
@@ -107,22 +110,27 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Read a little-endian unsigned 16-bit integer.
     pub fn u16(&mut self) -> Result<u16> {
         Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
 
+    /// Read a little-endian signed 16-bit integer.
     pub fn i16(&mut self) -> Result<i16> {
         Ok(i16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
 
+    /// Read a little-endian unsigned 32-bit integer.
     pub fn u32(&mut self) -> Result<u32> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
 
+    /// Read a little-endian unsigned 64-bit integer.
     pub fn u64(&mut self) -> Result<u64> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
 
+    /// Read a little-endian signed 64-bit integer.
     pub fn i64(&mut self) -> Result<i64> {
         Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }

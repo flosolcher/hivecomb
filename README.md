@@ -4,7 +4,7 @@
 [![live oracles](https://github.com/flosolcher/hivecomb/actions/workflows/live-oracles.yml/badge.svg)](https://github.com/flosolcher/hivecomb/actions/workflows/live-oracles.yml)
 
 Hive blockchain keys, Graphene serialization and **offline** transaction signing — in
-Rust, with Python bindings.
+Rust, with Python and Node.js bindings.
 
 `hivecomb` is a from-scratch reimplementation of [`beem`](https://github.com/holgern/beem),
 the Python Hive library by Holger Nahrstaedt, which itself descends from
@@ -48,6 +48,35 @@ tx = hivecomb.sign_transaction(
 )
 # tx is ready to POST to network_broadcast_api.broadcast_transaction
 ```
+
+```js
+import { BlockRef, signTransaction } from 'hivecomb'
+
+const tx = signTransaction(
+  [['custom_json', { required_posting_auths: ['alice'],
+                     id: 'my_app', json: { hello: 'hive' } }]],
+  BlockRef.fromBlockId(headBlockId),
+  [postingWif],
+)
+```
+
+## Install
+
+**Nothing is published yet.** These are the names reserved for the first release; until
+then, build from this repository. See [RELEASING.md](RELEASING.md).
+
+```bash
+cargo add hivecomb                  # Rust
+pip install hivecomb                # Python: keys, signing, memos, all operations
+pip install hivecomb-beem           # ...and the beem drop-in, including `beempy`
+npm install hivecomb                # Node.js: native addon, TypeScript types included
+```
+
+`hivecomb-beem` replaces `beem` in an existing program without changing that program.
+Uninstall `beem` first — the package names deliberately collide. See
+[MIGRATION.md](MIGRATION.md).
+
+Rust 1.88+, Python 3.8+ (abi3 wheels), Node 20+.
 
 ## Why
 
@@ -144,23 +173,41 @@ are inert and the client is explicit.
 ## Layout
 
 ```
-hivecomb/          the library          — publishable to crates.io
-hivecomb-py/       PyO3 bindings        — publishable to PyPI as `hivecomb`
-tests/  differential_beem.py         — the oracle against beem
-        hived_serialization_oracle.py — the oracle against hived itself
-        hived_broadcast_check.py      — the one thing that needs a real account
-SECURITY_FINDINGS.md                  — findings in beem, with file:line
-BROADCAST.md                          — what is proven, and what needs the chain
-CHANGELOG.md                          — what changed, and what was retracted
-CREDITS.md                            — upstream authorship
+hivecomb/        the library                     — crates.io: hivecomb
+hivecomb-py/     PyO3 bindings                   — PyPI: hivecomb
+hivecomb-node/   napi-rs addon                   — npm: hivecomb
+python/          the beem drop-in and beempy     — PyPI: hivecomb-beem
+
+hivecomb/examples/                  runnable: sign_offline, and the rest
+tests/  differential_beem.py          the oracle against beem
+        hived_serialization_oracle.py the oracle against hived itself
+        hived_authority_oracle.py     which key each operation must be signed with
+        hived_broadcast_check.py      the one thing that needs a real account
+
+README.md            you are here
+MIGRATION.md         replacing beem: what is identical, what diverges, what is missing
+SECURITY_FINDINGS.md what was wrong in beem, with file:line — and one retraction
+BROADCAST.md         what is proven against the live chain, and what is not
+COMPARISON.md        hivecomb against the other Rust Hive libraries, honestly
+CHANGELOG.md         what changed
+RELEASING.md         how a release happens, and what is not set up yet
+CREDITS.md           upstream authorship
 ```
 
 ## Building
 
 ```bash
-cargo test --all-features                  # 300 tests, 10 of them against live fixtures
+cargo test --all-features                  # 295 unit tests + 10 live-node fixtures
 cargo build -p hivecomb --no-default-features  # signing only: no network, no cipher, no scrypt
 ```
+
+```bash
+cargo run --example sign_offline --no-default-features
+```
+
+That example builds and signs with no HTTP client and no async runtime compiled in at
+all — if it ever stops doing so, something has pulled a network dependency into the
+signing path.
 
 Feature flags keep the core small. `--no-default-features` builds keys, serialization
 and signing alone — no HTTP client, no executor. `memo`, `bip38`, `bip32`, `wallet`,

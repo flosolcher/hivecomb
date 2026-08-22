@@ -16,6 +16,11 @@ use std::fmt;
 /// The result type used throughout `hivecomb`.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Everything that can go wrong in `hivecomb`.
+///
+/// `#[non_exhaustive]`, so matching needs a `_` arm and a new variant is not a breaking
+/// change. Variants are deliberately coarse: the message carries the detail, because a
+/// caller almost never recovers differently between, say, two kinds of malformed field.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -46,7 +51,12 @@ pub enum Error {
 
     /// An operation, asset or field was not recognised.
     #[error("unknown {kind}: {name}")]
-    Unknown { kind: &'static str, name: String },
+    Unknown {
+        /// What sort of thing was not recognised: `"operation"`, `"asset"`, ...
+        kind: &'static str,
+        /// The unrecognised name, as given.
+        name: String,
+    },
 
     /// A field required by the protocol was absent, or a field was present that this
     /// version does not know how to honour.
@@ -77,7 +87,12 @@ pub enum Error {
 
     /// The node answered with a JSON-RPC error object.
     #[error("rpc error {code}: {message}")]
-    RpcResponse { code: i64, message: String },
+    RpcResponse {
+        /// JSON-RPC error code from the node.
+        code: i64,
+        /// The node's message, passed through unchanged.
+        message: String,
+    },
 
     /// A chain id was requested that this build does not know, or a caller tried to
     /// sign against the pre-HF24 all-zero chain id.

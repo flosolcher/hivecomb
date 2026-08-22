@@ -401,16 +401,23 @@ impl<T: Transport> NodeClient<T> {
 pub struct BlockOperation {
     /// `[name, fields]`, the condenser shape.
     pub op: serde_json::Value,
+    /// Block this operation was included in.
     #[serde(default)]
     pub block: u32,
+    /// Transaction id. Empty for a virtual operation, which belongs to no transaction.
     #[serde(default)]
     pub trx_id: String,
+    /// Position of the transaction within the block.
     #[serde(default)]
     pub trx_in_block: u32,
+    /// Position of the operation within the transaction.
     #[serde(default)]
     pub op_in_trx: u32,
+    /// True for an operation the chain produced itself rather than one anybody signed.
+    /// These never appear in `block_api.get_block`; see `ops_in_block`.
     #[serde(default)]
     pub virtual_op: bool,
+    /// The block's timestamp, not the operation's.
     #[serde(default)]
     pub timestamp: String,
 }

@@ -32,7 +32,9 @@ use crate::types::{write_array, write_u16, write_u32, GrapheneSerialize};
 /// A weighted account entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountAuth {
+    /// The account whose authority of the same role is deferred to.
     pub account: String,
+    /// How much this contributes towards the threshold.
     pub weight: u16,
 }
 
@@ -58,7 +60,9 @@ impl GrapheneSerialize for AccountAuth {
 /// A weighted key entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyAuth {
+    /// A key that can sign for this authority.
     pub key: PublicKey,
+    /// How much a signature from this key contributes towards the threshold.
     pub weight: u16,
 }
 

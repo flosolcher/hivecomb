@@ -59,9 +59,14 @@ pub const BRAINKEY_WORD_COUNT: usize = 49_744;
 /// A Hive authority role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
+    /// Full control, including changing the other keys. Should live offline.
     Owner,
+    /// Moves funds and changes account settings.
     Active,
+    /// Posts, votes and `custom_json`. Cannot touch funds, which is why it is the
+    /// only one that belongs in a running service.
     Posting,
+    /// Encrypts and decrypts memos. Not a signing key.
     Memo,
 }
 

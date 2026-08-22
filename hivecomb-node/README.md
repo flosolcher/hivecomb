@@ -4,6 +4,13 @@ Hive blockchain keys, serialization and **offline** transaction signing for Node
 a native addon over the [`hivecomb`](https://github.com/flosolcher/hivecomb) Rust
 library.
 
+```sh
+npm install hivecomb
+```
+
+Prebuilt binaries for linux x64/arm64, macOS x64/arm64 and Windows x64. Node 20+.
+TypeScript definitions are included; there is no `@types` package to install.
+
 ```js
 import { PrivateKey, BlockRef, signTransaction, signMessage } from 'hivecomb'
 
@@ -39,8 +46,10 @@ HTTP client you already have.
 
 The curve arithmetic is [libsecp256k1](https://github.com/bitcoin-core/secp256k1)
 through the rust-bitcoin bindings — the same library Bitcoin Core uses, constant-time by
-construction. Serialization is the Rust core, verified against a reference
-implementation with a differential digest oracle rather than against its own
+construction. Serialization is the Rust core, verified against **hived itself** --
+a node is asked to serialize each of the 48 operations and the digests are
+compared, 57/57 identical -- and against beem with a 150-case differential digest
+oracle, rather than against its own
 expectations.
 
 The addon carries no HTTP client: Node has its own.
@@ -105,6 +114,20 @@ report.unresolvedAccounts
 An authority can delegate to another account, and following that needs a fetch. Reading
 such a case as a plain "no" is wrong for any account that shares posting rights, which
 on Hive is most of them.
+
+## How far this is proven
+
+A transaction signed by this core was accepted by the Hive network, into block
+[109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f), and
+the chain filed it under the transaction id computed offline.
+
+That is a proof, not a track record: one accepted transaction, one operation, no
+production exposure. What is and is not established is written down in
+[BROADCAST.md](https://github.com/flosolcher/hivecomb/blob/main/BROADCAST.md).
+
+The addon, the Python module and the Rust crate all assert the same pinned digest
+vector in their own test suites, so a divergence between the three bindings fails
+a test rather than reaching a user.
 
 ## Building from source
 

@@ -7,9 +7,13 @@ use serde::{Deserialize, Serialize};
 /// A JSON-RPC 2.0 request.
 #[derive(Debug, Clone, Serialize)]
 pub struct RpcRequest {
+    /// Always `"2.0"`.
     pub jsonrpc: &'static str,
+    /// Correlates a response with its request.
     pub id: u64,
+    /// Fully qualified, e.g. `condenser_api.get_dynamic_global_properties`.
     pub method: String,
+    /// Positional for `condenser_api`, named for `database_api`.
     pub params: serde_json::Value,
 }
 
@@ -28,8 +32,11 @@ impl RpcRequest {
 /// A JSON-RPC 2.0 response.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RpcResponse {
+    /// Present on success. A node may answer with `null` rather than an error when a
+    /// lookup simply found nothing, so this being `Some(Null)` is not a failure.
     #[serde(default)]
     pub result: Option<serde_json::Value>,
+    /// Present on failure. Checked before `result`.
     #[serde(default)]
     pub error: Option<RpcError>,
 }
@@ -64,9 +71,14 @@ impl RpcResponse {
 /// The subset of `database_api.get_dynamic_global_properties` this crate needs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DynamicGlobalProperties {
+    /// The most recent block. May still be orphaned.
     pub head_block_number: u32,
+    /// The id TaPoS is derived from; feed it to [`crate::BlockRef::from_block_id`].
     pub head_block_id: String,
+    /// The chain's own clock, which is what transaction expiry is measured against.
+    /// Use it rather than the local clock if the two disagree.
     pub time: String,
+    /// Everything at or below this cannot be reverted. About a minute behind the head.
     #[serde(default)]
     pub last_irreversible_block_num: u32,
 }

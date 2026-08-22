@@ -127,9 +127,13 @@ pub enum Chain {
 /// Everything needed to build and sign a transaction for a chain.
 #[derive(Debug, Clone)]
 pub struct ChainProperties {
+    /// Prefixed to the transaction bytes before hashing, so a signature is valid on
+    /// exactly one chain.
     pub chain_id: ChainId,
     /// Address prefix for public keys, e.g. `STM`.
     pub prefix: &'static str,
+    /// The assets this chain accepts, with the symbol written on the wire — which is
+    /// not always the symbol users type. See [`ChainAsset`].
     pub assets: &'static [ChainAsset],
 }
 

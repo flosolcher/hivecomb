@@ -919,8 +919,38 @@ fn chain_id(chain: Option<&str>) -> PyResult<String> {
     Ok(chain_from_name(chain)?.chain_id().to_hex())
 }
 
+/// The docstring `help(hivecomb)` shows. Kept short deliberately: the detail belongs
+/// on the individual functions, which all carry one.
+const MODULE_DOC: &str = "\
+Hive blockchain keys, serialization and offline transaction signing.
+
+Signing needs no network. A transaction needs exactly two things from outside
+itself: the chain id, which is a compile-time constant, and a recent block
+reference, which stays valid far longer than any submit window and can be
+cached. So the signing key never has to sit on a machine that talks to a node.
+
+    import hivecomb
+
+    ref = hivecomb.BlockRef.from_block_id(head_block_id)
+    tx = hivecomb.sign_transaction(
+        [(\"custom_json\", {\"required_posting_auths\": [\"alice\"],
+                          \"id\": \"my_app\", \"json\": {\"hello\": \"hive\"}})],
+        ref, [posting_wif],
+    )
+    # tx is ready to POST to network_broadcast_api.broadcast_transaction
+
+To replace beem in an existing program without changing it, install the
+`hivecomb-beem` package instead and keep importing `beem`.
+
+Amounts are parsed exactly and never through a float. Private keys are redacted
+in repr() and str(). Timestamps are UTC.
+
+Docs: https://github.com/flosolcher/hivecomb
+";
+
 #[pymodule]
 fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__doc__", MODULE_DOC)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyPrivateKey>()?;
     m.add_class::<PyPublicKey>()?;

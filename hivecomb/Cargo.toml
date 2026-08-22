@@ -7,10 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-readme = "../README.md"
+# The crate's own landing page. The repository README is repo-oriented and opens
+# with three languages; a crates.io visitor wants the Rust one.
+readme = "README.md"
 # Shipped in the package: this is a derived work and the upstream copyright
 # notices travel with it.
-include = ["src/**/*", "data/**/*", "tests/**/*", "LICENSE", "Cargo.toml"]
+include = ["src/**/*", "data/**/*", "tests/**/*", "examples/**/*", "README.md", "LICENSE", "Cargo.toml"]
 keywords = ["hive", "blockchain", "graphene", "secp256k1", "signing"]
 categories = ["cryptography::cryptocurrencies"]
 
