@@ -60,7 +60,7 @@
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey};
 use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
-use secp256k1::{Message, Secp256k1};
+use secp256k1::Message;
 use sha2::{Digest, Sha256};
 use std::fmt;
 
@@ -183,7 +183,11 @@ pub fn is_canonical(rs: &[u8]) -> bool {
 
 /// Sign a 32-byte digest, retrying until the signature is canonical.
 pub fn sign_digest(digest: &[u8; 32], key: &PrivateKey) -> Result<Signature> {
-    let secp = Secp256k1::signing_only();
+    // The process-wide context. `Secp256k1::new()` and `signing_only()` build
+    // precomputation tables on every call, which dominated these paths -- a
+    // signature cost more in table setup than in elliptic curve arithmetic. The
+    // `global-context` feature is already enabled; this is what it is for.
+    let secp = secp256k1::SECP256K1;
     let msg =
         Message::from_digest_slice(digest).map_err(|e| Error::sig(format!("bad digest: {e}")))?;
 
@@ -241,7 +245,11 @@ pub fn sign_message(message: &[u8], key: &PrivateKey) -> Result<Signature> {
 /// tautological check, discarded its result, and returned a key — leaving every caller
 /// to notice that "verify_message" verifies nothing on its own.
 pub fn recover(digest: &[u8; 32], signature: &Signature) -> Result<PublicKey> {
-    let secp = Secp256k1::new();
+    // The process-wide context. `Secp256k1::new()` and `signing_only()` build
+    // precomputation tables on every call, which dominated these paths -- a
+    // signature cost more in table setup than in elliptic curve arithmetic. The
+    // `global-context` feature is already enabled; this is what it is for.
+    let secp = secp256k1::SECP256K1;
     let msg =
         Message::from_digest_slice(digest).map_err(|e| Error::sig(format!("bad digest: {e}")))?;
     let rec_sig = signature.to_recoverable()?;

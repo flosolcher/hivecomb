@@ -3,7 +3,7 @@
 use super::{PublicKey, COMPRESSED_PUBKEY_LEN, SECRET_KEY_LEN, WIF_VERSION};
 use crate::base58;
 use crate::error::{Error, Result};
-use secp256k1::{Secp256k1, SecretKey};
+use secp256k1::SecretKey;
 use std::fmt;
 use zeroize::Zeroizing;
 
@@ -101,15 +101,24 @@ impl PrivateKey {
     }
 
     /// Generate a new random key from the OS CSPRNG.
+    ///
+    /// `OsRng` rather than `thread_rng`. `thread_rng` is a CSPRNG and would be
+    /// defensible, but it is a userspace generator seeded once per thread, and this is
+    /// long-lived key material that may guard funds for years. `OsRng` goes to
+    /// `getrandom` every time, which is also what BIP-39 entropy uses here — one
+    /// source for every secret this crate creates, rather than two.
     pub fn generate() -> Self {
-        let (inner, _) = Secp256k1::new().generate_keypair(&mut rand::thread_rng());
+        use rand::rngs::OsRng;
+        let (inner, _) = secp256k1::SECP256K1.generate_keypair(&mut OsRng);
         PrivateKey { inner }
     }
 
     /// The matching compressed public key.
     pub fn public_key(&self) -> PublicKey {
-        let secp = Secp256k1::signing_only();
-        let pk = secp256k1::PublicKey::from_secret_key(&secp, &self.inner);
+        // The process-wide context: `signing_only()` rebuilt the precomputation
+        // tables on every call, and this is called for every key, every signature
+        // check and every authority comparison.
+        let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, &self.inner);
         PublicKey::from_inner(pk)
     }
 

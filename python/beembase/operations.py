@@ -7,9 +7,9 @@ beem's did and renders to the ``[name, {fields}]`` JSON form, which is what
 beem's classes were serializers: they produced Graphene binary directly. Here
 serialization happens in Rust, so these are constructors and validators only.
 That is why they have no ``__bytes__``: producing wire bytes in Python is
-exactly where beem's `String` encoder mangled control characters (finding 8) and
-where its escrow and `custom_binary` operations dropped fields (findings 22 and
-23).
+exactly where beem's escrow and ``custom_binary`` operations dropped fields
+(findings 22 and 23), and where a second encoder can drift from the one that
+actually signs.
 
 Operations beem could not build at all — ``Collateralized_convert`` and
 ``Recurrent_transfer`` — are here and work.

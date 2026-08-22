@@ -16,7 +16,7 @@
 mod ids;
 pub mod virtual_ops;
 
-pub use ids::{OperationId, FIRST_VIRTUAL_OP, LAST_OP};
+pub use ids::{all_names, OperationId, FIRST_VIRTUAL_OP, LAST_OP};
 pub use virtual_ops::VirtualOperation;
 
 use crate::asset::Amount;

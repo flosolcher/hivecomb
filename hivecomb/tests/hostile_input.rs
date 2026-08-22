@@ -42,11 +42,13 @@ fn corpus(seed: u64) -> Vec<Vec<u8>> {
         vec![],
         vec![0],
         vec![0xff],
-        vec![0x80; 10],           // varint continuation bits, forever
-        vec![0xff; 1024],         // every length prefix implausibly large
-        vec![0x00; 78],           // exactly the memo header length, all zero
+        vec![0x80; 10],   // varint continuation bits, forever
+        vec![0xff; 1024], // every length prefix implausibly large
+        vec![0x00; 78],   // exactly the memo header length, all zero
     ];
-    for len in [1, 2, 3, 4, 8, 16, 32, 33, 34, 64, 65, 66, 77, 78, 79, 128, 512] {
+    for len in [
+        1, 2, 3, 4, 8, 16, 32, 33, 34, 64, 65, 66, 77, 78, 79, 128, 512,
+    ] {
         for _ in 0..24 {
             cases.push(rng.bytes(len));
         }
@@ -109,9 +111,8 @@ fn truncating_a_valid_transaction_never_panics() {
     // prefix of a well-formed transaction must be refused rather than misparsed.
     let key = PrivateKey::from_wif("5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3")
         .expect("test key");
-    let block_ref =
-        hivecomb::BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd")
-            .expect("block ref");
+    let block_ref = hivecomb::BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd")
+        .expect("block ref");
     let tx = Transaction::new(
         block_ref,
         vec![Operation::Transfer(hivecomb::operations::Transfer {

@@ -206,6 +206,21 @@ impl OperationId {
     }
 }
 
+/// Every operation name, indexed by its id. `all_names()[n]` is the operation with
+/// id `n`, for every `n` the chain defines.
+///
+/// Exposed so that other bindings can derive their tables from this one rather than
+/// keeping a second copy. The beem-compatible Python layer does exactly that: its
+/// `beembase.operationids.ops` is built from here, so the two cannot drift.
+pub fn all_names() -> &'static [&'static str] {
+    // A separate array rather than a map over NAMES, because the order is the
+    // meaning: index == id.
+    static ONLY_NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    ONLY_NAMES
+        .get_or_init(|| NAMES.iter().map(|(name, _)| *name).collect())
+        .as_slice()
+}
+
 /// Name/id pairs, indexed by id. The index *is* the id — see the test below.
 static NAMES: [(&str, OperationId); 93] = [
     ("vote", OperationId::Vote),

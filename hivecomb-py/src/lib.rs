@@ -948,6 +948,17 @@ in repr() and str(). Timestamps are UTC.
 Docs: https://github.com/flosolcher/hivecomb
 ";
 
+/// Every operation name, in id order: `operation_names()[n]` has id `n`.
+///
+/// Exists so the beem-compatible layer can build its table from this one instead of
+/// keeping a second copy. beem shipped two tables, used the wrong one, and had a
+/// missing comma in the other -- findings 1 and 2. One table cannot disagree with
+/// itself.
+#[pyfunction]
+fn operation_names() -> Vec<&'static str> {
+    hivecomb_core::operations::all_names().to_vec()
+}
+
 #[pymodule]
 fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__doc__", MODULE_DOC)?;
@@ -969,6 +980,7 @@ fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_mnemonic, m)?)?;
     m.add_function(wrap_pyfunction!(validate_mnemonic, m)?)?;
     m.add_function(wrap_pyfunction!(transaction_id, m)?)?;
+    m.add_function(wrap_pyfunction!(operation_names, m)?)?;
     m.add_function(wrap_pyfunction!(recover_digest, m)?)?;
     m.add_function(wrap_pyfunction!(check_authority, m)?)?;
     Ok(())

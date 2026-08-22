@@ -232,7 +232,7 @@ parsed and round-tripped correctly. It appears in `next_vesting_withdrawal`,
 
 beem's operation classes had `__bytes__` and produced Graphene binary in Python. Here
 they are constructors and validators; `bytes(op)` raises. Python-side wire encoding is
-exactly where findings 8, 22 and 23 lived.
+exactly where findings 22 and 23 lived.
 
 ### 3.10 `beempy` confirms before spending, and refuses to assume
 
@@ -474,7 +474,7 @@ generated corpus. `hivecomb/tests/live_fixtures.rs` parses real captured node re
 | `PrivateKey.child` | non-hardened derivation | `hivecomb.PrivateKey.from_mnemonic()` |
 | `BrainKey.suggest` | beem's generator was biased (finding 14) | `hivecomb.generate_mnemonic()` |
 | `Mnemonic.to_seed` | | `hivecomb.PrivateKey.from_mnemonic()` |
-| `bytes(Operation)`, `bytes(Signed_Transaction)` | Python-side wire encoding is where findings 8, 22, 23 lived | `Hive.finalizeOp`, `hivecomb.sign_transaction` |
+| `bytes(Operation)`, `bytes(Signed_Transaction)` | Python-side wire encoding is where findings 22 and 23 lived, and a second encoder can drift from the one that signs | `Hive.finalizeOp`, `hivecomb.sign_transaction` |
 | `Hive.sign` on a prebuilt tx | | `finalizeOp`, or `hivecomb.sign_transaction` |
 | `beem.Steem` | see §3.7 | — |
 | `recover_public_key`, `recoverPubkeyParameter` | beem's multi-backend machinery | `verify_message` |
