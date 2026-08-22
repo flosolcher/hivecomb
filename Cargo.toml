@@ -22,4 +22,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 zeroize = { version = "1", features = ["derive"] }
 subtle = "2"
 rand = "0.8"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+scrypt = { version = "0.11", default-features = false }
+pbkdf2 = { version = "0.12", default-features = false }
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }

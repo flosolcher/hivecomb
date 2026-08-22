@@ -23,12 +23,22 @@ serde_json.workspace = true
 zeroize.workspace = true
 subtle.workspace = true
 rand.workspace = true
+aes = { workspace = true, optional = true }
+cbc = { workspace = true, optional = true }
+scrypt = { workspace = true, optional = true }
+pbkdf2 = { workspace = true, optional = true }
 time.workspace = true
 
 ureq = { version = "2", optional = true, default-features = false, features = ["tls", "json"] }
 
 [features]
-default = ["rpc", "ureq-transport"]
+default = ["rpc", "ureq-transport", "memo", "bip38"]
+# Encrypted memos (ECDH + AES-CBC).
+memo = ["dep:aes", "dep:cbc"]
+# BIP-38 encrypted WIF keys.
+bip38 = ["dep:aes", "dep:scrypt"]
+# BIP-32 / BIP-39 hierarchical deterministic keys.
+bip32 = ["dep:pbkdf2"]
 # The JSON-RPC layer. Disable it to keep the signing path free of any network
 # dependency at all.
 rpc = []

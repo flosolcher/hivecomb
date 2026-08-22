@@ -36,6 +36,8 @@ pub mod base58;
 pub mod chains;
 pub mod error;
 pub mod keys;
+#[cfg(feature = "memo")]
+pub mod memo;
 pub mod operations;
 pub mod reader;
 #[cfg(feature = "rpc")]

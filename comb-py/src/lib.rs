@@ -560,6 +560,45 @@ fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<PyObject> {
     })
 }
 
+/// Encrypt a memo to `to_key`, returning the `#`-prefixed string.
+///
+/// The plaintext is written as a Graphene string (varint length, then UTF-8), which is
+/// what hive-js, dhive, Hive Keychain and HiveSigner all do. beem omits that prefix on
+/// encode while trying to strip one on decode.
+#[pyfunction]
+#[pyo3(signature = (from_wif, to_public_key, message, nonce = None))]
+fn encode_memo(
+    from_wif: &str,
+    to_public_key: &str,
+    message: &str,
+    nonce: Option<u64>,
+) -> PyResult<String> {
+    let from = RsPrivateKey::parse(from_wif).map_err(to_py_err)?;
+    let to = RsPublicKey::from_prefixed_any(to_public_key).map_err(to_py_err)?;
+    match nonce {
+        Some(n) => comb_core::memo::encode_with_nonce(&from, &to, message, n),
+        None => comb_core::memo::encode(&from, &to, message),
+    }
+    .map_err(to_py_err)
+}
+
+/// Decrypt a `#`-prefixed memo with either side's memo key.
+///
+/// Accepts memos written without the varint prefix, so anything beem produced can
+/// still be read.
+#[pyfunction]
+#[pyo3(signature = (wif, memo))]
+fn decode_memo(wif: &str, memo: &str) -> PyResult<String> {
+    let key = RsPrivateKey::parse(wif).map_err(to_py_err)?;
+    comb_core::memo::decode(&key, memo).map_err(to_py_err)
+}
+
+/// Whether a memo field holds an encrypted memo.
+#[pyfunction]
+fn is_encrypted_memo(memo: &str) -> bool {
+    comb_core::memo::is_encrypted(memo)
+}
+
 /// The chain id this build signs against, as hex.
 #[pyfunction]
 #[pyo3(signature = (chain = None))]
@@ -580,5 +619,8 @@ fn comb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sign_transaction, m)?)?;
     m.add_function(wrap_pyfunction!(transaction_digest, m)?)?;
     m.add_function(wrap_pyfunction!(chain_id, m)?)?;
+    m.add_function(wrap_pyfunction!(encode_memo, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_memo, m)?)?;
+    m.add_function(wrap_pyfunction!(is_encrypted_memo, m)?)?;
     Ok(())
 }

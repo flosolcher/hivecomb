@@ -39,6 +39,7 @@ A bug that yields a silently-invalid signature ranks above one that raises.
 | [21](#21) | High | serialization | `flat_set` fields serialized in caller order, not sorted |
 | [22](#22) | Critical | operations | `escrow_release` omits `agent` and `receiver`; `escrow_dispute` omits `agent` |
 | [23](#23) | High | operations | `custom_binary` serializes 2 of 6 fields, and mistypes `id` |
+| [24](#24) | Medium | memo | Encrypted memos omit the varint length prefix the ecosystem writes |
 
 ---
 
@@ -751,6 +752,67 @@ The output cannot be deserialized as a `custom_binary_operation` under any readi
 **In `comb`:** all six fields, with the three `flat_set` members sorted and
 deduplicated per [finding 21](#21), and `id` length-checked against
 `custom_id_type`'s 32-byte limit.
+
+---
+
+<a id="24"></a>
+## 24. Encrypted memos omit the varint length prefix — Medium
+
+**`beembase/memo.py`**, `encode_memo` and `decode_memo`
+
+Every reference implementation — `hive-js`, `dhive`, Hive Keychain, HiveSigner —
+encrypts the memo as a **Graphene string**: a varint byte length followed by the UTF-8
+bytes. From `hive-js/src/auth/memo.js`:
+
+```javascript
+const mbuf = new ByteBuffer(ByteBuffer.DEFAULT_CAPACITY, ByteBuffer.LITTLE_ENDIAN)
+mbuf.writeVString(memo)          // <- varint length prefix
+memo = new Buffer(mbuf.copy(0, mbuf.offset).toBinary(), 'binary')
+```
+
+beem's `encode_memo` does not write it:
+
+```python
+raw = py23_bytes(message, "utf8")
+raw = _pad(raw, 16)              # no prefix
+```
+
+while its `decode_memo` *does* try to strip one, with a heuristic its own comment flags
+as broken:
+
+```python
+# remove the varint prefix (FIXME, long messages!)
+n = varintdecode(message)
+if (len(message) - n) > 0 and (len(message) - n) < 8:
+    return '#' + message[len(message) - n:].decode("utf8")
+```
+
+So beem encodes in one format and decodes in another.
+
+### Measured
+
+Most messages survive, because both beem's heuristic and hive-js's `try readVString /
+catch → raw` fallback happen to fire. The failure is a message whose **first byte, read
+as a varint, equals the length of the rest** — then the prefix is indistinguishable from
+data, and the leading byte is consumed as a length:
+
+| message | beem → beem | beem → comb | comb → comb |
+|---|---|---|---|
+| `"\x05hello"` | `"hello"` | `"hello"` | `"\x05hello"` |
+| `"\x03abc"` | `"abc"` | `"abc"` | `"\x03abc"` |
+| `"\x01z"` | `"z"` | `"z"` | `"\x01z"` |
+| `"\x0bhello world"` | `"hello world"` | `"hello world"` | `"\x0bhello world"` |
+
+beem loses the byte **against its own encoder**, and so does every other client.
+
+**In `comb`:** the prefix is written, as the ecosystem does, so the length is
+unambiguous. [`memo::decode`] also accepts memos with no prefix, so anything beem
+produced can still be read.
+
+Note the residual ambiguity is inherent: a beem-written memo that begins with a
+length-like byte cannot be told apart from a correctly-prefixed one. `comb` resolves it
+the way every other client does, which means such a memo decodes the same way in `comb`
+as it does in Keychain — consistent, even where it is not what beem's author intended.
 
 ---
 

@@ -94,6 +94,11 @@ impl PublicKey {
         self.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    /// The underlying `secp256k1` point, for ECDH.
+    pub(crate) fn inner_ref(&self) -> &secp256k1::PublicKey {
+        &self.inner
+    }
+
     /// Render with a chain prefix, e.g. `STM8Gy...`.
     pub fn to_prefixed(&self, prefix: &str) -> String {
         format!("{prefix}{}", base58::encode_gph_check(&self.to_bytes()))

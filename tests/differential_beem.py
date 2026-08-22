@@ -37,6 +37,8 @@ try:
     from beemgraphenebase.account import PrivateKey as BeemPrivateKey
     from beemgraphenebase.ecdsasig import sign_message as beem_sign
     from beemgraphenebase.ecdsasig import verify_message as beem_verify
+    from beembase.memo import encode_memo as beem_encode_memo
+    from beembase.memo import decode_memo as beem_decode_memo
 except ImportError:
     sys.exit("beem is not importable; this harness compares against it")
 
@@ -181,6 +183,37 @@ def main():
     if beem_pub != comb_pub:
         problems.append(f"public key mismatch: beem {beem_pub} vs comb {comb_pub}")
 
+    # Memos: both implementations must read each other's.
+    #
+    # The known divergence is finding 24: beem omits the varint length prefix that
+    # hive-js, dhive and Keychain all write. Most messages survive on both sides
+    # because the fallback paths fire; a message whose first byte reads as a valid
+    # length for the rest does not, and beem loses that byte against its own encoder.
+    bob_wif = "5J4KCbg1G3my9b9hCaQXnHSm6vrwW9xQTJS6ZciW2Kek7cCkCEk"
+    bob = BeemPrivateKey(bob_wif)
+    bob_pub = format(bob.pubkey, "STM")
+    unambiguous = ["Hello Hive memo", "", "x" * 15, "x" * 16, "unicode é 中文 🐝", "a"]
+    for message in unambiguous:
+        comb_memo = comb.encode_memo(WIF, bob_pub, message)
+        if beem_decode_memo(bob, comb_memo).lstrip("#") != message:
+            problems.append(f"beem could not read comb's memo for {message!r}")
+        beem_memo = beem_encode_memo(BeemPrivateKey(WIF), bob.pubkey, 987654321, message,
+                                     prefix="STM")
+        if comb.decode_memo(bob_wif, beem_memo) != message:
+            problems.append(f"comb could not read beem's memo for {message!r}")
+
+    # And the case where the missing prefix bites: comb must round-trip it, beem
+    # must not.
+    for message in ["\x05hello", "\x03abc", "\x01z"]:
+        if comb.decode_memo(bob_wif, comb.encode_memo(WIF, bob_pub, message)) != message:
+            problems.append(f"comb lost the leading byte of {message!r}")
+        beem_memo = beem_encode_memo(BeemPrivateKey(WIF), bob.pubkey, 42, message,
+                                     prefix="STM")
+        if beem_decode_memo(bob, beem_memo).lstrip("#") == message:
+            problems.append(
+                f"beem unexpectedly round-tripped {message!r}; finding 24 may be fixed"
+            )
+
     # Tier 2: each side must accept the other's signatures.
     for message in [b"hello hive", b"", b"\x00\x01\x02", "unicode é\U0001f41d".encode()]:
         comb_sig = comb.sign_message(message, WIF)
@@ -199,6 +232,7 @@ def main():
     print(f"  UNEXPECTED      : {diverged_unknown}")
     print(f"public key        : {'match' if beem_pub == comb_pub else 'MISMATCH'}")
     print(f"cross-verification: {'ok' if not any('signature' in p for p in problems) else 'FAILED'}")
+    print(f"memo interop      : {'ok' if not any('memo' in p or 'leading byte' in p for p in problems) else 'FAILED'}")
 
     if problems:
         print("\nProblems:")
