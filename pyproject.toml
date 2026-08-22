@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "comb"
+description = "Hive blockchain keys, serialization and offline transaction signing, in Rust."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+keywords = ["hive", "blockchain", "graphene", "secp256k1", "signing", "beem"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Office/Business :: Financial",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/monacofriends/comb-rs"
+Issues = "https://github.com/monacofriends/comb-rs/issues"
+
+[tool.maturin]
+manifest-path = "comb-py/Cargo.toml"
+module-name = "comb"
+# abi3 so one wheel per platform covers CPython 3.8+.
+features = ["pyo3/extension-module"]
+strip = true

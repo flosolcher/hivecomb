@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["comb", "comb-py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/monacofriends/comb-rs"
+authors = ["The comb-rs contributors"]
+
+[workspace.dependencies]
+secp256k1 = { version = "0.29", features = ["recovery", "global-context", "rand-std"] }
+sha2 = "0.10"
+ripemd = "0.1"
+bs58 = "0.5"
+hmac = "0.12"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+rand = "0.8"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }

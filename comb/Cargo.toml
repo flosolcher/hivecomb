@@ -1,0 +1,39 @@
+[package]
+name = "comb"
+description = "A Rust library for the Hive blockchain: keys, Graphene serialization, transaction signing and RPC."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../README.md"
+keywords = ["hive", "blockchain", "graphene", "secp256k1", "signing"]
+categories = ["cryptography::cryptocurrencies"]
+
+[dependencies]
+secp256k1.workspace = true
+sha2.workspace = true
+ripemd.workspace = true
+bs58.workspace = true
+hmac.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+rand.workspace = true
+time.workspace = true
+
+ureq = { version = "2", optional = true, default-features = false, features = ["tls", "json"] }
+
+[features]
+default = ["rpc", "ureq-transport"]
+# The JSON-RPC layer. Disable it to keep the signing path free of any network
+# dependency at all.
+rpc = []
+# A working HTTP transport for the `rpc` layer.
+ureq-transport = ["rpc", "dep:ureq"]
+
+[dev-dependencies]
+hex = "0.4"
