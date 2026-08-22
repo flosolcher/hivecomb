@@ -1,16 +1,16 @@
-# comb
+# hivecomb
 
 Hive blockchain keys, Graphene serialization and **offline** transaction signing — in
 Rust, with Python bindings.
 
-`comb` is a from-scratch reimplementation of [`beem`](https://github.com/holgern/beem),
+`hivecomb` is a from-scratch reimplementation of [`beem`](https://github.com/holgern/beem),
 the Python Hive library by Holger Nahrstaedt, which itself descends from
 `python-bitshares` and `python-graphenelib` by Fabian Schuh. The protocol knowledge
 here is theirs; see [CREDITS.md](CREDITS.md). This is a translation, not new work.
 
 ```rust
-use comb::{Chain, PrivateKey, Transaction, BlockRef};
-use comb::operations::{CustomJson, Operation};
+use hivecomb::{Chain, PrivateKey, Transaction, BlockRef};
+use hivecomb::operations::{CustomJson, Operation};
 
 let key = PrivateKey::from_wif(&posting_wif)?;
 let block_ref = BlockRef::from_block_id(&head_block_id)?;   // cached, not fetched here
@@ -30,17 +30,17 @@ let signed = tx.sign(&[key], Chain::Hive)?;   // pure CPU: no network, ever
 ```
 
 ```python
-import comb
+import hivecomb
 
-sig = comb.sign_message("login challenge", posting_wif)      # hex, like beem's
+sig = hivecomb.sign_message("login challenge", posting_wif)      # hex, like beem's
 
-tx = comb.sign_transaction(
+tx = hivecomb.sign_transaction(
     [("custom_json", {
         "required_posting_auths": ["alice"],
         "id": "my_app",
         "json": {"hello": "hive"},
     })],
-    comb.BlockRef.from_block_id(head_block_id),
+    hivecomb.BlockRef.from_block_id(head_block_id),
     [posting_wif],
 )
 # tx is ready to POST to network_broadcast_api.broadcast_transaction
@@ -79,7 +79,7 @@ Speed is *not* a reason. ECDSA over secp256k1 is microseconds either way.
 ## Design rules
 
 - **No silent fallbacks.** Where beem swallowed an error and continued with a default —
-  a chain id, an ECDSA backend, a base58 character — `comb` returns an error.
+  a chain id, an ECDSA backend, a base58 character — `hivecomb` returns an error.
 - **Secrets do not render.** `Debug` and `Display` for `PrivateKey` print
   `PrivateKey(<redacted>)`; disclosure requires the explicitly-named `to_wif()` or
   `expose_secret()`, both returning `Zeroizing` wrappers. beem's `__repr__` returned the
@@ -125,7 +125,7 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Async API | no — sync, with a pluggable transport |
 | Wallet / encrypted key storage | done — scrypt + AES-GCM |
 
-Chain state is modelled as plain data (`comb::chain`), read from the API rather than
+Chain state is modelled as plain data (`hivecomb::chain`), read from the API rather than
 constructed. beem's equivalents subclass `dict` and can each reach the network on their
 own — which is the design that puts a node call inside the signing path. Here the types
 are inert and the client is explicit.
@@ -133,8 +133,8 @@ are inert and the client is explicit.
 ## Layout
 
 ```
-comb/          the library          — publishable to crates.io
-comb-py/       PyO3 bindings        — publishable to PyPI as `comb`
+hivecomb/          the library          — publishable to crates.io
+hivecomb-py/       PyO3 bindings        — publishable to PyPI as `hivecomb`
 tests/         differential_beem.py — the oracle against beem
 SECURITY_FINDINGS.md                — 21 findings, with file:line
 CREDITS.md                          — upstream authorship
@@ -144,7 +144,7 @@ CREDITS.md                          — upstream authorship
 
 ```bash
 cargo test                                 # 262 tests, including 10 against live fixtures
-cargo build -p comb --no-default-features  # signing only: no network, no cipher, no scrypt
+cargo build -p hivecomb --no-default-features  # signing only: no network, no cipher, no scrypt
 ```
 
 Feature flags keep the core small. `--no-default-features` builds keys, serialization
@@ -167,7 +167,7 @@ every serialization bug lives there.
 $ python tests/differential_beem.py
 digest corpus     : 134 cases
   identical       : 108
-  known divergence: 26  (comb is deliberately correct here)
+  known divergence: 26  (hivecomb is deliberately correct here)
   UNEXPECTED      : 0
 public key        : match
 cross-verification: ok
@@ -201,7 +201,7 @@ front of anything valuable:
    actually send.
 
 The chain id is hardcoded, which is correct today and is exactly the kind of constant
-that moves at a hardfork. It lives in one place — `comb/src/chains.rs` — with a comment
+that moves at a hardfork. It lives in one place — `hivecomb/src/chains.rs` — with a comment
 saying so. `NodeClient::verify_chain_id` will tell you if a node disagrees.
 
 ## Replacing beem
@@ -212,22 +212,47 @@ code runs unchanged:
 
 ```sh
 pip uninstall -y beem
-pip install comb comb-beem
+pip install hivecomb hivecomb-beem
 ```
 
 [MIGRATION.md](MIGRATION.md) is the complete record: every defect fixed and where it is
-fixed, every deliberate behavioural divergence, everything `comb` adds that beem cannot
+fixed, every deliberate behavioural divergence, everything `hivecomb` adds that beem cannot
 do, and exactly what is not implemented. `python/test_compat.py` runs 25 checks written
 against beem's API unmodified, and `python/test_cli.py` runs 21 more over `beempy`.
 
 `beempy commands --new` lists the seven commands beem has no equivalent for.
 
+## Names
+
+Three of the names here are chosen to avoid a collision, and one is chosen to *cause*
+one. Worth stating plainly, since both kinds are deliberate.
+
+**The crate is `hivecomb`, not `comb`.** `comb` is taken on crates.io (a Handlebars
+CLI) and on PyPI, and in Rust the word already means something else — the most
+prominent crate near that name, `honeycomb`, is a parser-combinator library. `hivecomb`
+is free on both registries and says what it is.
+
+| | name |
+|---|---|
+| Rust crate | `hivecomb` — `use hivecomb::{Chain, PrivateKey};` |
+| Python module | `hivecomb` — `import hivecomb` |
+| PyPI (core) | `hivecomb` |
+| PyPI (beem drop-in) | `hivecomb-beem` |
+| Repository | [`flosolcher/hivecomb`](https://github.com/flosolcher/hivecomb) |
+
+**The compatibility layer shadows beem on purpose.** `hivecomb-beem` installs packages
+called `beem`, `beemgraphenebase`, `beembase` and `beemapi`, and a console script
+called `beempy` — because being a drop-in replacement is the whole point. It cannot be
+installed alongside beem, and the [migration guide](MIGRATION.md) says so up front.
+`beem.__version__` reports `hivecomb-compat-0.1.0` rather than `0.24.26`, so anything
+that branches on the version can tell which library it is talking to.
+
 ## Other Rust Hive libraries
 
-`comb` is not the first. [COMPARISON.md](COMPARISON.md) measures it against
+`hivecomb` is not the first. [COMPARISON.md](COMPARISON.md) measures it against
 [`hive-xylem`](https://github.com/srbde/hive-xylem) in both directions, records the
-five things `comb` gained from reading it, notes a memo-encryption defect found while
-comparing, and answers the maturity question plainly: **xylem is published and `comb`
+five things `hivecomb` gained from reading it, notes a memo-encryption defect found while
+comparing, and answers the maturity question plainly: **xylem is published and `hivecomb`
 is not**, and on production exposure neither is mature.
 
 ## Licence

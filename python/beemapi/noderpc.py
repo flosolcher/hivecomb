@@ -9,7 +9,7 @@ Unknown attributes proxy to `condenser_api` methods, as beem's did, so
 reach another namespace.
 """
 
-from comb_compat import NodeClient, RPCError
+from hivecomb_compat import NodeClient, RPCError
 
 __all__ = ["NodeRPC", "RPCError"]
 

@@ -1,4 +1,4 @@
-"""beem's operation and serialization layer, re-implemented on `comb`."""
+"""beem's operation and serialization layer, re-implemented on `hivecomb`."""
 
 from .version import version as __version__
 

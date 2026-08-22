@@ -9,9 +9,11 @@
 //!
 //! Every one of those was a bug found here rather than in production.
 //!
-//! Regenerate with the curl commands in `comb/tests/fixtures/README.md`.
+//! Regenerate with the curl commands in `hivecomb/tests/fixtures/README.md`.
 
-use comb::chain::{Account, DynamicGlobalProperties, FeedHistory, RcAccount, RewardFund, Witness};
+use hivecomb::chain::{
+    Account, DynamicGlobalProperties, FeedHistory, RcAccount, RewardFund, Witness,
+};
 
 fn fixture(name: &str) -> serde_json::Value {
     let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
@@ -113,14 +115,14 @@ fn parses_real_global_properties() {
     assert!(!props.current_witness.is_empty());
 
     // The block id must agree with the block number it is reported alongside.
-    let block_ref = comb::BlockRef::from_block_id(&props.head_block_id).unwrap();
+    let block_ref = hivecomb::BlockRef::from_block_id(&props.head_block_id).unwrap();
     assert_eq!(block_ref.block_num, props.head_block_number);
 }
 
 #[test]
 fn vests_convert_using_real_totals() {
     let props: DynamicGlobalProperties = serde_json::from_value(fixture("gprops")).unwrap();
-    let vests = comb::Amount::parse("1000000.000000 VESTS", comb::Chain::Hive).unwrap();
+    let vests = hivecomb::Amount::parse("1000000.000000 VESTS", hivecomb::Chain::Hive).unwrap();
 
     let hive = props
         .vests_to_hive(&vests)

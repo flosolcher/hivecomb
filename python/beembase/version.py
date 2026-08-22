@@ -1,3 +1,3 @@
-import comb
+import hivecomb
 
-version = f"comb-compat-{comb.__version__}"
+version = f"hivecomb-compat-{hivecomb.__version__}"

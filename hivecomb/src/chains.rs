@@ -19,7 +19,7 @@
 //! that exact point produced **a silently unusable signature** rather than a failure.
 //! It looked like a relay rejection, not a signing bug.
 //!
-//! `comb` removes the failure mode rather than handling it:
+//! `hivecomb` removes the failure mode rather than handling it:
 //!
 //! * The live Hive chain id is a compile-time constant. Signing never needs the
 //!   network to learn it — this is the single largest reason the whole signing path

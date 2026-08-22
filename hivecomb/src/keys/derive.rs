@@ -281,6 +281,29 @@ mod tests {
     }
 
     #[test]
+    fn dictionary_content_is_pinned() {
+        // The words and their order decide which brain keys can be regenerated,
+        // so any change to this file loses somebody's account. A project-wide
+        // rename really did rewrite the word "comb" here once; this is the guard
+        // that would have caught it.
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(BRAINKEY_WORDS.as_bytes());
+        assert_eq!(
+            digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            "79712a3a4f237913598f981ada879afc11fecd7f8e01052349a23682e74b06be",
+            "the brain-key dictionary has been modified; it must match beem's exactly"
+        );
+        // A spot check that reads as English, so a corrupted file is obvious.
+        let words: Vec<&str> = BRAINKEY_WORDS.lines().collect();
+        assert_eq!(words[0], "a");
+        assert!(words.contains(&"comb"));
+        assert!(words.contains(&"zymurgy"));
+    }
+
+    #[test]
     fn normalization_matches_graphene() {
         assert_eq!(normalize("  a \t b \n\n c  "), "a b c");
         assert_eq!(normalize("single"), "single");

@@ -1,10 +1,10 @@
 # Credits
 
-`comb` is a Rust port. It is not original work.
+`hivecomb` is a Rust port. It is not original work.
 
 The protocol knowledge, the wire format, the key derivations, the API surface and the
 overwhelming majority of the design encoded in this repository were worked out by other
-people over roughly a decade. This file records who they are. Where a module in `comb`
+people over roughly a decade. This file records who they are. Where a module in `hivecomb`
 corresponds to one of theirs, its documentation says so.
 
 ## beem
@@ -19,10 +19,10 @@ STEEM*
 
 Copyright (c) 2018, 2019 Holger Nahrstaedt. MIT licensed.
 
-beem is the library `comb` reimplements: `beemgraphenebase`, `beembase`, `beemapi`,
+beem is the library `hivecomb` reimplements: `beemgraphenebase`, `beembase`, `beemapi`,
 `beemstorage` and `beem` itself. Every serialization rule, every operation definition,
 every key derivation and the entire signing scheme in this crate were learned by
-reading beem's source. Where `comb` diverges, it is documented as a divergence from
+reading beem's source. Where `hivecomb` diverges, it is documented as a divergence from
 beem, and the reasoning is recorded in `SECURITY_FINDINGS.md`.
 
 ## python-bitshares and python-graphenelib
@@ -40,7 +40,7 @@ Copyright (c) 2015 Fabian Schuh. MIT licensed.
 The base58 handling, the `GrapheneObject` serialization model, the canonical-signature
 loop, the brain-key and password-key derivations, the BIP-38 implementation and the
 encrypted-memo scheme all originate here. The `_is_canonical` predicate in
-`comb/src/sign.rs` is a direct, deliberate port of Fabian Schuh's implementation,
+`hivecomb/src/sign.rs` is a direct, deliberate port of Fabian Schuh's implementation,
 because it encodes a consensus rule that must not drift.
 
 ## Graphene and Steem
@@ -60,7 +60,7 @@ Hive inherited at the fork.
 the [Hive](https://hive.io) community.
 
 hived is the normative reference for everything in this crate. The operation table in
-`comb/src/operations/` is generated against
+`hivecomb/src/operations/` is generated against
 `libraries/protocol/include/hive/protocol/operations.hpp`; where beem and hived
 disagree, hived wins and beem is recorded as a finding. The
 [developer documentation](https://developers.hive.io) is the reference for the RPC
@@ -72,20 +72,20 @@ from hived directly, not from beem.
 
 ## Third-party word list
 
-`comb/data/brainkey_words.txt` is the 49,744-word Graphene brain-key dictionary,
+`hivecomb/data/brainkey_words.txt` is the 49,744-word Graphene brain-key dictionary,
 carried forward unchanged from python-graphenelib via beem
 (`beemgraphenebase/dictionary.py`). It must not be modified: the words and their order
 determine which brain keys can be regenerated.
 
-`comb/data/bip39_english.txt` is the standard BIP-39 English word list, carried
+`hivecomb/data/bip39_english.txt` is the standard BIP-39 English word list, carried
 forward from beem's `Mnemonic`, which was itself taken from
 [python-mnemonic](https://github.com/trezor/python-mnemonic) — copyright (c) 2013
-Pavol Rusnak, (c) 2017 mruddy. `comb/src/bip39.rs` is cross-checked against that
+Pavol Rusnak, (c) 2017 mruddy. `hivecomb/src/bip39.rs` is cross-checked against that
 implementation's output.
 
 ## Honourable mention — other Rust work on Hive
 
-`comb` is not the first Rust library for Hive, and it is better for the ones that came
+`hivecomb` is not the first Rust library for Hive, and it is better for the ones that came
 before it.
 
 **[hive-xylem](https://github.com/srbde/hive-xylem)** — by **SRBDE**, part of a
@@ -93,10 +93,10 @@ cross-language suite alongside Pollen (TypeScript), Anther (Go) and Nectar (Pyth
 MIT/Apache-2.0.
 
 An async-first Hive SDK built on Tokio, published on crates.io while this crate was
-not. Reading it directly improved `comb` in five places: authority satisfaction
+not. Reading it directly improved `hivecomb` in five places: authority satisfaction
 checking, `get_ops_in_block` (the only route to virtual operations), block streaming in
 Rust, exponential backoff on node failover, and a handful of conveniences. Its
-async-native design is a real advantage `comb` does not have — see
+async-native design is a real advantage `hivecomb` does not have — see
 [COMPARISON.md](COMPARISON.md), which also records a memo-encryption defect found while
 comparing, and answers the maturity question honestly rather than flatteringly.
 
@@ -109,7 +109,7 @@ space, noted so that anyone weighing options can find them.
 
 ## Rust dependencies
 
-`comb` binds [libsecp256k1](https://github.com/bitcoin-core/secp256k1) through the
+`hivecomb` binds [libsecp256k1](https://github.com/bitcoin-core/secp256k1) through the
 [`secp256k1`](https://crates.io/crates/secp256k1) crate maintained by the rust-bitcoin
 project. All curve arithmetic is theirs; none of it is hand-rolled here. The remaining
 dependencies — `sha2`, `ripemd`, `bs58`, `zeroize`, `subtle`, `serde`, `time` — are
@@ -121,7 +121,7 @@ The Rust translation in this repository was produced by Claude (Anthropic). It c
 no independent authorship claim: it is a translation of the work credited above, plus
 the corrections recorded in `SECURITY_FINDINGS.md`.
 
-`comb` is released under the MIT licence, matching beem, python-bitshares and
+`hivecomb` is released under the MIT licence, matching beem, python-bitshares and
 python-graphenelib, and reproduces their copyright notices in `LICENSE`.
 
 ## Corrections welcome

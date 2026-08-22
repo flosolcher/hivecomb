@@ -10,7 +10,7 @@ signature.
 
 from __future__ import annotations
 
-import comb
+import hivecomb
 
 from .exceptions import MissingKeyError
 from .instance import BlockchainInstance
@@ -86,7 +86,7 @@ class TransactionBuilder(dict):
         wifs = self.wifs or list(getattr(self.blockchain, "wifs", []))
         if not wifs:
             raise MissingKeyError("no signing keys available")
-        self._signed = comb.sign_transaction(
+        self._signed = hivecomb.sign_transaction(
             self.ops,
             self.blockchain._block_ref(),
             wifs,

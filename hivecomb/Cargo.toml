@@ -1,5 +1,5 @@
 [package]
-name = "comb"
+name = "hivecomb"
 description = "A Rust library for the Hive blockchain: keys, Graphene serialization, transaction signing and RPC."
 version.workspace = true
 edition.workspace = true
@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 readme = "../README.md"
+# Shipped in the package: this is a derived work and the upstream copyright
+# notices travel with it.
+include = ["src/**/*", "data/**/*", "tests/**/*", "LICENSE", "Cargo.toml"]
 keywords = ["hive", "blockchain", "graphene", "secp256k1", "signing"]
 categories = ["cryptography::cryptocurrencies"]
 

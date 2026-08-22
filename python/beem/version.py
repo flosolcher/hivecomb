@@ -1,9 +1,9 @@
 """Version reported to code that checks it.
 
 Deliberately not beem's ``0.24.26``: anything branching on the version should be
-able to tell it is talking to comb.
+able to tell it is talking to hivecomb.
 """
 
-import comb
+import hivecomb
 
-version = f"comb-compat-{comb.__version__}"
+version = f"hivecomb-compat-{hivecomb.__version__}"

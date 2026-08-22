@@ -132,7 +132,7 @@ class Witness(dict):
 
         raise NotImplementedError(
             "witness_set_properties encodes each value as the binary form of its "
-            "own type, which this layer does not build. Use comb's "
+            "own type, which this layer does not build. Use hivecomb's "
             "WitnessProperty helpers with Hive.finalizeOp; see MIGRATION.md."
         )
 

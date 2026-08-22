@@ -1,19 +1,19 @@
 """beempy — the command line interface.
 
-Drop-in for `beem.cli`, backed by `comb`. Installed as the ``beempy`` console
+Drop-in for `beem.cli`, backed by `hivecomb`. Installed as the ``beempy`` console
 script.
 
 Two departures from beem's CLI, both deliberate:
 
 * **Zero dependencies.** beem's CLI needed Click, click-shell and prettytable.
   This uses `argparse` and formats its own tables, so installing the
-  compatibility layer pulls in nothing beyond `comb`.
-* **Commands for what comb adds.** beem's 99 commands are here; so are commands
+  compatibility layer pulls in nothing beyond `hivecomb`.
+* **Commands for what hivecomb adds.** beem's 99 commands are here; so are commands
   for the operations and features beem has no way to reach — ``recurrenttransfer``,
   ``collateralizedconvert``, ``mnemonic``, ``bip38``, ``decodetx`` and
   ``virtualops``. ``beempy commands --new`` lists them.
 
-Configuration lives in ``~/.config/comb/config.json`` (override with
+Configuration lives in ``~/.config/hivecomb/config.json`` (override with
 ``COMB_CONFIG``). Keys come from the wallet, or from ``--key`` / the
 ``COMB_WIF`` environment variable when you are not using one.
 """
@@ -29,9 +29,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import comb
+import hivecomb
 
-from comb_compat import DEFAULT_NODES, NodeClient, RPCError
+from hivecomb_compat import DEFAULT_NODES, NodeClient, RPCError
 
 __all__ = ["cli", "main"]
 
@@ -117,7 +117,7 @@ def config_path():
     if override:
         return Path(override)
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "comb" / "config.json"
+    return base / "hivecomb" / "config.json"
 
 
 DEFAULT_CONFIG = {
@@ -265,17 +265,21 @@ def arg(*names, **kwargs):
 @command("about", "show version and build information", group="config")
 def cmd_about(args):
     from . import __version__
-
-    out(f"beempy (comb compatibility layer)  {__version__}")
-    out(f"comb extension module              {comb.__version__}")
-    out(f"chain id                           {comb.chain_id()}")
-    out(f"config                             {config_path()}")
     from .wallet import default_wallet_path
 
     wallet = default_wallet_path()
-    out(f"wallet                             {wallet}{'' if wallet.exists() else ' (none)'}")
-    out("")
-    out("A Rust reimplementation of beem. See MIGRATION.md for what differs.")
+    table(
+        ["property", "value"],
+        [
+            ("beempy (hivecomb compatibility layer)", __version__),
+            ("hivecomb extension module", hivecomb.__version__),
+            ("chain id", hivecomb.chain_id()),
+            ("config", config_path()),
+            ("wallet", f"{wallet}{'' if wallet.exists() else ' (none)'}"),
+        ],
+    )
+    out("\nA Rust reimplementation of beem. See MIGRATION.md for what differs,")
+    out("and COMPARISON.md for how it stands against the other Rust Hive libraries.")
 
 
 @command("config", "show the current configuration", group="config")
@@ -387,7 +391,7 @@ def cmd_info(args):
             ("vesting fund", amount("total_vesting_fund_hive")),
             ("vesting shares", amount("total_vesting_shares")),
             ("HBD interest", f"{props.get('hbd_interest_rate', 0) / 100:.2f}%"),
-            ("chain id (local)", comb.chain_id()),
+            ("chain id (local)", hivecomb.chain_id()),
         ]
         table(["property", "value"], rows)
         return
@@ -514,7 +518,7 @@ def cmd_listaccounts(args):
     wallet = Wallet()
     index = wallet._wallet.index() if wallet._wallet else {}
     if not index:
-        wallet_open = comb.Wallet.open(str(wallet.path))
+        wallet_open = hivecomb.Wallet.open(str(wallet.path))
         index = wallet_open.index()
     table(["account", "roles"], [(a, ", ".join(sorted(set(r)))) for a, r in sorted(index.items())])
 
@@ -535,7 +539,7 @@ def cmd_changewalletpassphrase(args):
 def cmd_parsewif(args):
     wif = args.wif or ask_passphrase("WIF: ")
     try:
-        key = comb.PrivateKey(wif)
+        key = hivecomb.PrivateKey(wif)
     except ValueError as exc:
         die(f"not a usable key: {exc}")
     out(f"public key  {key.public_key()}")
@@ -552,20 +556,20 @@ def cmd_keygen(args):
     choice = input("[1] ").strip() or "1"
 
     if choice == "1":
-        key = comb.PrivateKey.generate()
+        key = hivecomb.PrivateKey.generate()
     elif choice == "2":
         mnemonic = ask_passphrase("Mnemonic: ")
-        if not comb.validate_mnemonic(mnemonic):
+        if not hivecomb.validate_mnemonic(mnemonic):
             die("that mnemonic fails its checksum or contains a word outside the BIP-39 list")
         account_index = int(input("Account index [0]: ").strip() or "0")
-        key = comb.PrivateKey.from_mnemonic(mnemonic, args.role, account_index)
+        key = hivecomb.PrivateKey.from_mnemonic(mnemonic, args.role, account_index)
     elif choice == "3":
         if not args.account:
             die("--account is required for password derivation")
         out("Note: this is one unsalted SHA-256 with no work factor. It is Hive's")
         out("scheme, not a good one. Prefer option 1 or 2 for anything that holds value.")
         password = ask_passphrase("Master password: ")
-        key = comb.PrivateKey.from_password(args.account, args.role, password)
+        key = hivecomb.PrivateKey.from_password(args.account, args.role, password)
     else:
         die("unknown choice")
 
@@ -581,12 +585,12 @@ def cmd_mnemonic(args):
     """Not in beem: its brain-key generator was biased, and its BIP-39 support
     never derived Hive role keys."""
     strength = {12: 128, 15: 160, 18: 192, 21: 224, 24: 256}[args.words]
-    phrase = comb.generate_mnemonic(strength)
+    phrase = hivecomb.generate_mnemonic(strength)
     out(phrase)
     out("")
     rows = []
     for role in ("owner", "active", "posting", "memo"):
-        key = comb.PrivateKey.from_mnemonic(phrase, role, 0)
+        key = hivecomb.PrivateKey.from_mnemonic(phrase, role, 0)
         rows.append((role, str(key.public_key()), key.to_wif()))
     table(["role", "public key", "private key"], rows)
     out("\nDerived at m/48'/13'/<role>'/0'/0', the path Hive wallets use.")
@@ -602,11 +606,11 @@ def cmd_bip38(args):
     passphrase = ask_passphrase("BIP-38 passphrase: ", confirm=not args.decrypt)
     if args.decrypt:
         try:
-            out(comb.PrivateKey.from_bip38(value, passphrase).to_wif())
+            out(hivecomb.PrivateKey.from_bip38(value, passphrase).to_wif())
         except ValueError as exc:
             die(str(exc))
     else:
-        out(comb.PrivateKey(value).to_bip38(passphrase))
+        out(hivecomb.PrivateKey(value).to_bip38(passphrase))
 
 
 @command("passwordgen", "derive role keys from an account name and master password", group="wallet")
@@ -616,11 +620,11 @@ def cmd_passwordgen(args):
         die("an account name is required")
     password = ask_passphrase("Master password: ")
     out("\nThis scheme is one unsalted SHA-256 with no work factor. It is Hive's,")
-    out("not beem's and not comb's, and it cannot be changed without breaking")
+    out("not beem's and not hivecomb's, and it cannot be changed without breaking")
     out("compatibility. Prefer `beempy mnemonic` for a new account.\n")
     rows = []
     for role in ("owner", "active", "posting", "memo"):
-        key = comb.PrivateKey.from_password(account, role, password)
+        key = hivecomb.PrivateKey.from_password(account, role, password)
         rows.append((role, str(key.public_key()), key.to_wif()))
     table(["role", "public key", "private key"], rows)
 
@@ -1673,7 +1677,7 @@ def cmd_witnessdisable(args):
     die(
         "retiring a witness publishes the null signing key through "
         "witness_set_properties, whose values are binary-encoded per property. "
-        "This layer does not build them; use comb's WitnessProperty helpers. "
+        "This layer does not build them; use hivecomb's WitnessProperty helpers. "
         "See MIGRATION.md."
     )
 
@@ -1718,7 +1722,7 @@ def cmd_message(args):
     account = resolve_account(args)
     text = args.message if args.message is not None else sys.stdin.read()
     keys = signing_keys(args, account=account, role="posting")
-    out(comb.sign_message(text, keys[0]))
+    out(hivecomb.sign_message(text, keys[0]))
 
 
 @arg("message")
@@ -1727,7 +1731,7 @@ def cmd_message(args):
 @command("verify", "verify a signed message", group="crypto")
 def cmd_verify(args):
     try:
-        signer = comb.recover_message(args.message, args.signature)
+        signer = hivecomb.recover_message(args.message, args.signature)
     except ValueError as exc:
         die(f"signature is not usable: {exc}")
     if args.pubkey:
@@ -1755,7 +1759,7 @@ def cmd_encrypt(args):
     else:
         recipient = Account(args.to.lstrip("@"), blockchain_instance=hive)["memo_key"]
     keys = signing_keys(args, account=account, role="memo")
-    out(comb.encode_memo(keys[0], recipient, args.message))
+    out(hivecomb.encode_memo(keys[0], recipient, args.message))
 
 
 @arg("memo", help="the #-prefixed memo")
@@ -1765,7 +1769,7 @@ def cmd_decrypt(args):
     account = resolve_account(args, required=False)
     keys = signing_keys(args, account=account, role="memo")
     try:
-        out(comb.decode_memo(keys[0], args.memo))
+        out(hivecomb.decode_memo(keys[0], args.memo))
     except ValueError as exc:
         die(str(exc))
 
@@ -1982,9 +1986,9 @@ for _name, _reason in [
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="beempy",
-        description="Command line interface for Hive, backed by comb.",
+        description="Command line interface for Hive, backed by hivecomb.",
         epilog="`beempy commands` lists everything; `beempy commands --new` lists "
-               "what comb adds over beem.",
+               "what hivecomb adds over beem.",
     )
     parser.add_argument("--node", action="append", help="node URL; repeat for several")
     parser.add_argument("--key", action="append", help="signing WIF; repeat for several")

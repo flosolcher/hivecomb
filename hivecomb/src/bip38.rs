@@ -199,7 +199,7 @@ mod tests {
             &*encrypted,
             "6PRWaUZmruY6rjNSJZ8G9yzdeU72VZmLgxMjADM7wuDaYknZCjot2JNmAc"
         );
-        // ...and comb reads beem's back.
+        // ...and hivecomb reads beem's back.
         assert_eq!(
             decrypt(
                 "6PRWaUZmruY6rjNSJZ8G9yzdeU72VZmLgxMjADM7wuDaYknZCjot2JNmAc",

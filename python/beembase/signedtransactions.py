@@ -1,6 +1,6 @@
 """Signed transactions.
 
-Drop-in for `beembase.signedtransactions.Signed_Transaction`, backed by `comb`.
+Drop-in for `beembase.signedtransactions.Signed_Transaction`, backed by `hivecomb`.
 
 Two things differ, both deliberate:
 
@@ -14,9 +14,9 @@ Two things differ, both deliberate:
 
 from __future__ import annotations
 
-import comb
+import hivecomb
 
-from comb_compat import not_implemented
+from hivecomb_compat import not_implemented
 
 __all__ = ["Signed_Transaction"]
 
@@ -37,13 +37,13 @@ class Signed_Transaction:
         self.signatures = list(signatures or [])
         self._chain = kwargs.pop("chain", "HIVE")
 
-    # comb takes a BlockRef; reconstruct one from the two reference fields.
+    # hivecomb takes a BlockRef; reconstruct one from the two reference fields.
     def _block_ref(self):
-        return comb.BlockRef.from_parts(self.ref_block_num, self.ref_block_prefix)
+        return hivecomb.BlockRef.from_parts(self.ref_block_num, self.ref_block_prefix)
 
     def derive_digest(self, chain="HIVE"):
         """The digest that gets signed: ``sha256(chain_id || serialized_tx)``."""
-        return comb.transaction_digest(
+        return hivecomb.transaction_digest(
             self.operations, self._block_ref(), self.expiration, chain=_chain_name(chain)
         )
 
@@ -53,7 +53,7 @@ class Signed_Transaction:
     @property
     def id(self):
         """The transaction id."""
-        return comb.transaction_id(
+        return hivecomb.transaction_id(
             self.operations, self._block_ref(), self.expiration, chain=self._chain
         )
 
@@ -61,7 +61,7 @@ class Signed_Transaction:
         """Sign with the given WIF keys."""
         if not wifkeys:
             raise ValueError("no signing keys were provided")
-        result = comb.sign_transaction(
+        result = hivecomb.sign_transaction(
             self.operations,
             self._block_ref(),
             [str(k) for k in wifkeys],
@@ -80,7 +80,7 @@ class Signed_Transaction:
         digest = self.derive_digest(chain)
         found = []
         for signature in self.signatures:
-            found.append(comb.recover_digest(digest, signature))
+            found.append(hivecomb.recover_digest(digest, signature))
         if pubkeys:
             have = {str(k) for k in found}
             for key in pubkeys:
@@ -104,12 +104,12 @@ class Signed_Transaction:
         raise not_implemented(
             "bytes(Signed_Transaction)",
             "Use derive_digest() for the signed bytes' hash, or "
-            "comb.sign_transaction for the broadcast form.",
+            "hivecomb.sign_transaction for the broadcast form.",
         )
 
 
 def _as_pair(op):
-    """Normalise an operation into the ``(name, fields)`` pair comb takes."""
+    """Normalise an operation into the ``(name, fields)`` pair hivecomb takes."""
     if hasattr(op, "json"):
         op = op.json()
     if isinstance(op, (list, tuple)) and len(op) == 2:

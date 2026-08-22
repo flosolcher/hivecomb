@@ -1,16 +1,16 @@
-# Replacing beem with comb
+# Replacing beem with hivecomb
 
-This document is the complete record of how `comb` relates to `beem`:
+This document is the complete record of how `hivecomb` relates to `beem`:
 
 1. [Installing it as a drop-in](#1-installing-it-as-a-drop-in)
 2. [What was fixed](#2-what-was-fixed) — every defect, and where the fix lives
 3. [Deliberate divergences](#3-deliberate-divergences) — where behaviour differs on
    purpose, including the cases where beem was not wrong
-4. [Additions](#4-additions) — what `comb` does that beem cannot
+4. [Additions](#4-additions) — what `hivecomb` does that beem cannot
 5. [Coverage](#5-coverage) — what is implemented, what raises, what is not planned
 6. [The native API](#6-the-native-api) — what to use once you are no longer porting
 
-For how `comb` compares to the other Rust Hive libraries — and an honest answer to
+For how `hivecomb` compares to the other Rust Hive libraries — and an honest answer to
 which is more mature — see [COMPARISON.md](COMPARISON.md).
 
 Nothing here silently does something different from what you asked. Every gap raises
@@ -22,14 +22,14 @@ Nothing here silently does something different from what you asked. Every gap ra
 
 The `python/` directory of this repository is a distribution that **provides the
 `beem`, `beemgraphenebase`, `beembase` and `beemapi` package names**, implemented on
-top of the `comb` extension module. Installing it in place of beem makes existing
+top of the `hivecomb` extension module. Installing it in place of beem makes existing
 `import beem` code work unchanged.
 
 ```sh
 pip uninstall -y beem
 pip install maturin
-maturin build --release          # builds the comb extension module
-pip install target/wheels/comb-*.whl
+maturin build --release          # builds the hivecomb extension module
+pip install target/wheels/hivecomb-*.whl
 pip install ./python             # the beem-compatible layer
 ```
 
@@ -37,11 +37,11 @@ Verify:
 
 ```python
 import beem, beemgraphenebase
-print(beem.__version__)          # comb-compat-0.1.0, not 0.24.26
+print(beem.__version__)          # hivecomb-compat-0.1.0, not 0.24.26
 ```
 
 The version string is deliberately **not** `0.24.26`: anything that branches on the
-version should be able to tell it is talking to comb.
+version should be able to tell it is talking to hivecomb.
 
 The `beempy` console script is installed too, so existing invocations keep working.
 
@@ -76,10 +76,10 @@ exactly the kind of silent failure this port exists to remove.
 
 ## 2. What was fixed
 
-Every defect found in beem 0.24.26, with severity, and where `comb` addresses it. Full
+Every defect found in beem 0.24.26, with severity, and where `hivecomb` addresses it. Full
 detail, with file and line, is in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md).
 
-| # | Sev | What beem does | Where `comb` fixes it | Covered by |
+| # | Sev | What beem does | Where `hivecomb` fixes it | Covered by |
 |---|---|---|---|---|
 | [1](SECURITY_FINDINGS.md#1) | Critical | Missing comma concatenates two operation names, shifting every HF25 id | `operations/ids.rs` — one table, index-is-id asserted | unit test |
 | [2](SECURITY_FINDINGS.md#2) | Critical | Table cannot encode `recurrent_transfer`/`collateralized_convert`; all virtual ids off by two | `operations/ids.rs` — full 0–92 table from hived | unit test |
@@ -134,14 +134,14 @@ that changed them would not be a drop-in.
 export COMB_COMPAT_REDACT_KEYS=1     # once you have checked your code
 ```
 
-The native `comb` API and the Rust API redact by default. This is the only place in
+The native `hivecomb` API and the Rust API redact by default. This is the only place in
 the project where a known defect is reproduced, and it is opt-out rather than opt-in
 only because compatibility is the stated goal.
 
 ### 3.2 `verify_message` returns one key, not four
 
 beem's `Signed_Transaction.verify()` looped over all four recovery parameters and
-appended every candidate that did not raise (finding 7). `comb` returns exactly one
+appended every candidate that did not raise (finding 7). `hivecomb` returns exactly one
 key per signature.
 
 Also note what `verify_message` can and cannot do — in beem and here alike. Recovery
@@ -159,7 +159,7 @@ beem accepted a long tail of constructor arguments and quietly ignored the ones 
 not use. Silently dropping a setting the caller asked for is how a transaction ends up
 doing something other than what was intended.
 
-Options that describe machinery `comb` does not have — `appbase`, `use_condenser`,
+Options that describe machinery `hivecomb` does not have — `appbase`, `use_condenser`,
 `data_refresh_time_seconds`, node-ranking settings — are accepted and ignored, because
 there is genuinely nothing to configure.
 
@@ -171,7 +171,7 @@ hive.transfer("bob", "1.2345", "HIVE", account="alice")   # raises
 
 HIVE has three decimals. beem's `ROUND_DOWN` quantize silently made this `1.234 HIVE`.
 Quietly dropping a digit from a monetary amount transfers a different sum than the
-caller asked for, so `comb` refuses.
+caller asked for, so `hivecomb` refuses.
 
 ### 3.5 `flat_set` fields are sorted
 
@@ -186,14 +186,14 @@ transactions were being rejected.
 
 ### 3.6 Memos carry a varint length prefix
 
-`comb` writes the prefix that hive-js, dhive, Keychain and HiveSigner all write; beem
+`hivecomb` writes the prefix that hive-js, dhive, Keychain and HiveSigner all write; beem
 did not (finding 24). Memos written by either are readable by both, **except** a memo
 whose first byte reads as a valid length for the rest — those are genuinely ambiguous,
-and `comb` resolves them the way every other client does.
+and `hivecomb` resolves them the way every other client does.
 
 ### 3.7 `Steem` is not supported
 
-beem targeted both chains. `comb` targets Hive. The Steem entry in beem's chain table
+beem targeted both chains. `hivecomb` targets Hive. The Steem entry in beem's chain table
 carries the all-zero chain id, which is the same trap as finding 5.
 
 ### 3.8 Timestamps must be UTC
@@ -238,14 +238,14 @@ bound it says so, rather than presenting a short list as though it were complete
 
 beem pulled in `requests` and `websocket-client`, and its CLI added Click, click-shell
 and prettytable. The compatibility layer uses `urllib` and `argparse` and formats its
-own tables, so it adds no dependencies beyond `comb` itself. WebSocket transport is not
+own tables, so it adds no dependencies beyond `hivecomb` itself. WebSocket transport is not
 supported — every public Hive node serves HTTP JSON-RPC.
 
 ---
 
 ## 4. Additions
 
-Things `comb` does that beem cannot.
+Things `hivecomb` does that beem cannot.
 
 ### 4.1 Operations beem cannot build
 
@@ -266,14 +266,14 @@ transfers to the same recipient. beem predates it entirely.
 ### 4.2 The 43 virtual operations
 
 beem models none of them — it returns the raw dictionary and leaves callers to reach in
-by key. `comb` has all 43 as types, including everything added since HF25:
+by key. `hivecomb` has all 43 as types, including everything added since HF25:
 `limit_order_cancelled`, `producer_missed`, `proposal_fee`, `proxy_cleared`,
 `escrow_approved`, `escrow_rejected`, `expired_account_notification`,
 `collateralized_convert_immediate_conversion`, `fill_recurrent_transfer`,
 `failed_recurrent_transfer`, `declined_voting_rights`.
 
 ```rust
-use comb::operations::AnyOperation;
+use hivecomb::operations::AnyOperation;
 let op = AnyOperation::from_json(&entry["op"])?;   // signed or virtual, either way
 ```
 
@@ -290,7 +290,7 @@ explicit staleness bound, so producing a signature is pure CPU. beem called
 
 ### 4.5 Reading the wire format
 
-`comb` deserializes Graphene binary as well as writing it, so a transaction or block
+`hivecomb` deserializes Graphene binary as well as writing it, so a transaction or block
 can be decoded, and every operation round-trips through both binary and JSON. beem's
 deserializer was a separate module sharing no code with its serializer.
 
@@ -319,14 +319,14 @@ Validated against the reference vectors. Hive's BIP-48 paths
 (`m/48'/13'/<role>'/<account>'/<key>'`) are built in:
 
 ```python
-key = comb.PrivateKey.from_mnemonic(mnemonic, "posting", account_index=0)
+key = hivecomb.PrivateKey.from_mnemonic(mnemonic, "posting", account_index=0)
 ```
 
 BIP-38 output matches beem byte for byte, so existing `6P...` keys are readable.
 
 ### 4.9 An authenticated key store
 
-`comb::wallet` uses scrypt and AES-256-GCM, so a tampered wallet file fails
+`hivecomb::wallet` uses scrypt and AES-256-GCM, so a tampered wallet file fails
 authentication rather than decrypting to something.
 
 ### 4.10 `beempy` commands beem has no equivalent for
@@ -379,7 +379,7 @@ silently lose it.
 ### 4.14 A differential oracle
 
 `tests/differential_beem.py` compares digests against beem byte for byte over a
-generated corpus. `comb/tests/live_fixtures.rs` parses real captured node responses.
+generated corpus. `hivecomb/tests/live_fixtures.rs` parses real captured node responses.
 
 ---
 
@@ -421,11 +421,11 @@ generated corpus. `comb/tests/live_fixtures.rs` parses real captured node respon
 |---|---|---|
 | `PublicKey.address`, `Address` | Graphene addresses are unused in Hive's protocol | the prefixed key form |
 | `PrivateKey.bitcoin` | internal to BIP-38 | `PrivateKey.to_bip38()` |
-| `PrivateKey.child` | non-hardened derivation | `comb.PrivateKey.from_mnemonic()` |
-| `BrainKey.suggest` | beem's generator was biased (finding 14) | `comb.generate_mnemonic()` |
-| `Mnemonic.to_seed` | | `comb.PrivateKey.from_mnemonic()` |
-| `bytes(Operation)`, `bytes(Signed_Transaction)` | Python-side wire encoding is where findings 8, 22, 23 lived | `Hive.finalizeOp`, `comb.sign_transaction` |
-| `Hive.sign` on a prebuilt tx | | `finalizeOp`, or `comb.sign_transaction` |
+| `PrivateKey.child` | non-hardened derivation | `hivecomb.PrivateKey.from_mnemonic()` |
+| `BrainKey.suggest` | beem's generator was biased (finding 14) | `hivecomb.generate_mnemonic()` |
+| `Mnemonic.to_seed` | | `hivecomb.PrivateKey.from_mnemonic()` |
+| `bytes(Operation)`, `bytes(Signed_Transaction)` | Python-side wire encoding is where findings 8, 22, 23 lived | `Hive.finalizeOp`, `hivecomb.sign_transaction` |
+| `Hive.sign` on a prebuilt tx | | `finalizeOp`, or `hivecomb.sign_transaction` |
 | `beem.Steem` | see §3.7 | — |
 | `recover_public_key`, `recoverPubkeyParameter` | beem's multi-backend machinery | `verify_message` |
 
@@ -442,7 +442,7 @@ script that calls one gets an explanation instead of "unknown command".
 | `importaccount` | deriving a wallet's keys from a master password should be a deliberate act — use `passwordgen` then `addkey` |
 | `newaccount`, `changekeys`, `updatememokey`, `allow`, `disallow` | authority changes are owner-level and irreversible; build them explicitly so every field is visible |
 | `beneficiaries` | set them when posting, with `post --beneficiary` |
-| `witnessupdate`, `witnesscreate`, `witnessdisable`, `witnessenable` | `witness_set_properties` encodes each value as the binary form of its own type, which this layer does not build; use comb's `WitnessProperty` helpers |
+| `witnessupdate`, `witnesscreate`, `witnessdisable`, `witnessenable` | `witness_set_properties` encodes each value as the binary form of its own type, which this layer does not build; use hivecomb's `WitnessProperty` helpers |
 | `addtoken`, `deltoken`, `listtoken` | they served beem's HiveSigner integration, which this layer does not provide |
 
 ### Not ported
@@ -461,19 +461,19 @@ you depend on one of these, open an issue.
 Once you are no longer porting, the native surface is smaller and safer. In Python:
 
 ```python
-import comb
+import hivecomb
 
-key = comb.PrivateKey(wif)
+key = hivecomb.PrivateKey(wif)
 print(repr(key))                         # <PrivateKey redacted>
 
-sig = comb.sign_message("challenge", wif)                  # hex
-tx  = comb.sign_transaction(operations, block_ref, [wif])  # no network
+sig = hivecomb.sign_message("challenge", wif)                  # hex
+tx  = hivecomb.sign_transaction(operations, block_ref, [wif])  # no network
 
-cache = comb.TaposCache(max_age_seconds=180)
+cache = hivecomb.TaposCache(max_age_seconds=180)
 cache.store_block_id(head_block_id)                        # from a background task
-tx = comb.sign_transaction(ops, cache.block_ref(), [wif])  # raises if stale
+tx = hivecomb.sign_transaction(ops, cache.block_ref(), [wif])  # raises if stale
 
-memo = comb.encode_memo(from_wif, to_pubkey, "hello")
+memo = hivecomb.encode_memo(from_wif, to_pubkey, "hello")
 ```
 
 In Rust, see the [README](README.md) and the module documentation. The core builds

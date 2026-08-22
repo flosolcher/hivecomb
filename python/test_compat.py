@@ -5,9 +5,9 @@ Runs code written against beem's API through the compatibility layer, without
 changing a line of it. Where behaviour deliberately differs from beem, the test
 says so and asserts the *new* behaviour, with a comment explaining why.
 
-Run with `comb` importable:
+Run with `hivecomb` importable:
 
-    PYTHONPATH=python:<dir containing comb.so> python3 python/test_compat.py
+    PYTHONPATH=python:<dir containing hivecomb.so> python3 python/test_compat.py
 
 Network tests are skipped unless COMB_COMPAT_LIVE=1 is set.
 """
@@ -140,7 +140,7 @@ def _():
 @check("verify_message: a tampered signature recovers a DIFFERENT key, so comparing catches it")
 def _():
     # Recovery answers "which key made this?", so a tampered signature does not
-    # fail -- it recovers another key. That is true of beem and of comb alike,
+    # fail -- it recovers another key. That is true of beem and of hivecomb alike,
     # and is why the only real check is comparing against an expected key.
     expected = bytes.fromhex(repr(PrivateKey(WIF).pubkey))
     good = sign_message("hello hive", WIF)
@@ -278,7 +278,7 @@ def _():
 
 @check("Hive: custom_json signs offline against a supplied block reference")
 def _():
-    import comb
+    import hivecomb
 
     hive = Hive(node="https://invalid.example", keys=[WIF], nobroadcast=True)
     hive._tapos.store_block_id(BLOCK_ID)  # stand in for a background refresh
@@ -290,7 +290,7 @@ def _():
     assert tx["operations"][0][0] == "custom_json"
     assert len(tx["signatures"]) == 1
     assert len(tx["trx_id"]) == 40
-    assert tx["ref_block_num"] == comb.BlockRef.from_block_id(BLOCK_ID).ref_block_num
+    assert tx["ref_block_num"] == hivecomb.BlockRef.from_block_id(BLOCK_ID).ref_block_num
 
 
 @check("Hive: transfer and vote build the right operations")
@@ -346,7 +346,7 @@ def _():
 
 @check("Hive: a stale TaPoS reference is refused rather than served")
 def _():
-    import comb
+    import hivecomb
     import time as _time
 
     hive = Hive(node="https://invalid.example", keys=[WIF], nobroadcast=True,
@@ -379,7 +379,7 @@ def _():
 # --------------------------------------------------------------------------
 @check("ADDITION: check_authority reports weight, not just yes/no")
 def _():
-    import comb
+    import hivecomb
 
     key_a = str(PrivateKey(WIF).pubkey)
     other = str(PrivateKey().pubkey)
@@ -388,19 +388,19 @@ def _():
         "account_auths": [],
         "key_auths": [[key_a, 1], [other, 1]],
     }
-    one = comb.check_authority(authority, [key_a])
+    one = hivecomb.check_authority(authority, [key_a])
     assert one["satisfied"] is False
     assert one["weight"] == 1 and one["threshold"] == 2 and one["shortfall"] == 1
     assert one["conclusive"] is True, "no delegations, so this is a real no"
     assert one["matched_keys"] == [key_a]
 
-    both = comb.check_authority(authority, [key_a, other])
+    both = hivecomb.check_authority(authority, [key_a, other])
     assert both["satisfied"] is True and both["shortfall"] == 0
 
 
 @check("ADDITION: a delegated authority is inconclusive, not a plain no")
 def _():
-    import comb
+    import hivecomb
 
     key_a = str(PrivateKey(WIF).pubkey)
     authority = {
@@ -408,7 +408,7 @@ def _():
         "account_auths": [["bot", 1]],
         "key_auths": [[key_a, 1]],
     }
-    stranger = comb.check_authority(authority, [str(PrivateKey().pubkey)])
+    stranger = hivecomb.check_authority(authority, [str(PrivateKey().pubkey)])
     assert stranger["satisfied"] is False
     assert stranger["conclusive"] is False, (
         "the answer depends on @bot's authority, which was not fetched -- "
@@ -416,13 +416,13 @@ def _():
     )
     assert [tuple(a) for a in stranger["unresolved_accounts"]] == [("bot", 1)]
 
-    holder = comb.check_authority(authority, [key_a])
+    holder = hivecomb.check_authority(authority, [key_a])
     assert holder["satisfied"] and holder["conclusive"]
 
 
 @check("ADDITION: check_authority refuses a malformed authority")
 def _():
-    import comb
+    import hivecomb
 
     for bad in (
         {"weight_threshold": 0, "key_auths": [], "account_auths": []},
@@ -430,7 +430,7 @@ def _():
         {"weight_threshold": 1, "key_auths": [["not-a-key", 1]], "account_auths": []},
     ):
         try:
-            comb.check_authority(bad, [])
+            hivecomb.check_authority(bad, [])
         except Exception:
             continue
         raise AssertionError(f"should have refused {bad}")
@@ -457,7 +457,7 @@ def _():
 
 # --------------------------------------------------------------------------
 def main():
-    print(f"comb compatibility layer: {len(PASS) + len(FAIL)} checks\n")
+    print(f"hivecomb compatibility layer: {len(PASS) + len(FAIL)} checks\n")
     for name in PASS:
         print(f"  ok    {name}")
     for name, exc, tb in FAIL:

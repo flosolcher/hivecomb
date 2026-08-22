@@ -32,7 +32,7 @@
 //! `cryptography` purely to change that selection order, a security property held in
 //! place by a transitive dependency with no test able to detect its loss.
 //!
-//! `comb` binds libsecp256k1 and has exactly one code path.
+//! `hivecomb` binds libsecp256k1 and has exactly one code path.
 //!
 //! ### The nonce is not seeded from the wall clock
 //!

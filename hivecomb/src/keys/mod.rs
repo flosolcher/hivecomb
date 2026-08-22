@@ -10,7 +10,7 @@
 //!    `PrivateKey(<redacted>)`. beem's `PrivateKey.__repr__` returned the raw private
 //!    scalar as hex and `__str__` returned the WIF, so `print(key)`, an f-string, a
 //!    `log.debug("%r", key)`, or any debugger or crash reporter that renders local
-//!    variables would disclose the key. Exporting the secret in `comb` requires the
+//!    variables would disclose the key. Exporting the secret in `hivecomb` requires the
 //!    explicitly-named [`PrivateKey::to_wif`] or [`PrivateKey::expose_secret`].
 //! 2. **A secret is wiped.** Key bytes live in `Zeroizing` buffers and are cleared on
 //!    drop. Python `str` is immutable and interned; beem could not have wiped a key

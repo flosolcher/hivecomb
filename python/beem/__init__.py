@@ -1,4 +1,4 @@
-"""beem, re-implemented on `comb`.
+"""beem, re-implemented on `hivecomb`.
 
 Installing this distribution in place of `beem` makes existing `import beem`
 code work unchanged, with the defects in ``SECURITY_FINDINGS.md`` fixed

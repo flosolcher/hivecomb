@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 
-from comb_compat import DEFAULT_NODES, NodeClient, RPCError
+from hivecomb_compat import DEFAULT_NODES, NodeClient, RPCError
 
 __all__ = ["NodeList"]
 

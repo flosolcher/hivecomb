@@ -10,8 +10,8 @@
 //! nothing about whether the message was modified in transit. There is no MAC. The
 //! ciphertext is malleable and the decrypt path is a textbook padding-oracle shape.
 //!
-//! That is Hive's format, not a choice made here, and `comb` must stay wire-compatible
-//! with it. What `comb` does differently is **fail closed**: invalid padding is an
+//! That is Hive's format, not a choice made here, and `hivecomb` must stay wire-compatible
+//! with it. What `hivecomb` does differently is **fail closed**: invalid padding is an
 //! error rather than silently-returned plaintext, and the key checksum is compared in
 //! constant time. beem's `_unpad` returned the input unchanged when the padding did not
 //! validate, handing padded bytes back as though they were the message.
@@ -38,7 +38,7 @@
 //! because the fallback paths happen to fire — but a message whose first byte is a
 //! plausible length that fits the buffer is mis-parsed by everyone.
 //!
-//! `comb` writes the prefix, as the ecosystem does. [`decode`] accepts memos without
+//! `hivecomb` writes the prefix, as the ecosystem does. [`decode`] accepts memos without
 //! one so that anything beem produced can still be read.
 
 use crate::error::{Error, Result};

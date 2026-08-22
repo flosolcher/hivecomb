@@ -1,6 +1,6 @@
 """The key store.
 
-Drop-in for `beem.wallet.Wallet`, backed by `comb`'s encrypted key store.
+Drop-in for `beem.wallet.Wallet`, backed by `hivecomb`'s encrypted key store.
 
 **Fixed relative to beem.** beem encrypted stored keys under
 ``AESCipher(sha256(passphrase))`` — one unsalted SHA-256, no work factor — with
@@ -12,7 +12,7 @@ and a tampered wallet file fails authentication rather than decrypting.
 shipping the weak construction. Migrate with ``beempy listkeys`` under old beem,
 then ``beempy addkey`` here.
 
-The default location is ``~/.config/comb/wallet.json``; override with
+The default location is ``~/.config/hivecomb/wallet.json``; override with
 ``COMB_WALLET`` or the ``path`` argument.
 """
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import comb
+import hivecomb
 
 from .exceptions import (
     KeyNotFound,
@@ -42,7 +42,7 @@ def default_wallet_path():
     if override:
         return Path(override)
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "comb" / "wallet.json"
+    return base / "hivecomb" / "wallet.json"
 
 
 class Wallet:
@@ -68,14 +68,14 @@ class Wallet:
         if self.path.exists():
             raise WalletExists(f"{self.path} already exists")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._wallet = comb.Wallet.create(str(self.path), pwd)
+        self._wallet = hivecomb.Wallet.create(str(self.path), pwd)
         return self
 
     def unlock(self, pwd):
         """Unlock with the master passphrase."""
         if not self.path.exists():
             raise NoWalletException(f"no wallet at {self.path}")
-        wallet = comb.Wallet.open(str(self.path))
+        wallet = hivecomb.Wallet.open(str(self.path))
         try:
             wallet.unlock(pwd)
         except ValueError as exc:
@@ -118,7 +118,7 @@ class Wallet:
             loadkeys = list(loadkeys.values())
         self._direct = {}
         for wif in loadkeys:
-            key = comb.PrivateKey(str(wif))
+            key = hivecomb.PrivateKey(str(wif))
             self._direct[str(key.public_key())] = str(wif)
         return self
 

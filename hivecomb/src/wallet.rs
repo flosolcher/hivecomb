@@ -19,7 +19,7 @@
 //! 3. **No authentication.** AES-CBC with no MAC. Nothing detects a modified wallet
 //!    file, and the decrypt path is a padding-oracle shape.
 //!
-//! `comb` uses **scrypt** for the passphrase (salted, with a real work factor) and
+//! `hivecomb` uses **scrypt** for the passphrase (salted, with a real work factor) and
 //! **AES-256-GCM** for every ciphertext, so tampering is detected rather than
 //! decrypted. The file is JSON, versioned, and documented below.
 //!
@@ -86,7 +86,7 @@ struct WalletFile {
     keys: Vec<StoredKey>,
 }
 
-const CHECK_PLAINTEXT: &[u8] = b"comb wallet v1";
+const CHECK_PLAINTEXT: &[u8] = b"hivecomb wallet v1";
 
 fn b64(data: &[u8]) -> String {
     // A small, dependency-free base64. Not performance-critical: this runs once per
@@ -219,7 +219,7 @@ impl Wallet {
         let text = std::fs::read_to_string(&path)
             .map_err(|e| Error::key(format!("could not read {}: {e}", path.display())))?;
         let file: WalletFile = serde_json::from_str(&text)
-            .map_err(|e| Error::key(format!("{} is not a comb wallet: {e}", path.display())))?;
+            .map_err(|e| Error::key(format!("{} is not a hivecomb wallet: {e}", path.display())))?;
         if file.version != FORMAT_VERSION {
             return Err(Error::key(format!(
                 "wallet format version {} is not supported by this build (expected {FORMAT_VERSION})",
@@ -527,7 +527,7 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            p.push(format!("comb-wallet-test-{tag}-{unique}.json"));
+            p.push(format!("hivecomb-wallet-test-{tag}-{unique}.json"));
             TempPath(p)
         }
         fn path(&self) -> &Path {

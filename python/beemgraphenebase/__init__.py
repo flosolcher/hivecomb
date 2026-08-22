@@ -1,4 +1,4 @@
-"""beem's graphene base layer, re-implemented on `comb`.
+"""beem's graphene base layer, re-implemented on `hivecomb`.
 
 Drop-in for `beemgraphenebase`. See ``MIGRATION.md`` for coverage and for the
 list of behaviours that deliberately differ.

@@ -1,9 +1,9 @@
-//! # comb
+//! # hivecomb
 //!
 //! A Rust library for the [Hive](https://hive.io) blockchain: key handling, Graphene
 //! binary serialization, transaction construction, signing and RPC.
 //!
-//! `comb` is a from-scratch reimplementation, in Rust, of the Python library
+//! `hivecomb` is a from-scratch reimplementation, in Rust, of the Python library
 //! [`beem`](https://github.com/holgern/beem) by Holger Nahrstaedt, which in turn
 //! descends from `python-bitshares` and `python-graphenelib` by Fabian Schuh. See
 //! `CREDITS.md` for the full lineage — the design, the wire format and the great
@@ -18,7 +18,7 @@
 //! ## Design rules
 //!
 //! * **No silent fallbacks.** Where beem swallowed an error and continued with a
-//!   default — a chain id, an ECDSA backend, a base58 character — `comb` returns an
+//!   default — a chain id, an ECDSA backend, a base58 character — `hivecomb` returns an
 //!   error. A silent fallback in a signing path produces a valid-looking signature
 //!   over the wrong bytes, which is the worst possible failure mode.
 //! * **Signing never needs the network.** The chain id is a compile-time constant and

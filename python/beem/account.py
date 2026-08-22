@@ -17,7 +17,7 @@ from __future__ import annotations
 import json as _json
 import time
 
-import comb
+import hivecomb
 from datetime import datetime, timedelta, timezone
 
 from .amount import Amount
@@ -764,7 +764,7 @@ class Account(dict):
         """Check whether ``keys`` satisfy this account's authority for ``role``.
 
         Offline: the authority is already on this object. Returns the report
-        :func:`comb.check_authority` produces.
+        :func:`hivecomb.check_authority` produces.
 
         **The answer can be inconclusive.** An authority may delegate to another
         account, and following that means fetching *its* authority. Rather than
@@ -787,7 +787,7 @@ class Account(dict):
             raise ValueError(f"{self.name} has no {role} authority")
         if isinstance(keys, str):
             keys = [keys]
-        return comb.check_authority(authority, [str(k) for k in keys])
+        return hivecomb.check_authority(authority, [str(k) for k in keys])
 
     def verify_authority_via_node(self, transaction):
         """Ask the node whether a transaction satisfies the required authority.

@@ -3,9 +3,9 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "comb-beem"
+name = "hivecomb-beem"
 version = "0.1.0"
-description = "beem-compatible API for Hive, backed by comb. Install in place of beem."
+description = "beem-compatible API for Hive, backed by hivecomb. Install in place of beem."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.8"
@@ -20,18 +20,18 @@ classifiers = [
 # The Rust extension module, and nothing else: the compatibility layer uses only
 # the standard library, where beem pulled in requests, websocket-client, Click,
 # click-shell and prettytable.
-dependencies = ["comb>=0.1.0"]
+dependencies = ["hivecomb>=0.1.0"]
 
 [project.scripts]
 # The same console script beem installed, so `beempy` keeps working.
 beempy = "beem.cli:cli"
 
 [project.urls]
-Repository = "https://github.com/flosolcher/comb-rs"
-Migration = "https://github.com/flosolcher/comb-rs/blob/main/MIGRATION.md"
+Repository = "https://github.com/flosolcher/hivecomb"
+Migration = "https://github.com/flosolcher/hivecomb/blob/main/MIGRATION.md"
 
 [tool.setuptools]
 # These package names deliberately shadow beem's. Installing this alongside beem
 # is not supported -- uninstall beem first.
 packages = ["beem", "beemapi", "beembase", "beemgraphenebase"]
-py-modules = ["comb_compat"]
+py-modules = ["hivecomb_compat"]

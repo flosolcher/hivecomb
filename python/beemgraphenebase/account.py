@@ -1,12 +1,12 @@
 """Key types.
 
-Drop-in for `beemgraphenebase.account`, backed by `comb`.
+Drop-in for `beemgraphenebase.account`, backed by `hivecomb`.
 
 **Rendering of secrets matches beem, deliberately.** ``repr(PrivateKey)``
 returns the raw private scalar as hex and ``str(PrivateKey)`` returns the WIF,
 because real code depends on both and a drop-in that changed them would not be a
 drop-in. That is finding 9, reproduced here on purpose and nowhere else in this
-project: the Rust API and the native `comb` Python API both redact.
+project: the Rust API and the native `hivecomb` Python API both redact.
 
 Set ``COMB_COMPAT_REDACT_KEYS=1`` to make both redact, once you have checked
 your code does not rely on them.
@@ -23,9 +23,9 @@ from __future__ import annotations
 import hashlib
 import re
 
-import comb
+import hivecomb
 
-from comb_compat import REDACT_KEYS, not_implemented
+from hivecomb_compat import REDACT_KEYS, not_implemented
 
 __all__ = ["PrivateKey", "PublicKey", "PasswordKey", "BrainKey", "Address", "Mnemonic"]
 
@@ -95,14 +95,14 @@ class PublicKey:
         self.prefix = prefix
         if isinstance(pk, PublicKey):
             self._key = pk._key
-        elif isinstance(pk, comb.PublicKey):
+        elif isinstance(pk, hivecomb.PublicKey):
             self._key = pk
         else:
             text = str(pk).strip()
             if text.startswith(("STM", "TST", "STX")):
-                self._key = comb.PublicKey(text)
+                self._key = hivecomb.PublicKey(text)
             else:
-                self._key = comb.PublicKey(_hex_pubkey_to_prefixed(text, prefix))
+                self._key = hivecomb.PublicKey(_hex_pubkey_to_prefixed(text, prefix))
 
     def __repr__(self):
         """The compressed key as hex, matching beem."""
@@ -167,13 +167,13 @@ class PrivateKey:
     def __init__(self, wif=None, prefix="STM"):
         self.prefix = prefix
         if wif is None:
-            self._key = comb.PrivateKey.generate()
+            self._key = hivecomb.PrivateKey.generate()
         elif isinstance(wif, PrivateKey):
             self._key = wif._key
-        elif isinstance(wif, comb.PrivateKey):
+        elif isinstance(wif, hivecomb.PrivateKey):
             self._key = wif
         else:
-            self._key = comb.PrivateKey(str(wif))
+            self._key = hivecomb.PrivateKey(str(wif))
 
     def __repr__(self):
         """The raw scalar as hex — matching beem. See the module docstring."""
@@ -221,7 +221,7 @@ class PrivateKey:
     def bitcoin(self):
         raise not_implemented(
             "PrivateKey.bitcoin",
-            "Bitcoin address derivation is internal to BIP-38, which comb "
+            "Bitcoin address derivation is internal to BIP-38, which hivecomb "
             "implements directly (PrivateKey.to_bip38).",
         )
 
@@ -229,12 +229,12 @@ class PrivateKey:
         """Graphene's sequence derivation: ``sha256(sha512(f'{wif} {sequence}'))``."""
         encoded = f"{self._key.to_wif()} {int(sequence)}".encode("ascii")
         scalar = hashlib.sha256(hashlib.sha512(encoded).digest()).digest()
-        return PrivateKey(comb.PrivateKey(scalar.hex()), prefix=self.prefix)
+        return PrivateKey(hivecomb.PrivateKey(scalar.hex()), prefix=self.prefix)
 
     def child(self, offset256):
         raise not_implemented(
             "PrivateKey.child",
-            "Use comb.PrivateKey.from_mnemonic() for BIP-32 derivation.",
+            "Use hivecomb.PrivateKey.from_mnemonic() for BIP-32 derivation.",
         )
 
 
@@ -254,7 +254,7 @@ class PasswordKey:
 
     def get_private(self):
         return PrivateKey(
-            comb.PrivateKey.from_password(self.account or "", self.role, self.password),
+            hivecomb.PrivateKey.from_password(self.account or "", self.role, self.password),
             prefix=self.prefix,
         )
 
@@ -275,7 +275,7 @@ class BrainKey:
             raise not_implemented(
                 "BrainKey() with no phrase",
                 "Generating a brain key is not supported; beem's generator was "
-                "biased (finding 14). Use comb.generate_mnemonic() instead.",
+                "biased (finding 14). Use hivecomb.generate_mnemonic() instead.",
             )
         self.brainkey = _normalize(brainkey)
 
@@ -294,7 +294,7 @@ class BrainKey:
 
     def get_private(self):
         return PrivateKey(
-            comb.PrivateKey.from_brain_key(self.brainkey, self.sequence),
+            hivecomb.PrivateKey.from_brain_key(self.brainkey, self.sequence),
             prefix=self.prefix,
         )
 
@@ -309,7 +309,7 @@ class BrainKey:
             "BrainKey.suggest",
             "beem's generator was biased roughly 2:1 across the dictionary and "
             "could index past the end (finding 14). Use "
-            "comb.generate_mnemonic(), which is uniform and checksummed.",
+            "hivecomb.generate_mnemonic(), which is uniform and checksummed.",
         )
 
 
@@ -321,21 +321,21 @@ class Address:
 
 
 class Mnemonic:
-    """BIP-39 mnemonics, routed through `comb`."""
+    """BIP-39 mnemonics, routed through `hivecomb`."""
 
     def generate(self, strength=128):
-        return comb.generate_mnemonic(strength)
+        return hivecomb.generate_mnemonic(strength)
 
     def check(self, mnemonic):
-        return comb.validate_mnemonic(mnemonic)
+        return hivecomb.validate_mnemonic(mnemonic)
 
     def to_mnemonic(self, data):
-        raise not_implemented("Mnemonic.to_mnemonic", "Use comb.generate_mnemonic().")
+        raise not_implemented("Mnemonic.to_mnemonic", "Use hivecomb.generate_mnemonic().")
 
     @classmethod
     def to_seed(cls, mnemonic, passphrase=""):
         raise not_implemented(
             "Mnemonic.to_seed",
-            "Use comb.PrivateKey.from_mnemonic(mnemonic, role, ...), which "
+            "Use hivecomb.PrivateKey.from_mnemonic(mnemonic, role, ...), which "
             "derives the Hive role key directly via BIP-32/BIP-48.",
         )

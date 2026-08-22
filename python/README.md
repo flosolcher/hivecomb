@@ -1,6 +1,6 @@
-# comb-beem
+# hivecomb-beem
 
-A `beem`-compatible API for Hive, implemented on [`comb`](https://github.com/flosolcher/comb-rs).
+A `beem`-compatible API for Hive, implemented on [`hivecomb`](https://github.com/flosolcher/hivecomb).
 
 This distribution **provides the `beem`, `beemgraphenebase`, `beembase` and `beemapi`
 package names, and the `beempy` console script**. Installing it in place of beem makes
@@ -10,7 +10,7 @@ and the post-HF25 operations beem never gained made available.
 
 ```sh
 pip uninstall -y beem
-pip install comb comb-beem
+pip install hivecomb hivecomb-beem
 ```
 
 It deliberately shadows beem's package names, so **do not install it alongside beem**.

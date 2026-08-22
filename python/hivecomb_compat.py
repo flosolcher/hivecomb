@@ -1,7 +1,7 @@
 """Shared plumbing for the beem compatibility layer.
 
 The `beem`, `beemgraphenebase`, `beembase` and `beemapi` packages in this
-distribution re-implement beem's public API on top of `comb`, the Rust library.
+distribution re-implement beem's public API on top of `hivecomb`, the Rust library.
 Installing this distribution in place of `beem` makes existing `import beem`
 code work unchanged, with the defects listed in ``SECURITY_FINDINGS.md`` fixed
 underneath.
@@ -14,7 +14,7 @@ raw private scalar and ``str(PrivateKey)`` returns the WIF, exactly as beem
 does, because real code depends on both.  That is finding 9, and the shim
 reproduces it *deliberately* so that a drop-in replacement is actually a drop-in.
 Set ``COMB_COMPAT_REDACT_KEYS=1`` to switch both to a redacted form once you
-have checked your code does not rely on them; the Rust and native-Python `comb`
+have checked your code does not rely on them; the Rust and native-Python `hivecomb`
 APIs redact by default.
 
 **Coverage is the API that gets used, not all 33k lines.**  Anything not
@@ -31,7 +31,7 @@ import threading
 import urllib.error
 import urllib.request
 
-import comb
+import hivecomb
 
 __all__ = [
     "REDACT_KEYS",
@@ -66,7 +66,7 @@ def not_implemented(what: str, instead: str = "") -> "NotImplementedError":
     A shim that silently returns the wrong thing is worse than one that stops.
     Every gap says what is missing and what to do about it.
     """
-    message = f"comb's beem compatibility layer does not implement {what}."
+    message = f"hivecomb's beem compatibility layer does not implement {what}."
     if instead:
         message += f" {instead}"
     message += " See MIGRATION.md for the coverage table."
@@ -77,7 +77,7 @@ class NodeClient:
     """A small JSON-RPC client with node failover.
 
     Uses only the standard library, so the compatibility layer adds no
-    dependencies beyond `comb` itself. beem pulled in `requests` and
+    dependencies beyond `hivecomb` itself. beem pulled in `requests` and
     `websocket-client`.
     """
 
@@ -136,7 +136,7 @@ class NodeClient:
                         data=payload,
                         headers={
                             "Content-Type": "application/json",
-                            "User-Agent": f"comb-compat/{comb.__version__}",
+                            "User-Agent": f"hivecomb-compat/{hivecomb.__version__}",
                         },
                     )
                     with urllib.request.urlopen(request, timeout=self.timeout) as response:

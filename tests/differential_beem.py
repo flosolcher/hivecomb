@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Differential oracle: compare `comb` against `beem` on the bytes that matter.
+"""Differential oracle: compare `hivecomb` against `beem` on the bytes that matter.
 
 This is the Tier 1 gate. The digest `sha256(chain_id || serialized_tx)` is fully
 deterministic and backend-independent, so **every serialization bug lives here**:
@@ -13,12 +13,12 @@ simultaneously too strict (rejecting a correct signature) and too weak (saying
 nothing about serialization). What is checked instead is that each side verifies
 the other's signatures.
 
-Run with a Python that has both `beem` and `comb` importable:
+Run with a Python that has both `beem` and `hivecomb` importable:
 
     python tests/differential_beem.py
 
 Exit status is 0 when every divergence is one of the KNOWN_DIVERGENCES below —
-cases where `comb` is deliberately different because `beem` is wrong.
+cases where `hivecomb` is deliberately different because `beem` is wrong.
 """
 
 import itertools
@@ -27,9 +27,9 @@ import struct
 import sys
 
 try:
-    import comb
+    import hivecomb
 except ImportError:
-    sys.exit("comb is not importable; build it with `maturin develop` first")
+    sys.exit("hivecomb is not importable; build it with `maturin develop` first")
 
 try:
     from beembase.signedtransactions import Signed_Transaction
@@ -62,7 +62,7 @@ HIVE_CHAIN = {
     ],
 }
 
-BLOCK_REF = comb.BlockRef.from_block_id(BLOCK_ID)
+BLOCK_REF = hivecomb.BlockRef.from_block_id(BLOCK_ID)
 
 
 def beem_digest(ops):
@@ -77,7 +77,7 @@ def beem_digest(ops):
 
 
 def comb_digest(ops):
-    return comb.transaction_digest(ops, BLOCK_REF, EXPIRATION)
+    return hivecomb.transaction_digest(ops, BLOCK_REF, EXPIRATION)
 
 
 def corpus():
@@ -130,13 +130,13 @@ def corpus():
 
 
 def is_known_divergence(op_type, fields):
-    """Cases where comb deliberately differs because beem is wrong."""
+    """Cases where hivecomb deliberately differs because beem is wrong."""
     if op_type == "custom_json":
         # hived declares required_auths / required_posting_auths as `flat_set`, which
         # deserializes into sorted order. hived then re-serializes from that object to
         # compute the digest it verifies against. beem serializes the caller's order
         # verbatim, so an unsorted auth list yields a signature over bytes hived will
-        # not reconstruct. comb sorts. See SECURITY_FINDINGS.md finding 21.
+        # not reconstruct. hivecomb sorts. See SECURITY_FINDINGS.md finding 21.
         for key in ("required_auths", "required_posting_auths"):
             values = fields.get(key, [])
             if list(values) != sorted(values):
@@ -174,14 +174,14 @@ def main():
             problems.append(
                 f"UNEXPECTED divergence on {op_type} {str(fields)[:100]}\n"
                 f"    beem {hexlify(expected).decode()}\n"
-                f"    comb {hexlify(actual).decode()}"
+                f"    hivecomb {hexlify(actual).decode()}"
             )
 
     # Public key derivation must agree exactly.
     beem_pub = format(BeemPrivateKey(WIF).pubkey, "STM")
-    comb_pub = str(comb.PrivateKey(WIF).public_key())
+    comb_pub = str(hivecomb.PrivateKey(WIF).public_key())
     if beem_pub != comb_pub:
-        problems.append(f"public key mismatch: beem {beem_pub} vs comb {comb_pub}")
+        problems.append(f"public key mismatch: beem {beem_pub} vs hivecomb {comb_pub}")
 
     # Memos: both implementations must read each other's.
     #
@@ -194,19 +194,19 @@ def main():
     bob_pub = format(bob.pubkey, "STM")
     unambiguous = ["Hello Hive memo", "", "x" * 15, "x" * 16, "unicode é 中文 🐝", "a"]
     for message in unambiguous:
-        comb_memo = comb.encode_memo(WIF, bob_pub, message)
+        comb_memo = hivecomb.encode_memo(WIF, bob_pub, message)
         if beem_decode_memo(bob, comb_memo).lstrip("#") != message:
-            problems.append(f"beem could not read comb's memo for {message!r}")
+            problems.append(f"beem could not read hivecomb's memo for {message!r}")
         beem_memo = beem_encode_memo(BeemPrivateKey(WIF), bob.pubkey, 987654321, message,
                                      prefix="STM")
-        if comb.decode_memo(bob_wif, beem_memo) != message:
-            problems.append(f"comb could not read beem's memo for {message!r}")
+        if hivecomb.decode_memo(bob_wif, beem_memo) != message:
+            problems.append(f"hivecomb could not read beem's memo for {message!r}")
 
-    # And the case where the missing prefix bites: comb must round-trip it, beem
+    # And the case where the missing prefix bites: hivecomb must round-trip it, beem
     # must not.
     for message in ["\x05hello", "\x03abc", "\x01z"]:
-        if comb.decode_memo(bob_wif, comb.encode_memo(WIF, bob_pub, message)) != message:
-            problems.append(f"comb lost the leading byte of {message!r}")
+        if hivecomb.decode_memo(bob_wif, hivecomb.encode_memo(WIF, bob_pub, message)) != message:
+            problems.append(f"hivecomb lost the leading byte of {message!r}")
         beem_memo = beem_encode_memo(BeemPrivateKey(WIF), bob.pubkey, 42, message,
                                      prefix="STM")
         if beem_decode_memo(bob, beem_memo).lstrip("#") == message:
@@ -216,19 +216,19 @@ def main():
 
     # Tier 2: each side must accept the other's signatures.
     for message in [b"hello hive", b"", b"\x00\x01\x02", "unicode é\U0001f41d".encode()]:
-        comb_sig = comb.sign_message(message, WIF)
+        comb_sig = hivecomb.sign_message(message, WIF)
         beem_sig = hexlify(beem_sign(message, WIF)).decode()
         if hexlify(beem_verify(message, bytes.fromhex(comb_sig))).decode() != repr(
             BeemPrivateKey(WIF).pubkey
         ):
-            problems.append(f"beem rejected comb's signature over {message!r}")
-        if not comb.verify_message(message, beem_sig, comb.PrivateKey(WIF).public_key()):
-            problems.append(f"comb rejected beem's signature over {message!r}")
+            problems.append(f"beem rejected hivecomb's signature over {message!r}")
+        if not hivecomb.verify_message(message, beem_sig, hivecomb.PrivateKey(WIF).public_key()):
+            problems.append(f"hivecomb rejected beem's signature over {message!r}")
 
     total = matched + diverged_known + diverged_unknown
     print(f"digest corpus     : {total} cases")
     print(f"  identical       : {matched}")
-    print(f"  known divergence: {diverged_known}  (comb is deliberately correct here)")
+    print(f"  known divergence: {diverged_known}  (hivecomb is deliberately correct here)")
     print(f"  UNEXPECTED      : {diverged_unknown}")
     print(f"public key        : {'match' if beem_pub == comb_pub else 'MISMATCH'}")
     print(f"cross-verification: {'ok' if not any('signature' in p for p in problems) else 'FAILED'}")

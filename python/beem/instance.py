@@ -4,7 +4,7 @@ Drop-in for `beem.instance`. beem's wrappers each reach for a global `Hive`
 when none is passed, so the same mechanism is here.
 
 That global is exactly the design that puts a node call in unexpected places —
-an `Account` object that can fetch on attribute access. `comb`'s wrappers fetch
+an `Account` object that can fetch on attribute access. `hivecomb`'s wrappers fetch
 only when you construct or refresh them, and never while signing.
 """
 

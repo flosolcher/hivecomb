@@ -6,7 +6,7 @@ construction under ``--dry-run``, and the refusals. Commands that read chain
 state are exercised by hand against a live node; these are the ones that must
 keep working without one.
 
-    PYTHONPATH=python:<dir with comb.so> python3 python/test_cli.py
+    PYTHONPATH=python:<dir with hivecomb.so> python3 python/test_cli.py
 """
 
 import io
@@ -17,8 +17,15 @@ import tempfile
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
 
-os.environ.setdefault("COMB_CONFIG", os.path.join(tempfile.mkdtemp(), "config.json"))
-os.environ.setdefault("COMB_ASSUME_YES", "1")
+# Always isolate: `setdefault` would let an inherited COMB_CONFIG leak in, and
+# the config tests below mutate it -- so a developer with the variable exported
+# saw four unrelated failures depending on what they had run before.
+_SCRATCH = tempfile.mkdtemp(prefix="beempy-test-")
+os.environ["COMB_CONFIG"] = os.path.join(_SCRATCH, "config.json")
+os.environ["COMB_WALLET"] = os.path.join(_SCRATCH, "wallet.json")
+os.environ["COMB_ASSUME_YES"] = "1"
+os.environ.pop("COMB_WIF", None)
+os.environ.pop("COMB_WALLET_PASSPHRASE", None)
 
 from beem.cli import COMMANDS, build_parser, main  # noqa: E402
 
@@ -119,7 +126,7 @@ def _():
 @check("about and featureflags run offline")
 def _():
     text = run(["about"])
-    assert "comb-compat" in text and "beeab0de" in text
+    assert "hivecomb-compat" in text and "beeab0de" in text
     text = run(["featureflags"])
     assert "93" in text and "recurrent_transfer" in text
 
@@ -138,16 +145,16 @@ def _():
 
 @check("mnemonic generates a checksummed phrase and all four role keys")
 def _():
-    import comb
+    import hivecomb
 
     text = run(["mnemonic", "--words", "12"])
     phrase = text.splitlines()[0].strip()
     assert len(phrase.split()) == 12
-    assert comb.validate_mnemonic(phrase)
+    assert hivecomb.validate_mnemonic(phrase)
     for role in ("owner", "active", "posting", "memo"):
         assert role in text
     # ...and the keys shown are the ones the phrase derives.
-    expected = str(comb.PrivateKey.from_mnemonic(phrase, "posting", 0).public_key())
+    expected = str(hivecomb.PrivateKey.from_mnemonic(phrase, "posting", 0).public_key())
     assert expected in text
 
 

@@ -1,4 +1,4 @@
-//! Error type for `comb`.
+//! Error type for `hivecomb`.
 //!
 //! # Security invariant
 //!
@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-/// The result type used throughout `comb`.
+/// The result type used throughout `hivecomb`.
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

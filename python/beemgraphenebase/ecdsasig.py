@@ -2,11 +2,11 @@
 
 Drop-in for `beemgraphenebase.ecdsasig`.
 
-Under the hood this is libsecp256k1 via `comb`, with one constant-time code
+Under the hood this is libsecp256k1 via `hivecomb`, with one constant-time code
 path. beem selected between four backends at import time inside a bare
 ``except:`` and, with none installed, fell through to pure-Python variable-time
 ECDSA — the Minerva primitive (findings 3 and 4). There is no backend selection
-here, so ``SECP256K1_MODULE`` is reported as ``"comb"`` for any code that
+here, so ``SECP256K1_MODULE`` is reported as ``"hivecomb"`` for any code that
 inspects it.
 
 Nonces come from RFC 6979 with an incrementing counter, so signatures are
@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import hashlib
 
-import comb
+import hivecomb
 
 from .account import PrivateKey, PublicKey
 
 #: Reported for code that inspects which backend is in use. Always this.
-SECP256K1_MODULE = "comb"
+SECP256K1_MODULE = "hivecomb"
 SECP256K1_AVAILABLE = True
 CRYPTOGRAPHY_AVAILABLE = False
 GMPY2_MODULE = False
@@ -62,7 +62,7 @@ def sign_message(message, wif, hashfn=hashlib.sha256):
             "signature the chain will reject"
         )
     wif = str(wif)
-    return bytes.fromhex(comb.sign_message(_as_bytes(message), wif))
+    return bytes.fromhex(hivecomb.sign_message(_as_bytes(message), wif))
 
 
 def verify_message(message, signature, hashfn=hashlib.sha256, recover_parameter=None):
@@ -93,7 +93,7 @@ def verify_message(message, signature, hashfn=hashlib.sha256, recover_parameter=
     signature = _as_bytes(signature)
     if len(signature) != 65:
         raise ValueError(f"signature must be 65 bytes, got {len(signature)}")
-    key = comb.recover_message(_as_bytes(message), signature.hex())
+    key = hivecomb.recover_message(_as_bytes(message), signature.hex())
     return bytes.fromhex(key.to_hex())
 
 
@@ -111,7 +111,7 @@ def recover_public_key(digest, signature, i, message=None):
     is not a public operation here because recovery alone proves nothing — see
     :func:`verify_message`.
     """
-    from comb_compat import not_implemented
+    from hivecomb_compat import not_implemented
 
     raise not_implemented(
         "recover_public_key",
@@ -121,7 +121,7 @@ def recover_public_key(digest, signature, i, message=None):
 
 def recoverPubkeyParameter(message, digest, signature, pubkey):
     """Not provided; the recovery id is in the signature header byte."""
-    from comb_compat import not_implemented
+    from hivecomb_compat import not_implemented
 
     raise not_implemented(
         "recoverPubkeyParameter",

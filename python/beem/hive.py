@@ -1,6 +1,6 @@
 """The `Hive` class.
 
-Drop-in for `beem.hive.Hive` / `beem.Hive`, backed by `comb`.
+Drop-in for `beem.hive.Hive` / `beem.Hive`, backed by `hivecomb`.
 
 # The one behavioural change that matters
 
@@ -30,9 +30,9 @@ from __future__ import annotations
 import json
 import time
 
-import comb
+import hivecomb
 
-from comb_compat import DEFAULT_NODES, NodeClient, not_implemented
+from hivecomb_compat import DEFAULT_NODES, NodeClient, not_implemented
 
 __all__ = ["Hive", "Steem"]
 
@@ -65,7 +65,7 @@ class Hive:
         self.nobroadcast = nobroadcast
         self.expiration = expiration
         self.chain = chain
-        self._tapos = comb.TaposCache(max_age_seconds=tapos_max_age)
+        self._tapos = hivecomb.TaposCache(max_age_seconds=tapos_max_age)
         self.wifs = self._collect_keys(keys)
         self._wallet = kwargs.pop("wallet", None)
 
@@ -140,7 +140,7 @@ class Hive:
         A **local constant**, not a node lookup. Use :meth:`verify_chain_id` to
         check a node agrees.
         """
-        return comb.chain_id(self.chain)
+        return hivecomb.chain_id(self.chain)
 
     def verify_chain_id(self):
         """Check the node's reported chain id against the compiled-in constant.
@@ -196,7 +196,7 @@ class Hive:
                 "no signing keys; pass keys=[wif] to Hive() or to this call"
             )
 
-        signed = comb.sign_transaction(
+        signed = hivecomb.sign_transaction(
             operations,
             self._block_ref(),
             wifs,
@@ -217,7 +217,7 @@ class Hive:
         raise not_implemented(
             "Hive.sign on a prebuilt transaction",
             "Build and sign in one step with finalizeOp, or use "
-            "comb.sign_transaction directly.",
+            "hivecomb.sign_transaction directly.",
         )
 
     # -- operations beem had ---------------------------------------------
@@ -490,13 +490,13 @@ class Hive:
 class Steem(Hive):
     """Steem is not supported.
 
-    beem targeted both chains. `comb` targets Hive: the Steem entry in beem's
+    beem targeted both chains. `hivecomb` targets Hive: the Steem entry in beem's
     chain table carries the all-zero chain id, which is the same trap as
     finding 5.
     """
 
     def __init__(self, *args, **kwargs):
-        raise not_implemented("Steem", "comb targets Hive.")
+        raise not_implemented("Steem", "hivecomb targets Hive.")
 
 
 #: Constructor arguments accepted for compatibility and ignored, because they
@@ -518,7 +518,7 @@ _IGNORED_KWARGS = {
 
 
 def _as_operation(op):
-    """Normalise one operation into the ``(name, fields)`` pair comb takes."""
+    """Normalise one operation into the ``(name, fields)`` pair hivecomb takes."""
     if isinstance(op, tuple) and len(op) == 2:
         return (op[0], dict(op[1]))
     if isinstance(op, list) and len(op) == 2:

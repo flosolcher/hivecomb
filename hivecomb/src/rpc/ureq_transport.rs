@@ -13,7 +13,7 @@ impl Transport for UreqTransport {
     fn post_json(&self, url: &str, body: &str, timeout: Duration) -> Result<String> {
         let agent = ureq::AgentBuilder::new()
             .timeout(timeout)
-            .user_agent(concat!("comb/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("hivecomb/", env!("CARGO_PKG_VERSION")))
             .build();
         let response = agent
             .post(url)

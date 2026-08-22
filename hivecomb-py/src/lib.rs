@@ -1,4 +1,4 @@
-//! Python bindings for `comb`.
+//! Python bindings for `hivecomb`.
 //!
 //! The surface is deliberately narrow and mirrors what a Hive application actually
 //! does: hold a key, sign a login handshake, build and sign an operation, cache a
@@ -26,19 +26,19 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
 
-use comb_core::chains::Chain as RsChain;
-use comb_core::keys::{PrivateKey as RsPrivateKey, PublicKey as RsPublicKey};
-use comb_core::operations::Operation as RsOperation;
-use comb_core::sign as rs_sign;
-use comb_core::tapos::TaposCache as RsTaposCache;
-use comb_core::transaction::{BlockRef as RsBlockRef, Transaction as RsTransaction};
-use comb_core::types::PointInTime;
-use comb_core::Error as RsError;
+use hivecomb_core::chains::Chain as RsChain;
+use hivecomb_core::keys::{PrivateKey as RsPrivateKey, PublicKey as RsPublicKey};
+use hivecomb_core::operations::Operation as RsOperation;
+use hivecomb_core::sign as rs_sign;
+use hivecomb_core::tapos::TaposCache as RsTaposCache;
+use hivecomb_core::transaction::{BlockRef as RsBlockRef, Transaction as RsTransaction};
+use hivecomb_core::types::PointInTime;
+use hivecomb_core::Error as RsError;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Map a `comb` error onto a Python exception.
+/// Map a `hivecomb` error onto a Python exception.
 ///
 /// `ValueError` for anything the caller could have supplied differently,
 /// `RuntimeError` for environmental failures. Neither ever carries key material.
@@ -63,7 +63,7 @@ fn chain_from_name(name: Option<&str>) -> PyResult<RsChain> {
 // ---------------------------------------------------------------------------
 
 /// A Hive private key.
-#[pyclass(name = "PrivateKey", module = "comb")]
+#[pyclass(name = "PrivateKey", module = "hivecomb")]
 #[derive(Clone)]
 pub struct PyPrivateKey {
     inner: RsPrivateKey,
@@ -119,8 +119,8 @@ impl PyPrivateKey {
     #[staticmethod]
     #[pyo3(signature = (account, role, password))]
     fn from_password(account: &str, role: &str, password: &str) -> PyResult<Self> {
-        let role: comb_core::keys::Role = role.parse().map_err(to_py_err)?;
-        let derived = comb_core::keys::PasswordKey::new(account, role, password, true)
+        let role: hivecomb_core::keys::Role = role.parse().map_err(to_py_err)?;
+        let derived = hivecomb_core::keys::PasswordKey::new(account, role, password, true)
             .map_err(to_py_err)?
             .private_key()
             .map_err(to_py_err)?;
@@ -131,7 +131,7 @@ impl PyPrivateKey {
     #[staticmethod]
     #[pyo3(signature = (phrase, sequence = 0))]
     fn from_brain_key(phrase: &str, sequence: u32) -> PyResult<Self> {
-        let derived = comb_core::keys::BrainKey::new(phrase, sequence)
+        let derived = hivecomb_core::keys::BrainKey::new(phrase, sequence)
             .map_err(to_py_err)?
             .private_key()
             .map_err(to_py_err)?;
@@ -148,10 +148,11 @@ impl PyPrivateKey {
         key_index: u32,
         passphrase: &str,
     ) -> PyResult<Self> {
-        let role: comb_core::keys::Role = role.parse().map_err(to_py_err)?;
-        let phrase = comb_core::bip39::Mnemonic::parse(mnemonic).map_err(to_py_err)?;
+        let role: hivecomb_core::keys::Role = role.parse().map_err(to_py_err)?;
+        let phrase = hivecomb_core::bip39::Mnemonic::parse(mnemonic).map_err(to_py_err)?;
         let seed = phrase.to_seed(passphrase);
-        let master = comb_core::bip32::ExtendedPrivateKey::from_seed(&*seed).map_err(to_py_err)?;
+        let master =
+            hivecomb_core::bip32::ExtendedPrivateKey::from_seed(&*seed).map_err(to_py_err)?;
         let derived = master
             .derive_hive_role(role, account_index, key_index)
             .map_err(to_py_err)?;
@@ -160,7 +161,7 @@ impl PyPrivateKey {
 
     /// Encrypt this key under a passphrase, BIP-38 style. Returns a `6P...` string.
     fn to_bip38(&self, passphrase: &str) -> PyResult<String> {
-        comb_core::bip38::encrypt(&self.inner, passphrase)
+        hivecomb_core::bip38::encrypt(&self.inner, passphrase)
             .map(|s| s.to_string())
             .map_err(to_py_err)
     }
@@ -169,7 +170,7 @@ impl PyPrivateKey {
     #[staticmethod]
     fn from_bip38(encrypted: &str, passphrase: &str) -> PyResult<Self> {
         Ok(PyPrivateKey {
-            inner: comb_core::bip38::decrypt(encrypted, passphrase).map_err(to_py_err)?,
+            inner: hivecomb_core::bip38::decrypt(encrypted, passphrase).map_err(to_py_err)?,
         })
     }
 
@@ -199,7 +200,7 @@ impl PyPrivateKey {
 }
 
 /// A Hive public key.
-#[pyclass(name = "PublicKey", module = "comb")]
+#[pyclass(name = "PublicKey", module = "hivecomb")]
 #[derive(Clone)]
 pub struct PyPublicKey {
     inner: RsPublicKey,
@@ -312,7 +313,7 @@ fn verify_message(
 // ---------------------------------------------------------------------------
 
 /// A reference to a recent block, binding a transaction to a fork.
-#[pyclass(name = "BlockRef", module = "comb")]
+#[pyclass(name = "BlockRef", module = "hivecomb")]
 #[derive(Clone, Copy)]
 pub struct PyBlockRef {
     inner: RsBlockRef,
@@ -373,7 +374,7 @@ impl PyBlockRef {
 /// reference raises `RuntimeError` rather than returning something unusable — signing
 /// against an expired reference produces a transaction the relay accepts and the chain
 /// rejects, which is a silent failure.
-#[pyclass(name = "TaposCache", module = "comb")]
+#[pyclass(name = "TaposCache", module = "hivecomb")]
 pub struct PyTaposCache {
     inner: Arc<RsTaposCache>,
 }
@@ -433,9 +434,9 @@ impl PyTaposCache {
 /// scrypt for the passphrase, AES-256-GCM for every entry, so a tampered file
 /// fails authentication rather than decrypting to something. beem's used one
 /// unsalted SHA-256 and AES-CBC with no MAC.
-#[pyclass(name = "Wallet", module = "comb")]
+#[pyclass(name = "Wallet", module = "hivecomb")]
 pub struct PyWallet {
-    inner: comb_core::wallet::Wallet,
+    inner: hivecomb_core::wallet::Wallet,
 }
 
 #[pymethods]
@@ -444,7 +445,7 @@ impl PyWallet {
     #[staticmethod]
     fn create(path: &str, passphrase: &str) -> PyResult<Self> {
         Ok(PyWallet {
-            inner: comb_core::wallet::Wallet::create(path, passphrase).map_err(to_py_err)?,
+            inner: hivecomb_core::wallet::Wallet::create(path, passphrase).map_err(to_py_err)?,
         })
     }
 
@@ -452,7 +453,7 @@ impl PyWallet {
     #[staticmethod]
     fn open(path: &str) -> PyResult<Self> {
         Ok(PyWallet {
-            inner: comb_core::wallet::Wallet::open(path).map_err(to_py_err)?,
+            inner: hivecomb_core::wallet::Wallet::open(path).map_err(to_py_err)?,
         })
     }
 
@@ -481,7 +482,7 @@ impl PyWallet {
     ) -> PyResult<String> {
         let key = RsPrivateKey::parse(wif).map_err(to_py_err)?;
         let role = role
-            .map(|r| r.parse::<comb_core::keys::Role>())
+            .map(|r| r.parse::<hivecomb_core::keys::Role>())
             .transpose()
             .map_err(to_py_err)?;
         let public = self.inner.add_key(&key, account, role).map_err(to_py_err)?;
@@ -511,7 +512,7 @@ impl PyWallet {
 
     /// The WIF for an account and role.
     fn get_key_for_role(&self, account: &str, role: &str) -> PyResult<String> {
-        let role: comb_core::keys::Role = role.parse().map_err(to_py_err)?;
+        let role: hivecomb_core::keys::Role = role.parse().map_err(to_py_err)?;
         Ok(self
             .inner
             .key_for_role(account, role)
@@ -601,7 +602,7 @@ fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     )))
 }
 
-/// Convert a Python operation description into a `comb` operation.
+/// Convert a Python operation description into a `hivecomb` operation.
 ///
 /// Accepts `("custom_json", {...})` and `{"type": "custom_json", "value": {...}}`.
 /// All 48 signable operations work, because this routes through the same JSON
@@ -769,8 +770,8 @@ fn encode_memo(
     let from = RsPrivateKey::parse(from_wif).map_err(to_py_err)?;
     let to = RsPublicKey::from_prefixed_any(to_public_key).map_err(to_py_err)?;
     match nonce {
-        Some(n) => comb_core::memo::encode_with_nonce(&from, &to, message, n),
-        None => comb_core::memo::encode(&from, &to, message),
+        Some(n) => hivecomb_core::memo::encode_with_nonce(&from, &to, message, n),
+        None => hivecomb_core::memo::encode(&from, &to, message),
     }
     .map_err(to_py_err)
 }
@@ -783,13 +784,13 @@ fn encode_memo(
 #[pyo3(signature = (wif, memo))]
 fn decode_memo(wif: &str, memo: &str) -> PyResult<String> {
     let key = RsPrivateKey::parse(wif).map_err(to_py_err)?;
-    comb_core::memo::decode(&key, memo).map_err(to_py_err)
+    hivecomb_core::memo::decode(&key, memo).map_err(to_py_err)
 }
 
 /// Whether a memo field holds an encrypted memo.
 #[pyfunction]
 fn is_encrypted_memo(memo: &str) -> bool {
-    comb_core::memo::is_encrypted(memo)
+    hivecomb_core::memo::is_encrypted(memo)
 }
 
 /// Recover the public key that signed a 32-byte digest, verifying as it goes.
@@ -837,7 +838,7 @@ fn check_authority(
     public_keys: Vec<String>,
 ) -> PyResult<PyObject> {
     let raw = py_to_json(authority.as_any())?;
-    let auth: comb_core::authority::Authority =
+    let auth: hivecomb_core::authority::Authority =
         serde_json::from_value(raw).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let keys: Vec<RsPublicKey> = public_keys
         .iter()
@@ -874,7 +875,7 @@ fn check_authority(
 #[pyfunction]
 #[pyo3(signature = (strength = 256))]
 fn generate_mnemonic(strength: usize) -> PyResult<String> {
-    comb_core::bip39::Mnemonic::generate(strength)
+    hivecomb_core::bip39::Mnemonic::generate(strength)
         .map(|m| m.phrase().to_string())
         .map_err(to_py_err)
 }
@@ -882,7 +883,7 @@ fn generate_mnemonic(strength: usize) -> PyResult<String> {
 /// Validate a BIP-39 mnemonic's checksum and word list.
 #[pyfunction]
 fn validate_mnemonic(mnemonic: &str) -> bool {
-    comb_core::bip39::Mnemonic::parse(mnemonic).is_ok()
+    hivecomb_core::bip39::Mnemonic::parse(mnemonic).is_ok()
 }
 
 /// The transaction id of an unsigned operation set, without signing it.
@@ -919,7 +920,7 @@ fn chain_id(chain: Option<&str>) -> PyResult<String> {
 }
 
 #[pymodule]
-fn comb(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyPrivateKey>()?;
     m.add_class::<PyPublicKey>()?;

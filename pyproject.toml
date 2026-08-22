@@ -3,7 +3,7 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "comb"
+name = "hivecomb"
 description = "Hive blockchain keys, serialization and offline transaction signing, in Rust."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -23,12 +23,12 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Repository = "https://github.com/flosolcher/comb-rs"
-Issues = "https://github.com/flosolcher/comb-rs/issues"
+Repository = "https://github.com/flosolcher/hivecomb"
+Issues = "https://github.com/flosolcher/hivecomb/issues"
 
 [tool.maturin]
-manifest-path = "comb-py/Cargo.toml"
-module-name = "comb"
+manifest-path = "hivecomb-py/Cargo.toml"
+module-name = "hivecomb"
 # abi3 so one wheel per platform covers CPython 3.8+.
 features = ["pyo3/extension-module"]
 strip = true

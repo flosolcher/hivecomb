@@ -3,7 +3,7 @@
 Everything below was read out of the **installed distribution** at
 `beem 0.24.26` (site-packages), not from memory or from the upstream repository, so
 line numbers refer to what actually ships on PyPI. Each finding names the file, the
-line, what the code does, why it matters, and where `comb` addresses it.
+line, what the code does, why it matters, and where `hivecomb` addresses it.
 
 `beem` is unmaintained: its trove classifiers stop at `Programming Language :: Python
 :: 3.9`, its status is `Development Status :: 4 - Beta`, and its last release was
@@ -73,7 +73,7 @@ HF25 — makes every transaction serialize under the wrong operation id. The sig
 is well-formed; it just authorises a different operation than intended, and the chain
 rejects it. A user following the file's own instruction gets silent, total breakage.
 
-**In `comb`:** operation ids are a Rust `enum` with explicit discriminants and an
+**In `hivecomb`:** operation ids are a Rust `enum` with explicit discriminants and an
 exhaustive round-trip test against the id list from hived's
 `libraries/protocol/include/hive/protocol/operations.hpp`. There is no second list to
 fall out of sync.
@@ -104,7 +104,7 @@ beem; `producer_reward` is 64 on chain and 62 in beem. Any code using
 `getOperationNameForId`, or passing an operation-id bitmask to
 `account_history_api.get_account_history`, reads the wrong operations.
 
-**In `comb`:** the full 0–92 table, generated against hived's `operations.hpp`, with
+**In `hivecomb`:** the full 0–92 table, generated against hived's `operations.hpp`, with
 both spellings accepted on input and `recurrent_transfer` used on the wire.
 
 ---
@@ -138,7 +138,7 @@ downstream project is to install `cryptography` *purely to change an import orde
 with no test able to detect its loss. The `except:` on line 22 is bare, so it also
 swallows `KeyboardInterrupt` and `SystemExit`.
 
-**In `comb`:** one backend, libsecp256k1 via the `secp256k1` crate, constant-time by
+**In `hivecomb`:** one backend, libsecp256k1 via the `secp256k1` crate, constant-time by
 construction. There is no selection order to get wrong.
 
 ---
@@ -166,7 +166,7 @@ randomness; the extra-entropy field exists for domain separation, not for a cloc
 This path is reached only on the pure-Python backend — the same one reached by
 [finding 3](#3).
 
-**In `comb`:** RFC 6979 with an incrementing counter in the extra-entropy field, the
+**In `hivecomb`:** RFC 6979 with an incrementing counter in the extra-entropy field, the
 same construction libsecp256k1 exposes as `ndata`. Signing is deterministic and
 reproducible.
 
@@ -199,7 +199,7 @@ path.
 Worth noting: the chain id is a **compile-time constant**. This network call exists
 partly to look up something that never changes between hardforks.
 
-**In `comb`:** `chains::HIVE_CHAIN_ID` is a constant; `Chain::from_name("HIVE")`
+**In `hivecomb`:** `chains::HIVE_CHAIN_ID` is a constant; `Chain::from_name("HIVE")`
 resolves to the live post-HF24 id; there is no fallback for an unknown chain; and
 `ChainId::is_all_zero()` lets a caller refuse the legacy id explicitly.
 
@@ -236,7 +236,7 @@ That makes this an API-shape defect rather than an exploitable hole, which is wh
 Medium rather than High. [Finding 7](#7) — where the same reasoning is applied to four
 recovery candidates at once and the results accumulated — *is* a genuine bug.
 
-**In `comb`:** the two operations are separate and honestly named. `sign::recover`
+**In `hivecomb`:** the two operations are separate and honestly named. `sign::recover`
 returns the signing key and documents that it proves only well-formedness;
 `sign::verify` takes the key you expect and compares. Malformed signatures are rejected
 by both.
@@ -269,7 +269,7 @@ Relatedly, `verify(chain=None)` executes a bare `raise` with no active exception
 raises `RuntimeError: No active exception to reraise` rather than saying the chain
 argument is missing.
 
-**In `comb`:** verification recovers exactly one key, verifies it, and compares it. The
+**In `hivecomb`:** verification recovers exactly one key, verifies it, and compares it. The
 recovery id comes from the signature's own header byte, which is range-checked.
 
 ---
@@ -300,7 +300,7 @@ expects** — the transaction is signed over content that is not what was submit
 This looks like a Python-2-era escaping hack that lost its backslashes and was never
 exercised, because control characters are rare in practice.
 
-**In `comb`:** `types::write_string` writes a varint length and the raw UTF-8 bytes,
+**In `hivecomb`:** `types::write_string` writes a varint length and the raw UTF-8 bytes,
 with regression tests pinning `\u{1}`, `\u{8}` and `\u{c}` to one byte each.
 
 ---
@@ -330,7 +330,7 @@ For a value that is the entire security of an account, "the default rendering is
 secret" is the wrong default. Python `str` is also immutable and interned, so the key
 cannot be wiped from memory even in principle.
 
-**In `comb`:** `Debug` and `Display` for `PrivateKey` both print
+**In `hivecomb`:** `Debug` and `Display` for `PrivateKey` both print
 `PrivateKey(<redacted>)`. Disclosure requires the explicitly-named `to_wif()` or
 `expose_secret()`, both of which return `Zeroizing` wrappers that wipe on drop. Key
 bytes never appear in an `Error`. There is a test asserting the rendered form contains
@@ -356,7 +356,7 @@ error rather than a wrong key. But `base58decode` is also called directly —
 `bip38.decrypt` (`bip38.py:99`) and `extract_memo_data` (`beembase/memo.py`) both use
 it with no checksum verification at all.
 
-**In `comb`:** `base58::decode` rejects any character outside the alphabet, and both
+**In `hivecomb`:** `base58::decode` rejects any character outside the alphabet, and both
 checksum schemes compare in constant time.
 
 ---
@@ -383,7 +383,7 @@ compressed-form key is accepted and produces a key for a different address than 
 user expects. The dispatch also tests `all(c in string.hexdigits for c in data)` first,
 which is vacuously true for the empty string.
 
-**In `comb`:** `base58::decode_check_version` requires the exact version byte;
+**In `hivecomb`:** `base58::decode_check_version` requires the exact version byte;
 `PrivateKey::from_wif` requires a leading `5` and rejects `K`/`L` with an error naming
 the reason.
 
@@ -413,7 +413,7 @@ a short or long field with no complaint.
 (The explicit `raise AssertionError()` calls elsewhere in `base58.py` are *not*
 affected by `-O`; only the `assert` statement form is.)
 
-**In `comb`:** all validation is ordinary checked control flow returning `Result`.
+**In `hivecomb`:** all validation is ordinary checked control flow returning `Result`.
 Rust has no equivalent of `-O` stripping.
 
 ---
@@ -432,7 +432,7 @@ On the libsecp256k1 backend the failure surfaces later as an opaque error; on th
 pure-Python backend the arithmetic proceeds and produces a key that does not correspond
 to the intended point.
 
-**In `comb`:** `PrivateKey::from_bytes` constructs a `secp256k1::SecretKey`, which
+**In `hivecomb`:** `PrivateKey::from_bytes` constructs a `secp256k1::SecretKey`, which
 enforces the range, and tests pin the rejection of zero, of the curve order, and of
 all-`0xff`.
 
@@ -466,7 +466,7 @@ The cost of (1) and (2) is entropy. A uniform draw from 49744 words is 15.60 bit
 For a value that is the sole backup of an account, advertised entropy that the
 generator does not deliver is the wrong direction to err in.
 
-**In `comb`:** `BrainKey::suggest` uses `OsRng` with rejection sampling, so selection
+**In `hivecomb`:** `BrainKey::suggest` uses `OsRng` with rejection sampling, so selection
 is exactly uniform, and refuses fewer than 12 words.
 
 ---
@@ -498,10 +498,10 @@ is exactly uniform, and refuses fewer than 12 words.
 * A comment in `decode_memo` concedes an unfixed bug: `# remove the varint prefix
   (FIXME, long messages!)`.
 
-This is the memo format Hive defines, so `comb` must remain wire-compatible. What it
+This is the memo format Hive defines, so `hivecomb` must remain wire-compatible. What it
 can do is fail closed.
 
-**In `comb`:** padding is validated and a bad pad is an error; the nonce is generated
+**In `hivecomb`:** padding is validated and a bad pad is an error; the nonce is generated
 from the OS CSPRNG unless explicitly supplied; the key checksum is compared in constant
 time; and the API documents plainly that Hive memo encryption provides confidentiality
 but **not** integrity.
@@ -552,7 +552,7 @@ HP at typical ratios. Hive's largest accounts hold more than that, so
 account can silently serialize a different amount than was requested. The transaction
 is signed over the wrong number.
 
-**In `comb`:** amounts are integers of the asset's smallest unit throughout — the same
+**In `hivecomb`:** amounts are integers of the asset's smallest unit throughout — the same
 representation the chain uses — parsed from decimal strings without any float step. All
 five rows above are exact.
 
@@ -579,7 +579,7 @@ match — fragile, and locale-dependent.
 An expiration that is silently early expires the transaction; one that is silently late
 is rejected for exceeding the chain's maximum expiration window.
 
-**In `comb`:** `types::PointInTime` holds `u32` seconds since the Unix epoch, parses
+**In `hivecomb`:** `types::PointInTime` holds `u32` seconds since the Unix epoch, parses
 strictly, accepts a trailing `Z`, and **rejects** any other offset rather than guessing.
 
 ---
@@ -598,7 +598,7 @@ if int(self.operations()[key]) is int(i):
 (−5 to 256) — an implementation detail, not a language guarantee. Operation ids happen
 to stay under 256 today. It also emits a `SyntaxWarning` on modern Python.
 
-**In `comb`:** operation ids are an `enum`; the comparison is exhaustive matching.
+**In `hivecomb`:** operation ids are an `enum`; the comparison is exhaustive matching.
 
 ---
 
@@ -642,7 +642,7 @@ This is **Hive's scheme**, not beem's invention, and cannot be changed without b
 compatibility. It is listed because it is a real property of any key derived this way
 and deserves to be visible.
 
-**In `comb`:** the derivation is reproduced exactly, but `PasswordKey::new` takes a
+**In `hivecomb`:** the derivation is reproduced exactly, but `PasswordKey::new` takes a
 required `i_understand_this_is_unstretched: bool` argument, so choosing it is explicit
 at the call site, and the module documentation states the cost plainly.
 
@@ -677,7 +677,7 @@ whatever order the caller happened to build the list in.
 This was found by the differential harness rather than by reading: 26 of 134 corpus
 cases diverged, and every one of them was an unsorted auth list.
 
-**In `comb`:** `write_sorted_account_set` sorts and rejects duplicates, and the same is
+**In `hivecomb`:** `write_sorted_account_set` sorts and rejects duplicates, and the same is
 done for `proposal_ids` (also a `flat_set`) and for authority key/account maps
 (`flat_map` — see `authority.rs`, where beem additionally sorted keys by their
 **ripemd160 address** rather than by the serialized key). Tests assert that input order
@@ -723,7 +723,7 @@ what the caller asked for.
 `Escrow_transfer` and `Escrow_approve` are correct, which is what makes this
 particularly easy to miss: two of the four escrow operations are right.
 
-**In `comb`:** all eight and all five fields respectively, with tests asserting the
+**In `hivecomb`:** all eight and all five fields respectively, with tests asserting the
 serialized length and that `agent` actually appears in the bytes.
 
 ---
@@ -760,7 +760,7 @@ different operation) uses.
 
 The output cannot be deserialized as a `custom_binary_operation` under any reading.
 
-**In `comb`:** all six fields, with the three `flat_set` members sorted and
+**In `hivecomb`:** all six fields, with the three `flat_set` members sorted and
 deduplicated per [finding 21](#21), and `id` length-checked against
 `custom_id_type`'s 32-byte limit.
 
@@ -807,7 +807,7 @@ catch → raw` fallback happen to fire. The failure is a message whose **first b
 as a varint, equals the length of the rest** — then the prefix is indistinguishable from
 data, and the leading byte is consumed as a length:
 
-| message | beem → beem | beem → comb | comb → comb |
+| message | beem → beem | beem → hivecomb | hivecomb → hivecomb |
 |---|---|---|---|
 | `"\x05hello"` | `"hello"` | `"hello"` | `"\x05hello"` |
 | `"\x03abc"` | `"abc"` | `"abc"` | `"\x03abc"` |
@@ -816,13 +816,13 @@ data, and the leading byte is consumed as a length:
 
 beem loses the byte **against its own encoder**, and so does every other client.
 
-**In `comb`:** the prefix is written, as the ecosystem does, so the length is
+**In `hivecomb`:** the prefix is written, as the ecosystem does, so the length is
 unambiguous. [`memo::decode`] also accepts memos with no prefix, so anything beem
 produced can still be read.
 
 Note the residual ambiguity is inherent: a beem-written memo that begins with a
-length-like byte cannot be told apart from a correctly-prefixed one. `comb` resolves it
-the way every other client does, which means such a memo decodes the same way in `comb`
+length-like byte cannot be told apart from a correctly-prefixed one. `hivecomb` resolves it
+the way every other client does, which means such a memo decodes the same way in `hivecomb`
 as it does in Keychain — consistent, even where it is not what beem's author intended.
 
 ---
@@ -865,7 +865,7 @@ Three problems, all in the same six lines:
 For a file whose entire purpose is to hold private keys at rest, all three matter. The
 IV is random, which is the one thing done right.
 
-**In `comb`:** `wallet::Wallet` uses **scrypt** (`N = 2^15, r = 8, p = 1`, random
+**In `hivecomb`:** `wallet::Wallet` uses **scrypt** (`N = 2^15, r = 8, p = 1`, random
 16-byte salt per wallet) to derive the key, and **AES-256-GCM** for every ciphertext, so
 a tampered file fails authentication rather than decrypting to something. The file is
 written to a temporary path and renamed, so an interrupted write cannot truncate a key
@@ -897,7 +897,7 @@ compares `sha256(chain_id || serialized_tx)` byte for byte. Current result:
 ```
 digest corpus     : 134 cases
   identical       : 108
-  known divergence: 26  (comb is deliberately correct here)
+  known divergence: 26  (hivecomb is deliberately correct here)
   UNEXPECTED      : 0
 public key        : match
 cross-verification: ok
@@ -921,7 +921,7 @@ The corpus is a floor, not a ceiling. It covers varint boundaries (payloads past
 
 Findings were read from the installed source. Findings 1, 2, 8, 10, 11, 12, 13, 14, 18
 and 19 are mechanically verifiable from the code alone and are covered by regression
-tests in `comb`. Findings 22 and 23 are field-by-field
+tests in `hivecomb`. Findings 22 and 23 are field-by-field
 comparisons against hived's `hive_operations.hpp` and are covered by regression tests.
 Findings **16 and 21 were confirmed empirically** by running both
 implementations against each other, with the measurements shown above. Findings 3, 4,

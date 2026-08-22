@@ -1,6 +1,6 @@
 """Encrypted memos.
 
-Drop-in for `beem.memo.Memo`, backed by `comb`.
+Drop-in for `beem.memo.Memo`, backed by `hivecomb`.
 
 **Fixed relative to beem.** Every reference implementation writes the memo as a
 Graphene string — a varint length, then the UTF-8 bytes — before encrypting.
@@ -16,7 +16,7 @@ ciphertext, and there is no MAC. That is Hive's design, not a choice made here.
 
 from __future__ import annotations
 
-import comb
+import hivecomb
 
 from .account import Account
 from .exceptions import MissingKeyError, WrongMemoKey
@@ -60,7 +60,7 @@ class Memo:
         sender_wif = wif or _first_key(self.blockchain)
         if sender_wif is None:
             raise MissingKeyError("no memo key available to encrypt with")
-        encrypted = comb.encode_memo(str(sender_wif), recipient, str(memo), nonce)
+        encrypted = hivecomb.encode_memo(str(sender_wif), recipient, str(memo), nonce)
         if return_enc_memo_only:
             return encrypted
         return {"message": encrypted, "from": recipient, "to": recipient}
@@ -70,12 +70,12 @@ class Memo:
         if not memo:
             return memo
         text = memo["message"] if isinstance(memo, dict) else str(memo)
-        if not comb.is_encrypted_memo(text):
+        if not hivecomb.is_encrypted_memo(text):
             return text
         key = wif or _first_key(self.blockchain)
         if key is None:
             raise MissingKeyError("no memo key available to decrypt with")
-        return comb.decode_memo(str(key), text)
+        return hivecomb.decode_memo(str(key), text)
 
     def __repr__(self):
         return f"<Memo {self.from_account} -> {self.to_account}>"

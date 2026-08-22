@@ -2,7 +2,7 @@
 
 Drop-in for `beembase.operations`. Each class takes the same keyword arguments
 beem's did and renders to the ``[name, {fields}]`` JSON form, which is what
-`comb` signs and what `network_broadcast_api` accepts.
+`hivecomb` signs and what `network_broadcast_api` accepts.
 
 beem's classes were serializers: they produced Graphene binary directly. Here
 serialization happens in Rust, so these are constructors and validators only.
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 
-from comb_compat import not_implemented
+from hivecomb_compat import not_implemented
 
 from .operationids import getOperationIdForName, isVirtualOperation
 
@@ -130,7 +130,7 @@ class Operation:
         raise not_implemented(
             f"bytes({type(self).__name__})",
             "Graphene serialization happens in Rust. Sign with Hive.finalizeOp "
-            "or comb.sign_transaction, which serialize correctly.",
+            "or hivecomb.sign_transaction, which serialize correctly.",
         )
 
 
