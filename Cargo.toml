@@ -26,4 +26,5 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 scrypt = { version = "0.11", default-features = false }
 pbkdf2 = { version = "0.12", default-features = false }
+unicode-normalization = "0.1"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }

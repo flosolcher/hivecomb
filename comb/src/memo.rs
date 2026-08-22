@@ -88,7 +88,7 @@ fn derive(secret: &[u8; 64], nonce: u64) -> (Zeroizing<[u8; 32]>, [u8; 16], u32)
     let mut iv = [0u8; 16];
     iv.copy_from_slice(&encryption_key[32..48]);
 
-    let digest = Sha256::digest(&*encryption_key);
+    let digest = Sha256::digest(*encryption_key);
     let check = u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]]);
     (key, iv, check)
 }

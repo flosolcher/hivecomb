@@ -27,7 +27,6 @@
 
 use crate::error::{Error, Result};
 use crate::keys::PublicKey;
-use crate::reader::GrapheneDeserialize;
 use crate::types::{write_array, write_u16, write_u32, GrapheneSerialize};
 
 /// A weighted account entry.

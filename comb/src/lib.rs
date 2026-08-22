@@ -33,6 +33,12 @@
 pub mod asset;
 pub mod authority;
 pub mod base58;
+#[cfg(feature = "bip32")]
+pub mod bip32;
+#[cfg(feature = "bip38")]
+pub mod bip38;
+#[cfg(feature = "bip32")]
+pub mod bip39;
 pub mod chains;
 pub mod error;
 pub mod keys;
