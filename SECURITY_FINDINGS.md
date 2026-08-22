@@ -21,10 +21,36 @@ obtained from a running system, no credentials or user data were involved, and n
 working exploit is included or withheld.
 
 beem is **unmaintained**: 0.24.26 is its last release, its trove classifiers stop at
-Python 3.9, and its status is still `Development Status :: 4 - Beta`. There is no
-upstream that will ship a fix, so the usual sequence — report privately, wait, then
-disclose — has no counterparty. Holding these back would protect nobody and leave the
-people still running beem unable to judge their own exposure.
+Python 3.9, and its status is still `Development Status :: 4 - Beta`. Holding these
+findings back would protect nobody and would leave the people still running beem unable
+to judge their own exposure.
+
+### The findings outlive beem, so there *is* someone to tell
+
+An earlier draft of this section argued that publishing was the only option because
+there was no maintainer to report to. That was incomplete, and the correction matters.
+
+[`hive-nectar`](https://github.com/srbde/hive-nectar) is an actively maintained Python
+SDK — version 1.0.7, last commit 2026-07-30 — that describes itself as beem's
+"opinionated spiritual successor" and carries beem's package layout forward
+(`nectarbase`, `nectargraphenebase`, and the rest). Audited against this document at
+that commit, it has **fixed the entire crypto-critical set**: the missing comma
+([1](#1)), the operation-id table ([2](#2) — `collateralized_convert` is 48,
+`recurrent_transfer` is 49, and the virtual operations are renumbered correctly), the
+pure-Python ECDSA fall-through ([3](#3)), the wall-clock nonce ([4](#4)), the all-zero
+chain id ([5](#5) — properly, by making `known_chains["HIVE"]` the real post-HF24 value
+and deleting the `HIVE2` trap), the discarded verification result ([6](#6)), the
+timezone handling ([17](#17)) and the triplicated `init_aes` ([19](#19)).
+
+Fourteen findings do carry forward, including the one with the widest blast radius:
+`unicodify` ([8](#8)) still mangles control characters into literal text, and it still
+does so on the bytes that get **signed**. Also present: [9](#9), [10](#10), [11](#11),
+[12](#12), [14](#14), [15](#15), [16](#16), [18](#18), [21](#21), [22](#22), [23](#23),
+[24](#24) and [25](#25).
+
+So this document is not only an autopsy. Where a finding survives into nectar it is
+actionable, and it should be reported there rather than merely published here. That is
+the sequence being followed.
 
 Most of what follows is **correctness**, not security: wrong operation ids, dropped
 fields, mangled strings. Four findings are security-relevant and worth naming plainly
