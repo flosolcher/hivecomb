@@ -188,6 +188,16 @@ class Hive:
 
         ``ops`` is a single ``(name, fields)`` pair or a list of them. beem also
         accepted its own operation objects; pass plain tuples or dicts here.
+
+        ``permission`` selects which of the account's keys signs, and is only
+        consulted when no key was passed to this call or to the constructor --
+        an explicit key always wins over one found in the wallet. Every
+        operation's correct role is checked against hived itself by
+        ``tests/hived_authority_oracle.py``.
+
+        Note that hived does not reject a transaction for carrying more
+        signatures than it needs, so passing several keys is harmless; it is
+        signing with the *wrong* one that fails.
         """
         if isinstance(ops, tuple) and len(ops) == 2 and isinstance(ops[0], str):
             ops = [ops]
@@ -197,8 +207,12 @@ class Hive:
 
         wifs = kwargs.pop("keys", None) or self.wifs
         if not wifs:
+            wifs = self._wallet_key_for(account, permission)
+        if not wifs:
             raise ValueError(
-                "no signing keys; pass keys=[wif] to Hive() or to this call"
+                "no signing keys; pass keys=[wif] to Hive() or to this call, "
+                "or unlock a wallet holding this account's "
+                f"{permission} key"
             )
 
         signed = hivecomb.sign_transaction(
@@ -211,6 +225,29 @@ class Hive:
         if self.nobroadcast:
             return signed
         return self.broadcast(signed)
+
+    def _wallet_key_for(self, account, permission):
+        """The wallet's key for `account` at `permission`, or an empty list.
+
+        This is what makes `finalizeOp(permission=...)` mean something. beem
+        selected the signing key by role, and a shim that accepted the argument
+        and ignored it would sign a transfer with whatever key happened to be
+        loaded -- which is a wrong-key failure at broadcast time for anyone
+        relying on the wallet rather than passing keys explicitly.
+
+        Returns a list so the caller can treat it like any other key source. A
+        locked or absent wallet, or a missing key for that role, yields an empty
+        list rather than raising, so the caller reports the one clear error.
+        """
+        if account is None:
+            return []
+        wallet = self.wallet
+        if wallet is None:
+            return []
+        try:
+            return [wallet.getKeyForAccount(account, permission)]
+        except Exception:  # noqa: BLE001 - locked, absent, or no such role
+            return []
 
     def broadcast(self, tx, trx_id=True, race_width=None):
         """Broadcast a signed transaction and wait for the node to accept it.

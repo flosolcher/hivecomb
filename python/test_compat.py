@@ -477,6 +477,34 @@ def _():
         raise AssertionError("a gap must raise NotImplementedError")
 
 
+@check("Hive: finalizeOp permission selects the key rather than being ignored")
+def _():
+    # beem chose the signing key by role. Accepting `permission` and ignoring it
+    # would sign a transfer with whatever key was loaded, which fails at
+    # broadcast for anyone relying on a wallet instead of explicit keys. With no
+    # keys and no wallet the error must name the role it looked for.
+    hive = Hive(node="https://invalid.example", nobroadcast=True)
+    hive._tapos.store_block_id(BLOCK_ID)
+    try:
+        hive.finalizeOp(
+            ("transfer", {"from": "alice", "to": "bob",
+                          "amount": "1.000 HIVE", "memo": ""}),
+            account="alice", permission="active",
+        )
+    except ValueError as exc:
+        assert "active" in str(exc), str(exc)
+    else:
+        raise AssertionError("signing with no key available should fail")
+
+    # An explicit key still wins over anything a wallet might hold.
+    tx = hive.finalizeOp(
+        ("transfer", {"from": "alice", "to": "bob",
+                      "amount": "1.000 HIVE", "memo": ""}),
+        account="alice", permission="active", keys=[WIF],
+    )
+    assert len(tx["signatures"]) == 1
+
+
 # --------------------------------------------------------------------------
 def main():
     print(f"hivecomb compatibility layer: {len(PASS) + len(FAIL)} checks\n")

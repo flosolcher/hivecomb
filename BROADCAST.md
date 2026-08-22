@@ -60,6 +60,32 @@ one step where the chain's answer is the only answer.
 >
 > The rest of this section is how to repeat it.
 
+### Do you also need an active-authority transaction?
+
+**No.** Signing is authority-blind: the digest, the curve, the canonical signature
+format and the broadcast envelope are identical whichever key is used. A broadcast
+under posting authority proves the signing path for active and owner too, and putting
+an active key on disk to prove it again would add real risk for no information.
+
+What *is* authority-specific is the library's choice of **which key to sign with** --
+and that is checked without any key at all.
+`database_api.get_potential_signatures` returns the public keys that could sign a given
+unsigned transaction; matching them against the account's own `key_auths` says which
+authority hived wants. `tests/hived_authority_oracle.py` does that for 26 operations:
+
+```
+26 operations: 26 agree, 0 disagree, 0 errored
+```
+
+including the two that need **owner** (`decline_voting_rights`,
+`change_recovery_account`) and both directions of `custom_json`.
+
+One related measurement, since it decides whether loading several keys is dangerous:
+hived **accepts** a transaction carrying more signatures than it requires. Verified by
+broadcasting one with a deliberate irrelevant signature
+([`0fbf896c…`](https://hivehub.dev/tx/0fbf896ccf0935366a19da4332fe0d47d5b01997), accepted).
+So signing with an extra key is harmless; signing with the *wrong* key is what fails.
+
 ### Is a posting-authority transaction sufficient?
 
 **Yes.** The authority level changes which key signs and nothing else. The digest is
