@@ -243,7 +243,7 @@ impl HexBytes {
     /// Parse a hex string.
     pub fn from_hex(s: &str) -> Result<Self> {
         let s = s.trim();
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return Err(Error::field("hex buffer has an odd number of characters"));
         }
         (0..s.len() / 2)

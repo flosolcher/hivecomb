@@ -98,7 +98,7 @@ fn derive(secret: &[u8; 64], nonce: u64) -> (Zeroizing<[u8; 32]>, [u8; 16], u32)
 /// when the input is already aligned, which is what keeps unpadding unambiguous.
 fn pad(data: &mut Vec<u8>) {
     let n = BLOCK - (data.len() % BLOCK);
-    data.extend(std::iter::repeat(n as u8).take(n));
+    data.extend(std::iter::repeat_n(n as u8, n));
 }
 
 /// Strip and **validate** the padding.

@@ -1,0 +1,20 @@
+# Normalize line endings in the repository, and check them out natively.
+* text=auto
+
+# ...except these two, which are data rather than source.
+#
+# A brain key or a BIP-39 mnemonic is only portable if every implementation sees
+# exactly the same words in exactly the same order, so the tests pin both files
+# by SHA-256. Git's default CRLF conversion on Windows changes those bytes and
+# the pin fails — which is how this was found, on the first Windows CI run.
+#
+# `.lines()` in Rust strips a trailing \r, so word *lookup* would have survived
+# the conversion. The pin is the stricter guarantee and it is the one that
+# matters: these files must be byte-identical to beem's, everywhere, forever.
+# Marking them binary means git never rewrites them on any platform.
+hivecomb/data/brainkey_words.txt -text
+hivecomb/data/bip39_english.txt  -text
+
+# Captured node responses, compared as parsed JSON but kept verbatim so a
+# regenerated fixture diffs cleanly against the one it replaces.
+hivecomb/tests/fixtures/*.json -text

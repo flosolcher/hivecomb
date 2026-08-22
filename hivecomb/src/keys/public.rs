@@ -35,7 +35,7 @@ impl PublicKey {
     /// Parse a hex-encoded public key.
     pub fn from_hex(s: &str) -> Result<Self> {
         let s = s.trim();
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return Err(Error::key("public key hex has an odd number of characters"));
         }
         let bytes: Result<Vec<u8>> = (0..s.len() / 2)
