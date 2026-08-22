@@ -1,0 +1,32 @@
+{
+ "id": 9493,
+ "owner": "gtg",
+ "created": "2016-06-30T17:22:18",
+ "url": "https://gtg.openhive.network",
+ "votes": "168098560465925338",
+ "virtual_last_update": "1068239076505581691459068755",
+ "virtual_position": "19290910363215775194741450137635902531",
+ "virtual_scheduled_time": "1068240986048742965524376137",
+ "total_missed": 990,
+ "last_aslot": 109511400,
+ "last_confirmed_block_num": 109235593,
+ "pow_worker": 0,
+ "signing_key": "STM5dLh5HxjjawY4Gm6o6ugmJUmEXgnfXXXRJPRTxRnvfFBJ24c1M",
+ "props": {
+  "account_creation_fee": "3.000 HIVE",
+  "maximum_block_size": 65536,
+  "hbd_interest_rate": 1000,
+  "account_subsidy_budget": 797,
+  "account_subsidy_decay": 347321
+ },
+ "hbd_exchange_rate": {
+  "base": "0.046 HBD",
+  "quote": "1.000 HIVE"
+ },
+ "last_hbd_exchange_update": "2026-08-22T02:53:24",
+ "last_work": "0000000048bf77f525731f28db7c1aa9ad853a475ccc78e71ea952a7782e5459",
+ "running_version": "1.28.7",
+ "hardfork_version_vote": "1.28.0",
+ "hardfork_time_vote": "2025-11-19T13:00:00",
+ "available_witness_account_subsidies": 1708914
+}

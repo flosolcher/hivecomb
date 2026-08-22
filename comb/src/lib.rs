@@ -39,6 +39,7 @@ pub mod bip32;
 pub mod bip38;
 #[cfg(feature = "bip32")]
 pub mod bip39;
+pub mod chain;
 pub mod chains;
 pub mod error;
 pub mod keys;

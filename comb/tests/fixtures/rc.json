@@ -1,0 +1,19 @@
+{
+ "rc_accounts": [
+  {
+   "account": "hiveio",
+   "rc_manabar": {
+    "current_mana": 318262827993,
+    "last_update_time": 1767246366
+   },
+   "max_rc_creation_adjustment": {
+    "amount": "5879302741",
+    "precision": 6,
+    "nai": "@@000000037"
+   },
+   "max_rc": 320445617591,
+   "delegated_rc": 0,
+   "received_delegated_rc": 0
+  }
+ ]
+}

@@ -143,6 +143,90 @@ impl Ord for PublicKey {
     }
 }
 
+/// Hive's null public key, meaning "no key".
+///
+/// It is 33 zero bytes, which is **not a point on secp256k1** — so it cannot be a
+/// [`PublicKey`], and code that assumes every key field parses will fail on it. It
+/// appears wherever a key is optional in a field that is not an `optional<>`: a witness
+/// publishes it to retire, and accounts that have never set a memo key carry it.
+///
+/// Use [`MaybePublicKey`] for a field that can hold it.
+pub const NULL_PUBLIC_KEY: &str = "STM1111111111111111111111111111111114T1Anm";
+
+/// A public-key field that may hold [`NULL_PUBLIC_KEY`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MaybePublicKey {
+    /// The null key: 33 zero bytes, meaning "no key".
+    Null,
+    /// A real key.
+    Key(PublicKey),
+}
+
+impl MaybePublicKey {
+    /// The key, if it is a real one.
+    pub fn key(&self) -> Option<&PublicKey> {
+        match self {
+            MaybePublicKey::Null => None,
+            MaybePublicKey::Key(k) => Some(k),
+        }
+    }
+
+    /// Whether this is the null key.
+    pub fn is_null(&self) -> bool {
+        matches!(self, MaybePublicKey::Null)
+    }
+
+    /// Parse a prefixed key, accepting the null key.
+    pub fn from_prefixed_any(s: &str) -> Result<Self> {
+        let s = s.trim();
+        // The null key's payload is 33 zero bytes; recognise it by decoding rather
+        // than by string comparison, so any chain prefix works.
+        for prefix in ["STM", "TST", "STX"] {
+            if let Some(rest) = s.strip_prefix(prefix) {
+                let payload = base58::decode_gph_check(rest)?;
+                if payload == [0u8; COMPRESSED_PUBKEY_LEN] {
+                    return Ok(MaybePublicKey::Null);
+                }
+                return PublicKey::from_bytes(&payload).map(MaybePublicKey::Key);
+            }
+        }
+        Err(Error::key("public key has no recognised chain prefix"))
+    }
+
+    /// Render with a chain prefix.
+    pub fn to_prefixed(&self, prefix: &str) -> String {
+        match self {
+            MaybePublicKey::Null => {
+                format!(
+                    "{prefix}{}",
+                    base58::encode_gph_check(&[0u8; COMPRESSED_PUBKEY_LEN])
+                )
+            }
+            MaybePublicKey::Key(k) => k.to_prefixed(prefix),
+        }
+    }
+}
+
+impl fmt::Display for MaybePublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_prefixed("STM"))
+    }
+}
+
+impl serde::Serialize for MaybePublicKey {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_prefixed("STM"))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MaybePublicKey {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let s = String::deserialize(d)?;
+        MaybePublicKey::from_prefixed_any(&s).map_err(D::Error::custom)
+    }
+}
+
 impl crate::reader::GrapheneDeserialize for PublicKey {
     /// A public key is a bare 33-byte fixed array with no length prefix.
     fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
@@ -229,6 +313,30 @@ mod tests {
         let wire = pubkey.to_wire().unwrap();
         assert_eq!(wire.len(), 33, "no varint length prefix on a fixed array");
         assert_eq!(wire, pubkey.to_bytes().to_vec());
+    }
+
+    #[test]
+    fn the_null_key_is_not_a_public_key_but_is_a_maybe_key() {
+        // 33 zero bytes are not on the curve, so PublicKey must refuse them...
+        assert!(PublicKey::from_prefixed_any(NULL_PUBLIC_KEY).is_err());
+        // ...but a witness that has retired publishes exactly this.
+        let maybe = MaybePublicKey::from_prefixed_any(NULL_PUBLIC_KEY).unwrap();
+        assert!(maybe.is_null());
+        assert!(maybe.key().is_none());
+        assert_eq!(maybe.to_prefixed("STM"), NULL_PUBLIC_KEY);
+    }
+
+    #[test]
+    fn maybe_key_round_trips_a_real_key() {
+        let real = PrivateKey::from_wif(TEST_WIF).unwrap().public_key();
+        let text = real.to_prefixed("STM");
+        let maybe = MaybePublicKey::from_prefixed_any(&text).unwrap();
+        assert_eq!(maybe.key(), Some(&real));
+        assert_eq!(maybe.to_prefixed("STM"), text);
+        assert_eq!(
+            serde_json::from_str::<MaybePublicKey>(&format!("\"{text}\"")).unwrap(),
+            maybe
+        );
     }
 
     #[test]

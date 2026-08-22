@@ -1,0 +1,87 @@
+{
+ "id": 0,
+ "head_block_number": 109235598,
+ "head_block_id": "0682cd8ede615c758c1148fa9e2c7bcbf42adef6",
+ "time": "2026-08-22T03:30:15",
+ "current_witness": "yabapmatt",
+ "total_pow": 514415,
+ "num_pow_witnesses": 172,
+ "virtual_supply": {
+  "amount": "1362933688963",
+  "precision": 3,
+  "nai": "@@000000021"
+ },
+ "current_supply": {
+  "amount": "578685292988",
+  "precision": 3,
+  "nai": "@@000000021"
+ },
+ "init_hbd_supply": {
+  "amount": "0",
+  "precision": 3,
+  "nai": "@@000000013"
+ },
+ "current_hbd_supply": {
+  "amount": "32154184235",
+  "precision": 3,
+  "nai": "@@000000013"
+ },
+ "total_vesting_fund_hive": {
+  "amount": "214631379968",
+  "precision": 3,
+  "nai": "@@000000021"
+ },
+ "total_vesting_shares": {
+  "amount": "346307992691989491",
+  "precision": 6,
+  "nai": "@@000000037"
+ },
+ "total_reward_fund_hive": {
+  "amount": "0",
+  "precision": 3,
+  "nai": "@@000000021"
+ },
+ "total_reward_shares2": "0",
+ "pending_rewarded_vesting_shares": {
+  "amount": "1540373933463620",
+  "precision": 6,
+  "nai": "@@000000037"
+ },
+ "pending_rewarded_vesting_hive": {
+  "amount": "878094119",
+  "precision": 3,
+  "nai": "@@000000021"
+ },
+ "hbd_interest_rate": 1000,
+ "hbd_print_rate": 0,
+ "maximum_block_size": 65536,
+ "current_aslot": 109511405,
+ "recent_slots_filled": "340282366604025813406317257057592410111",
+ "participation_count": 127,
+ "last_irreversible_block_num": 109235598,
+ "vote_power_reserve_rate": 10,
+ "delegation_return_period": 432000,
+ "reverse_auction_seconds": 0,
+ "available_account_subsidies": 21365884,
+ "hbd_stop_percent": 2000,
+ "hbd_start_percent": 2000,
+ "next_maintenance_time": "2026-08-22T03:38:00",
+ "last_budget_time": "2026-08-22T02:38:00",
+ "next_daily_maintenance_time": "2026-08-22T19:31:33",
+ "content_reward_percent": 6500,
+ "vesting_reward_percent": 1500,
+ "proposal_fund_percent": 1000,
+ "dhf_interval_ledger": {
+  "amount": "16672",
+  "precision": 3,
+  "nai": "@@000000013"
+ },
+ "downvote_pool_percent": 2500,
+ "current_remove_threshold": 200,
+ "early_voting_seconds": 86400,
+ "mid_voting_seconds": 172800,
+ "max_consecutive_recurrent_transfer_failures": 10,
+ "max_recurrent_transfer_end_date": 730,
+ "min_recurrent_transfers_recurrence": 24,
+ "max_open_recurrent_transfers": 255
+}

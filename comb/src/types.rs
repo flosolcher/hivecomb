@@ -202,11 +202,37 @@ pub fn write_static_variant<T: GrapheneSerialize>(
 pub struct PointInTime(u32);
 
 impl PointInTime {
+    /// hived's "never" / "maximum" sentinel: `time_point_sec::maximum()`, all bits set.
+    ///
+    /// It appears in `next_vesting_withdrawal`, `governance_vote_expiration_ts`,
+    /// `last_owner_update` and others to mean "not scheduled". The JSON renderer prints
+    /// it as **`1969-12-31T23:59:59`** — it formats the `uint32` as though it were a
+    /// signed `int32`, so `0xFFFFFFFF` comes out as `-1` second before the epoch rather
+    /// than as a date in 2106. Parsing that string back naively yields `-1`, which does
+    /// not fit a `u32`, so it has to be handled deliberately.
+    pub const MAXIMUM: PointInTime = PointInTime(u32::MAX);
+
     /// Construct from whole seconds since the Unix epoch.
+    ///
+    /// Negative values in the `int32` range are reinterpreted as the `uint32` hived
+    /// actually stores, because that is what its JSON renderer means by them — see
+    /// [`PointInTime::MAXIMUM`]. Anything outside both ranges is an error.
     pub fn from_unix(secs: i64) -> Result<Self> {
-        u32::try_from(secs)
-            .map(PointInTime)
-            .map_err(|_| Error::Time(format!("{secs} is outside the uint32 epoch range")))
+        if let Ok(v) = u32::try_from(secs) {
+            return Ok(PointInTime(v));
+        }
+        if let Ok(v) = i32::try_from(secs) {
+            // Two's complement: -1 is 0xFFFFFFFF, which is the sentinel.
+            return Ok(PointInTime(v as u32));
+        }
+        Err(Error::Time(format!(
+            "{secs} is outside the uint32 epoch range"
+        )))
+    }
+
+    /// Whether this is hived's "never" sentinel.
+    pub fn is_maximum(&self) -> bool {
+        self.0 == u32::MAX
     }
 
     /// Seconds since the Unix epoch.
@@ -234,9 +260,17 @@ impl PointInTime {
     }
 
     /// Render in Hive's JSON timestamp form.
+    ///
+    /// Sentinel values render the way hived renders them — as a pre-epoch date — so
+    /// that a value read from a node and written back is unchanged.
     pub fn to_iso(&self) -> Result<String> {
-        let dt = OffsetDateTime::from_unix_timestamp(i64::from(self.0))
-            .map_err(|e| Error::Time(e.to_string()))?;
+        let seconds = if self.0 >= 0x8000_0000 {
+            i64::from(self.0 as i32)
+        } else {
+            i64::from(self.0)
+        };
+        let dt =
+            OffsetDateTime::from_unix_timestamp(seconds).map_err(|e| Error::Time(e.to_string()))?;
         dt.format(HIVE_TIME_FORMAT)
             .map_err(|e| Error::Time(e.to_string()))
     }
@@ -403,8 +437,31 @@ mod tests {
         assert!(PointInTime::parse("not a time").is_err());
         assert!(PointInTime::parse("2026-08-22 14:30:00").is_err());
         assert!(PointInTime::parse("2026-08-22T14:30:00+02:00").is_err());
-        assert!(PointInTime::from_unix(-1).is_err());
         assert!(PointInTime::from_unix(i64::from(u32::MAX) + 1).is_err());
+        assert!(PointInTime::from_unix(i64::from(i32::MIN) - 1).is_err());
+    }
+
+    #[test]
+    fn the_never_sentinel_round_trips() {
+        // hived stores 0xFFFFFFFF and renders it as 1969-12-31T23:59:59, formatting a
+        // uint32 as a signed int32. Real accounts carry this in
+        // next_vesting_withdrawal, governance_vote_expiration_ts and last_owner_update,
+        // so failing to parse it means failing to parse most accounts.
+        let sentinel = PointInTime::parse("1969-12-31T23:59:59").unwrap();
+        assert_eq!(sentinel, PointInTime::MAXIMUM);
+        assert!(sentinel.is_maximum());
+        assert_eq!(sentinel.unix(), u32::MAX);
+        // ...and writing it back gives what the node sent.
+        assert_eq!(sentinel.to_iso().unwrap(), "1969-12-31T23:59:59");
+        assert_eq!(sentinel.to_wire().unwrap(), vec![0xff, 0xff, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn the_epoch_itself_is_not_a_sentinel() {
+        let epoch = PointInTime::parse("1970-01-01T00:00:00").unwrap();
+        assert_eq!(epoch.unix(), 0);
+        assert!(!epoch.is_maximum());
+        assert_eq!(epoch.to_iso().unwrap(), "1970-01-01T00:00:00");
     }
 
     #[test]

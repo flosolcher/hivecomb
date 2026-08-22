@@ -104,21 +104,27 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Assets and amounts (integer, no float) | done |
 | Authorities (sorted, deduplicated) | done |
 | Operation table, all 93 ids incl. HF25–HF28 | done |
-| 33 constructible operations | done |
+| All 48 constructible operations | done |
+| All 43 virtual operations | done — beem models none |
+| Binary + JSON deserialization, round-tripped | done |
 | Transactions: digest, id, signing, verification | done |
 | TaPoS cache with hard staleness refusal | done |
-| JSON-RPC client with node failover | done |
-| Python bindings (PyO3 / abi3) | done |
+| Encrypted memos | done |
+| BIP-32, BIP-38, BIP-39 | done |
+| Chain types: Account, Witness, Block, RC, feed | done |
+| Mana / voting power / RC arithmetic | done |
+| JSON-RPC client with node failover + typed accessors | done |
+| Python bindings (PyO3 / abi3) | partial — signing, memos, keys |
 | Differential oracle vs beem | done, green |
-| Encrypted memos | not yet ported |
-| BIP-32 / BIP-38 / BIP-39 | not yet ported |
-| Account, Comment, Market, Witness wrappers | not planned — see below |
-| Wallet key storage | not yet ported |
+| Live-node fixture tests | done |
+| Wallet / encrypted key storage | not yet |
+| CLI (`beempy` equivalent) | not yet |
+| Comment / Market / Discussions wrappers | not yet |
 
-The high-level object wrappers (`Account`, `Comment`, `Market`, and the 5,198-line
-`cli.py`) are deliberately not in scope. They are a convenience layer over the RPC API,
-they are where beem's "any object can reach the network" design lives, and they are not
-what makes signing hard.
+Chain state is modelled as plain data (`comb::chain`), read from the API rather than
+constructed. beem's equivalents subclass `dict` and can each reach the network on their
+own — which is the design that puts a node call inside the signing path. Here the types
+are inert and the client is explicit.
 
 ## Layout
 
@@ -133,9 +139,12 @@ CREDITS.md                          — upstream authorship
 ## Building
 
 ```bash
-cargo test -p comb                       # 130 unit tests
-cargo build -p comb --no-default-features  # signing only, no network dependency at all
+cargo test                                 # 262 tests, including 10 against live fixtures
+cargo build -p comb --no-default-features  # signing only: no network, no cipher, no scrypt
 ```
+
+Feature flags keep the core small. `--no-default-features` builds keys, serialization
+and signing alone; `memo`, `bip38`, `bip32`, `rpc` and `ureq-transport` are additive.
 
 Python wheels, via [maturin](https://github.com/PyO3/maturin):
 

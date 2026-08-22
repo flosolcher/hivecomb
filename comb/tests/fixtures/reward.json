@@ -1,0 +1,20 @@
+{
+ "funds": [
+  {
+   "id": 0,
+   "name": "post",
+   "reward_balance": {
+    "amount": "1161383416",
+    "precision": 3,
+    "nai": "@@000000021"
+   },
+   "recent_claims": "764029060062504649",
+   "last_update": "2026-08-22T03:30:48",
+   "content_constant": "2000000000000",
+   "percent_curation_rewards": 5000,
+   "percent_content_rewards": 10000,
+   "author_reward_curve": "linear",
+   "curation_reward_curve": "linear"
+  }
+ ]
+}

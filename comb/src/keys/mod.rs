@@ -29,7 +29,7 @@ mod public;
 
 pub use derive::{BrainKey, PasswordKey, Role};
 pub use private::PrivateKey;
-pub use public::PublicKey;
+pub use public::{MaybePublicKey, PublicKey, NULL_PUBLIC_KEY};
 
 /// Version byte prefixed to a Hive/Bitcoin mainnet WIF before base58check encoding.
 pub const WIF_VERSION: u8 = 0x80;
