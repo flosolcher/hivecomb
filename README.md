@@ -114,7 +114,8 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Chain types: Account, Witness, Block, RC, feed | done |
 | Mana / voting power / RC arithmetic | done |
 | JSON-RPC client with node failover + typed accessors | done |
-| Python bindings (PyO3 / abi3) | partial — signing, memos, keys |
+| Python bindings (PyO3 / abi3) | done — keys, signing, memos, all 48 ops |
+| beem-compatible Python layer | done — drop-in, 25 checks |
 | Differential oracle vs beem | done, green |
 | Live-node fixture tests | done |
 | Wallet / encrypted key storage | done — scrypt + AES-GCM |
@@ -199,6 +200,22 @@ front of anything valuable:
 The chain id is hardcoded, which is correct today and is exactly the kind of constant
 that moves at a hardfork. It lives in one place — `comb/src/chains.rs` — with a comment
 saying so. `NodeClient::verify_chain_id` will tell you if a node disagrees.
+
+## Replacing beem
+
+The `python/` directory is a distribution that provides the `beem`,
+`beemgraphenebase`, `beembase` and `beemapi` package names, so existing `import beem`
+code runs unchanged:
+
+```sh
+pip uninstall -y beem
+pip install comb comb-beem
+```
+
+[MIGRATION.md](MIGRATION.md) is the complete record: every defect fixed and where it is
+fixed, every deliberate behavioural divergence, everything `comb` adds that beem cannot
+do, and exactly what is not implemented. `python/test_compat.py` runs 25 checks written
+against beem's API, unmodified.
 
 ## Licence
 

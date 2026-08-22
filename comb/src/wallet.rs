@@ -92,7 +92,7 @@ fn b64(data: &[u8]) -> String {
     // A small, dependency-free base64. Not performance-critical: this runs once per
     // key, not per byte of a stream.
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b = [
             chunk[0],

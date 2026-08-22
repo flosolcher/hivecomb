@@ -26,7 +26,6 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
 
-use comb_core::asset::Amount as RsAmount;
 use comb_core::chains::Chain as RsChain;
 use comb_core::keys::{PrivateKey as RsPrivateKey, PublicKey as RsPublicKey};
 use comb_core::operations::{
@@ -112,6 +111,68 @@ impl PyPrivateKey {
     /// this for you.
     fn to_wif(&self) -> String {
         self.inner.to_wif().to_string()
+    }
+
+    /// Derive a key from an account name, role and master password.
+    ///
+    /// This is Hive's master-password scheme: a single unsalted SHA-256. It is weak by
+    /// construction — see the Rust `keys` module docs — and is provided because the
+    /// account-creation flow defines it, not because it is a good idea.
+    #[staticmethod]
+    #[pyo3(signature = (account, role, password))]
+    fn from_password(account: &str, role: &str, password: &str) -> PyResult<Self> {
+        let role: comb_core::keys::Role = role.parse().map_err(to_py_err)?;
+        let derived = comb_core::keys::PasswordKey::new(account, role, password, true)
+            .map_err(to_py_err)?
+            .private_key()
+            .map_err(to_py_err)?;
+        Ok(PyPrivateKey { inner: derived })
+    }
+
+    /// Derive a key from a Graphene brain key and sequence number.
+    #[staticmethod]
+    #[pyo3(signature = (phrase, sequence = 0))]
+    fn from_brain_key(phrase: &str, sequence: u32) -> PyResult<Self> {
+        let derived = comb_core::keys::BrainKey::new(phrase, sequence)
+            .map_err(to_py_err)?
+            .private_key()
+            .map_err(to_py_err)?;
+        Ok(PyPrivateKey { inner: derived })
+    }
+
+    /// Derive a Hive role key from a BIP-39 mnemonic, using the BIP-48 path wallets use.
+    #[staticmethod]
+    #[pyo3(signature = (mnemonic, role, account_index = 0, key_index = 0, passphrase = ""))]
+    fn from_mnemonic(
+        mnemonic: &str,
+        role: &str,
+        account_index: u32,
+        key_index: u32,
+        passphrase: &str,
+    ) -> PyResult<Self> {
+        let role: comb_core::keys::Role = role.parse().map_err(to_py_err)?;
+        let phrase = comb_core::bip39::Mnemonic::parse(mnemonic).map_err(to_py_err)?;
+        let seed = phrase.to_seed(passphrase);
+        let master = comb_core::bip32::ExtendedPrivateKey::from_seed(&*seed).map_err(to_py_err)?;
+        let derived = master
+            .derive_hive_role(role, account_index, key_index)
+            .map_err(to_py_err)?;
+        Ok(PyPrivateKey { inner: derived })
+    }
+
+    /// Encrypt this key under a passphrase, BIP-38 style. Returns a `6P...` string.
+    fn to_bip38(&self, passphrase: &str) -> PyResult<String> {
+        comb_core::bip38::encrypt(&self.inner, passphrase)
+            .map(|s| s.to_string())
+            .map_err(to_py_err)
+    }
+
+    /// Decrypt a BIP-38 `6P...` key.
+    #[staticmethod]
+    fn from_bip38(encrypted: &str, passphrase: &str) -> PyResult<Self> {
+        Ok(PyPrivateKey {
+            inner: comb_core::bip38::decrypt(encrypted, passphrase).map_err(to_py_err)?,
+        })
     }
 
     /// Sign an arbitrary message — the login-handshake primitive.
@@ -270,6 +331,21 @@ impl PyBlockRef {
         })
     }
 
+    /// Build directly from the two reference fields.
+    ///
+    /// Use this when reconstructing a transaction whose block id is no longer at
+    /// hand; `block_num` is then unknown and reported as the low 16 bits.
+    #[staticmethod]
+    fn from_parts(ref_block_num: u16, ref_block_prefix: u32) -> Self {
+        PyBlockRef {
+            inner: RsBlockRef {
+                ref_block_num,
+                ref_block_prefix,
+                block_num: u32::from(ref_block_num),
+            },
+        }
+    }
+
     #[getter]
     fn ref_block_num(&self) -> u16 {
         self.inner.ref_block_num
@@ -354,100 +430,93 @@ impl PyTaposCache {
 // Transactions
 // ---------------------------------------------------------------------------
 
+/// Convert a Python value into `serde_json::Value`.
+///
+/// Rejects anything that has no JSON representation rather than coercing it —
+/// a silently stringified object would end up signed.
+fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    if value.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    if let Ok(v) = value.extract::<bool>() {
+        return Ok(serde_json::Value::Bool(v));
+    }
+    if let Ok(v) = value.extract::<i64>() {
+        return Ok(serde_json::Value::from(v));
+    }
+    if let Ok(v) = value.extract::<u64>() {
+        return Ok(serde_json::Value::from(v));
+    }
+    if let Ok(v) = value.extract::<f64>() {
+        return serde_json::Number::from_f64(v)
+            .map(serde_json::Value::Number)
+            .ok_or_else(|| PyValueError::new_err("non-finite float has no JSON form"));
+    }
+    if let Ok(v) = value.extract::<String>() {
+        return Ok(serde_json::Value::String(v));
+    }
+    if let Ok(dict) = value.downcast::<PyDict>() {
+        let mut map = serde_json::Map::with_capacity(dict.len());
+        for (k, v) in dict.iter() {
+            let key: String = k
+                .extract()
+                .map_err(|_| PyValueError::new_err("operation field names must be strings"))?;
+            map.insert(key, py_to_json(&v)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+    if let Ok(list) = value.downcast::<PyList>() {
+        return list.iter().map(|item| py_to_json(&item)).collect();
+    }
+    if let Ok(tuple) = value.downcast::<pyo3::types::PyTuple>() {
+        return tuple.iter().map(|item| py_to_json(&item)).collect();
+    }
+    Err(PyValueError::new_err(format!(
+        "{} has no JSON representation and cannot go into an operation",
+        value.get_type().name()?
+    )))
+}
+
 /// Convert a Python operation description into a `comb` operation.
 ///
-/// Accepts `("custom_json", {...})` or `{"type": "custom_json", "value": {...}}`.
-/// **Unknown keys are refused**, so a typo in a field name fails loudly instead of
-/// silently producing a transaction that does something else.
+/// Accepts `("custom_json", {...})` and `{"type": "custom_json", "value": {...}}`.
+/// All 48 signable operations work, because this routes through the same JSON
+/// decoder the Rust API uses — including `recurrent_transfer` and
+/// `collateralized_convert`, which beem cannot build at all.
+///
+/// **Unknown fields are refused**, so a typo in a field name fails loudly instead
+/// of silently producing a transaction that does something else.
 fn operation_from_py(
     op_type: &str,
     value: &Bound<'_, PyDict>,
-    chain: RsChain,
+    _chain: RsChain,
 ) -> PyResult<RsOperation> {
-    fn get_str(d: &Bound<'_, PyDict>, key: &str) -> PyResult<String> {
-        d.get_item(key)?
-            .ok_or_else(|| PyValueError::new_err(format!("missing field {key:?}")))?
-            .extract()
-    }
-    fn get_str_list(d: &Bound<'_, PyDict>, key: &str) -> PyResult<Vec<String>> {
-        match d.get_item(key)? {
-            None => Ok(Vec::new()),
-            Some(v) => v.extract(),
-        }
-    }
-    fn reject_unknown(d: &Bound<'_, PyDict>, allowed: &[&str]) -> PyResult<()> {
-        for key in d.keys() {
-            let name: String = key.extract()?;
-            if !allowed.contains(&name.as_str()) {
-                return Err(PyValueError::new_err(format!(
-                    "unknown field {name:?}; allowed fields are {allowed:?}"
-                )));
+    let mut fields = py_to_json(value.as_any())?;
+
+    // hived's `json` and `json_metadata` fields are *strings* holding JSON, not
+    // JSON objects. Every Hive client lets a caller pass the object and serializes
+    // it, so accepting a dict here is convenience rather than laxity — and the
+    // separators matter, because the string is what gets signed.
+    if let Some(map) = fields.as_object_mut() {
+        for key in [
+            "json",
+            "json_metadata",
+            "posting_json_metadata",
+            "json_meta",
+        ] {
+            if let Some(entry) = map.get_mut(key) {
+                if !entry.is_string() {
+                    let text = serde_json::to_string(entry).map_err(|e| {
+                        PyValueError::new_err(format!("could not encode {key}: {e}"))
+                    })?;
+                    *entry = serde_json::Value::String(text);
+                }
             }
         }
-        Ok(())
     }
 
-    match op_type {
-        "custom_json" => {
-            reject_unknown(
-                value,
-                &["required_auths", "required_posting_auths", "id", "json"],
-            )?;
-            // `json` may be given as a string or as any JSON-serializable object.
-            let json_field = value
-                .get_item("json")?
-                .ok_or_else(|| PyValueError::new_err("missing field \"json\""))?;
-            let json = match json_field.extract::<String>() {
-                Ok(s) => s,
-                Err(_) => {
-                    let dumps = json_field.py().import_bound("json")?.getattr("dumps")?;
-                    let kwargs = PyDict::new_bound(json_field.py());
-                    kwargs.set_item("separators", (",", ":"))?;
-                    dumps.call((json_field,), Some(&kwargs))?.extract()?
-                }
-            };
-            Ok(RsOperation::CustomJson(RsCustomJson {
-                required_auths: get_str_list(value, "required_auths")?,
-                required_posting_auths: get_str_list(value, "required_posting_auths")?,
-                id: get_str(value, "id")?,
-                json,
-            }))
-        }
-        "transfer" => {
-            reject_unknown(value, &["from", "to", "amount", "memo"])?;
-            let amount_text: String = get_str(value, "amount")?;
-            Ok(RsOperation::Transfer(RsTransfer {
-                from: get_str(value, "from")?,
-                to: get_str(value, "to")?,
-                amount: RsAmount::parse(&amount_text, chain).map_err(to_py_err)?,
-                memo: value
-                    .get_item("memo")?
-                    .map(|v| v.extract::<String>())
-                    .transpose()?
-                    .unwrap_or_default(),
-            }))
-        }
-        "vote" => {
-            reject_unknown(value, &["voter", "author", "permlink", "weight"])?;
-            let weight: i64 = value
-                .get_item("weight")?
-                .ok_or_else(|| PyValueError::new_err("missing field \"weight\""))?
-                .extract()?;
-            let weight = i16::try_from(weight).map_err(|_| {
-                PyValueError::new_err("vote weight must fit in an int16 (-10000..=10000)")
-            })?;
-            Ok(RsOperation::Vote(RsVote {
-                voter: get_str(value, "voter")?,
-                author: get_str(value, "author")?,
-                permlink: get_str(value, "permlink")?,
-                weight,
-            }))
-        }
-        other => Err(PyValueError::new_err(format!(
-            "operation {other:?} is not yet exposed through the Python bindings; \
-             build it through the Rust API or open an issue"
-        ))),
-    }
+    let described = serde_json::json!([op_type, fields]);
+    RsOperation::from_json(&described).map_err(to_py_err)
 }
 
 /// Build and sign a transaction entirely offline.
@@ -599,6 +668,64 @@ fn is_encrypted_memo(memo: &str) -> bool {
     comb_core::memo::is_encrypted(memo)
 }
 
+/// Recover the public key that signed a 32-byte digest, verifying as it goes.
+///
+/// Raises unless the signature genuinely verifies. Recovery alone proves nothing:
+/// it succeeds for essentially any well-formed 65-byte input, which is why beem's
+/// `verify_message` could return a plausible-looking key for a bogus signature.
+#[pyfunction]
+#[pyo3(signature = (digest, signature))]
+fn recover_digest(digest: &[u8], signature: &str) -> PyResult<PyPublicKey> {
+    let digest: [u8; 32] = digest.try_into().map_err(|_| {
+        PyValueError::new_err(format!("digest must be 32 bytes, got {}", digest.len()))
+    })?;
+    let sig = rs_sign::Signature::from_hex(signature).map_err(to_py_err)?;
+    Ok(PyPublicKey {
+        inner: rs_sign::recover(&digest, &sig).map_err(to_py_err)?,
+    })
+}
+
+/// Generate a new BIP-39 mnemonic.
+#[pyfunction]
+#[pyo3(signature = (strength = 256))]
+fn generate_mnemonic(strength: usize) -> PyResult<String> {
+    comb_core::bip39::Mnemonic::generate(strength)
+        .map(|m| m.phrase().to_string())
+        .map_err(to_py_err)
+}
+
+/// Validate a BIP-39 mnemonic's checksum and word list.
+#[pyfunction]
+fn validate_mnemonic(mnemonic: &str) -> bool {
+    comb_core::bip39::Mnemonic::parse(mnemonic).is_ok()
+}
+
+/// The transaction id of an unsigned operation set, without signing it.
+///
+/// Useful for pre-registering an id before broadcast.
+#[pyfunction]
+#[pyo3(signature = (operations, block_ref, expiration, chain = None))]
+fn transaction_id(
+    operations: &Bound<'_, PyList>,
+    block_ref: &PyBlockRef,
+    expiration: &str,
+    chain: Option<&str>,
+) -> PyResult<String> {
+    let chain = chain_from_name(chain)?;
+    let mut ops = Vec::with_capacity(operations.len());
+    for item in operations.iter() {
+        let (name, fields): (String, Bound<'_, PyDict>) = item.extract()?;
+        ops.push(operation_from_py(&name, &fields, chain)?);
+    }
+    let tx = RsTransaction {
+        ref_block_num: block_ref.inner.ref_block_num,
+        ref_block_prefix: block_ref.inner.ref_block_prefix,
+        expiration: PointInTime::parse(expiration).map_err(to_py_err)?,
+        operations: ops,
+    };
+    tx.id().map_err(to_py_err)
+}
+
 /// The chain id this build signs against, as hex.
 #[pyfunction]
 #[pyo3(signature = (chain = None))]
@@ -622,5 +749,9 @@ fn comb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(encode_memo, m)?)?;
     m.add_function(wrap_pyfunction!(decode_memo, m)?)?;
     m.add_function(wrap_pyfunction!(is_encrypted_memo, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_mnemonic, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_mnemonic, m)?)?;
+    m.add_function(wrap_pyfunction!(transaction_id, m)?)?;
+    m.add_function(wrap_pyfunction!(recover_digest, m)?)?;
     Ok(())
 }

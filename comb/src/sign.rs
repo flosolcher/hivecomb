@@ -222,10 +222,24 @@ pub fn sign_message(message: &[u8], key: &PrivateKey) -> Result<Signature> {
     sign_digest(&digest, key)
 }
 
-/// Recover the public key from a signature over `digest`, and verify it.
+/// Recover the public key that produced a signature over `digest`.
 ///
-/// Returns an error unless the signature genuinely verifies. Recovery alone proves
-/// nothing — see the module docs for what beem did with that.
+/// # What this does and does not prove
+///
+/// It proves the signature is **well formed**: a malformed compact signature, or one
+/// whose recovery id cannot yield a point, is an error.
+///
+/// It does **not** prove the signature is the one you expected. Recovery answers
+/// "which key would have produced this?", and a tampered signature simply recovers a
+/// *different* key. Checking the recovered key against its own signature — which is
+/// what this function does internally — is therefore close to tautological, and is
+/// kept only to reject inputs libsecp256k1 would otherwise accept.
+///
+/// **Meaningful verification requires an expected key: use [`verify`].**
+///
+/// This is the distinction beem's `verify_message` blurred. It performed the same
+/// tautological check, discarded its result, and returned a key — leaving every caller
+/// to notice that "verify_message" verifies nothing on its own.
 pub fn recover(digest: &[u8; 32], signature: &Signature) -> Result<PublicKey> {
     let secp = Secp256k1::new();
     let msg =
@@ -245,6 +259,9 @@ pub fn recover(digest: &[u8; 32], signature: &Signature) -> Result<PublicKey> {
 }
 
 /// Verify a signature over `digest` against an expected public key.
+///
+/// This is the check that actually means something: the signature must recover to
+/// exactly `expected`.
 pub fn verify(digest: &[u8; 32], signature: &Signature, expected: &PublicKey) -> Result<()> {
     let recovered = recover(digest, signature)?;
     if &recovered != expected {

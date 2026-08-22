@@ -21,7 +21,7 @@ A bug that yields a silently-invalid signature ranks above one that raises.
 | [3](#3) | High | signing | Silent fall-through to variable-time pure-Python ECDSA (Minerva) |
 | [4](#4) | High | signing | Wall-clock time used as ECDSA nonce entropy |
 | [5](#5) | High | chain id | Bare `except:` falls back to the pre-HF24 all-zero chain id |
-| [6](#6) | High | verify | `ecdsa_verify` result discarded; verification does not verify |
+| [6](#6) | Medium | verify | `verify_message` cannot verify, and its discarded result hides that |
 | [7](#7) | High | verify | `Signed_Transaction.verify()` collects all four recovery candidates |
 | [8](#8) | High | serialization | `String` mangles control characters into literal text |
 | [9](#9) | High | key hygiene | `repr()`/`str()` of a private key return the secret |
@@ -206,7 +206,7 @@ resolves to the live post-HF24 id; there is no fallback for an unknown chain; an
 ---
 
 <a id="6"></a>
-## 6. `verify_message` discards the verification result — High
+## 6. `verify_message` cannot verify, and a discarded result hides it — Medium
 
 **`beemgraphenebase/ecdsasig.py:285-292`**
 
@@ -218,18 +218,28 @@ phex = verifyPub.serialize(compressed=True)
 return phex
 ```
 
-`ecdsa_verify` returns a boolean. It is never inspected. Public-key *recovery* succeeds
-for essentially any well-formed 65-byte input, so the function returns a
-plausible-looking public key regardless of whether the signature is valid, and leaves
-every caller to notice on its own.
+`ecdsa_verify` returns a boolean and it is never inspected.
 
-The damage is bounded only because callers usually compare the returned key against an
-expected one — and a recovered key from a bad signature will not match. That is a
-property of how it happens to be used, not of the function.
+**A correction to the obvious reading.** Reading that result would not help much: the
+key being verified against is the one just *recovered from the same signature*, so the
+check is close to tautological. A tampered signature does not fail it — it recovers a
+different key, and verifies fine against that. Recovery succeeds for essentially any
+well-formed 65-byte input.
 
-**In `comb`:** `sign::verify` and `sign::recover` return `Result` and error unless the
-signature verifies against the digest. There is a regression test that tampers with a
-signature and asserts the failure.
+So the real defect is not "a check whose result is thrown away". It is that **a function
+named `verify_message` performs no verification a caller can rely on**, while looking
+like it does. Whether a signature is the *expected* one can only be decided against an
+expected key, which this function never takes. Its callers have to do the comparison
+themselves, and nothing in the API says so.
+
+That makes this an API-shape defect rather than an exploitable hole, which is why it is
+Medium rather than High. [Finding 7](#7) — where the same reasoning is applied to four
+recovery candidates at once and the results accumulated — *is* a genuine bug.
+
+**In `comb`:** the two operations are separate and honestly named. `sign::recover`
+returns the signing key and documents that it proves only well-formedness;
+`sign::verify` takes the key you expect and compares. Malformed signatures are rejected
+by both.
 
 ---
 
