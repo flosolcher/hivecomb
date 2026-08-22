@@ -125,7 +125,10 @@ jobs:
         include:
           - { name: linux-x86_64,  os: ubuntu-latest,  target: x86_64,  manylinux: "2014" }
           - { name: linux-aarch64, os: ubuntu-latest,  target: aarch64, manylinux: "2014" }
-          - { name: macos-x86_64,  os: macos-13,       target: x86_64 }
+          # Cross-compiled on the arm64 runner: Intel macOS runners sat queued for
+          # an hour without starting, and both Apple targets ship with the same
+          # Xcode toolchain, so a separate runner buys nothing but a dependency.
+          - { name: macos-x86_64,  os: macos-latest,   target: x86_64 }
           - { name: macos-aarch64, os: macos-latest,   target: aarch64 }
           - { name: windows-x64,   os: windows-latest, target: x64 }
     steps:
@@ -263,10 +266,16 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
-          # Cross-compiled rather than built on an arm runner, which is not
-          # available on every plan for a private repository.
-          - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu, cross: true }
-          - { os: macos-13,       target: x86_64-apple-darwin }
+          # aarch64 Linux needs napi's cross toolchain (zig, a sysroot). Built here
+          # rather than on an arm runner, which is not available on every plan for a
+          # private repository.
+          - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu,
+              napi_cross: true, skip_test: true }
+          # Intel macOS needs no cross toolchain at all -- both Apple targets ship
+          # with the same Xcode -- only `rustup target add`, which the toolchain
+          # action does. Built here because the Intel runners sat queued for an hour
+          # without ever starting.
+          - { os: macos-latest,   target: x86_64-apple-darwin, skip_test: true }
           - { os: macos-latest,   target: aarch64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
@@ -286,15 +295,15 @@ jobs:
         working-directory: hivecomb-node
         shell: bash
         run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
+          if [ "${{ matrix.napi_cross }}" = "true" ]; then
             npx napi build --platform --release \
               --target ${{ matrix.target }} --use-napi-cross
           else
             npx napi build --platform --release --target ${{ matrix.target }}
           fi
-      # Only the native builds can run their own tests.
+      # A binary that cannot run on the builder cannot be tested on it.
       - name: test
-        if: matrix.cross != true
+        if: matrix.skip_test != true
         working-directory: hivecomb-node
         run: npm test
       - uses: actions/upload-artifact@v5
