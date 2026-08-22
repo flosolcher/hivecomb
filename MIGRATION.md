@@ -503,6 +503,16 @@ tx = hivecomb.sign_transaction(ops, cache.block_ref(), [wif])  # raises if stale
 memo = hivecomb.encode_memo(from_wif, to_pubkey, "hello")
 ```
 
+In Node:
+
+```js
+import { PrivateKey, BlockRef, signTransaction, encodeMemo } from 'hivecomb'
+```
+
+Same surface, same guarantees — see `hivecomb-node/README.md`. The three bindings pin a
+shared digest vector in their own test suites, so a drift in any one is caught
+independently.
+
 In Rust, see the [README](README.md) and the module documentation. The core builds
 with `--no-default-features` into keys, serialization and signing alone — no network,
 no cipher, no scrypt.

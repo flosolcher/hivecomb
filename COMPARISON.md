@@ -175,12 +175,9 @@ Reported here because it is verifiable and because it affects interoperability. 
 not a criticism of the project — it is the kind of thing differential testing exists to
 catch, and `hivecomb` found two of its own the same way.
 
-> **Disclosure status.** Unlike beem, xylem is **actively maintained** (last commit
-> 2026-07-18), so there is someone to tell. The courteous order is to report upstream
-> first and link the report here. If you are reading this and no issue link appears
-> below, that report has not been filed yet and this section should be treated as a
-> heads-up to the maintainers rather than a public advisory. It is a correctness and
-> interoperability defect, not a key-disclosure or signature-forgery one.
+> **Reported upstream:** [srbde/hive-xylem#9](https://github.com/srbde/hive-xylem/issues/9),
+> filed before this section was published. It is a correctness and interoperability
+> defect, not a key-disclosure or signature-forgery one.
 
 **`src/memo.rs` derives the ECDH shared secret from the wrong 32 bytes.**
 

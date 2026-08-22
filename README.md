@@ -116,6 +116,7 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | JSON-RPC client with node failover + typed accessors | done |
 | Python bindings (PyO3 / abi3) | done — keys, signing, memos, all 48 ops |
 | beem-compatible Python layer | done — drop-in, with its own test suite |
+| Node.js addon (napi-rs) | done — native, with TypeScript types |
 | beem object wrappers (Account, Market, …) | done |
 | `beempy` CLI | done — every beem command, plus 9 new |
 | Differential oracle vs beem | done, green |
@@ -229,6 +230,26 @@ The chain id is hardcoded, which is correct today and is exactly the kind of con
 that moves at a hardfork. It lives in one place — `hivecomb/src/chains.rs` — with a comment
 saying so. `NodeClient::verify_chain_id` will tell you if a node disagrees.
 
+## Node.js
+
+```js
+import { PrivateKey, BlockRef, signTransaction } from 'hivecomb'
+
+const tx = signTransaction(
+  [['custom_json', { required_posting_auths: ['alice'], id: 'my_app', json: { hello: 'hive' } }]],
+  BlockRef.fromBlockId(headBlockId),
+  [postingWif],
+)
+```
+
+A native addon (napi-rs) with TypeScript definitions, in `hivecomb-node/`. It is the
+signing and serialization core, not an RPC client — `dhive` and `hive-js` already do
+that, and this is meant to sit underneath one of them. The addon carries no HTTP client,
+since Node has its own.
+
+Keys are redacted in `toString`, template literals, `JSON.stringify` and `util.inspect`,
+each covered by a test.
+
 ## Replacing beem
 
 The `python/` directory is a distribution that provides the `beem`,
@@ -263,6 +284,7 @@ is free on both registries and says what it is.
 | Python module | `hivecomb` — `import hivecomb` |
 | PyPI (core) | `hivecomb` |
 | PyPI (beem drop-in) | `hivecomb-beem` |
+| npm | `hivecomb` — `import { PrivateKey } from 'hivecomb'` |
 | Repository | [`flosolcher/hivecomb`](https://github.com/flosolcher/hivecomb) |
 
 **The compatibility layer shadows beem on purpose.** `hivecomb-beem` installs packages

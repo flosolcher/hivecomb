@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["hivecomb", "hivecomb-py"]
+members = ["hivecomb", "hivecomb-py", "hivecomb-node"]
 
 [workspace.package]
 version = "0.1.0"
@@ -32,3 +32,10 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", default-features = false }
+
+[profile.release]
+# Worth the build time for what ships: the native addons are loaded by other
+# runtimes, where binary size and call overhead are paid by every consumer.
+lto = true
+codegen-units = 1
+strip = true

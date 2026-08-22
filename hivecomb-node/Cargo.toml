@@ -1,0 +1,31 @@
+[package]
+name = "hivecomb-node"
+description = "Node.js bindings for hivecomb, a Hive blockchain library."
+version.workspace = true
+edition.workspace = true
+# Not the workspace MSRV: napi-build needs 1.77+, while the library itself
+# stays at 1.75 so consumers are not forced upward. This crate is a build
+# artifact, not something anyone depends on as a library.
+rust-version = "1.77"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+# The N-API addon. Node loads this as hivecomb.<platform>.node.
+crate-type = ["cdylib"]
+
+[dependencies]
+# Aliased for the same reason as the Python crate: the addon and the library
+# would otherwise want the same name inside this crate.
+# default-features = false drops the RPC layer and its TLS stack: Node has its
+# own HTTP client, so shipping ureq inside the addon is pure weight.
+hivecomb_core = { package = "hivecomb", path = "../hivecomb", version = "0.1.0", default-features = false, features = ["memo", "bip32", "bip38", "wallet"] }
+napi = { version = "3", default-features = false, features = ["napi6", "serde-json"] }
+napi-derive = "3"
+serde_json = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"
+

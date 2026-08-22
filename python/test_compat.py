@@ -439,6 +439,19 @@ def _():
         raise AssertionError(f"should have refused {bad}")
 
 
+@check("cross-binding vector: same digest as the Rust and Node suites")
+def _():
+    import hivecomb
+
+    ref = hivecomb.BlockRef.from_block_id("00000005aabbccdd00000000000000000000abcd")
+    ops = [("custom_json", {"required_auths": [], "required_posting_auths": ["alice"],
+                            "id": "my_app", "json": '{"a":1}'})]
+    digest = hivecomb.transaction_digest(ops, ref, "2026-08-22T14:30:00").hex()
+    assert digest == "cef35a5b34e7ee9297de5153b363668245793c8ba719762ccacdde9fd85ad3d6", digest
+    assert hivecomb.transaction_id(ops, ref, "2026-08-22T14:30:00") == \
+        "8e4d2bb0d665a855512abf702c2b8e1ad9f6719e"
+
+
 # --------------------------------------------------------------------------
 # Gaps must be loud
 # --------------------------------------------------------------------------

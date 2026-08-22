@@ -7,3 +7,10 @@ __pycache__/
 *.pyd
 .venv/
 dist/
+
+# Node addon build output and dependencies
+node_modules/
+*.node
+hivecomb-node/index.js
+hivecomb-node/index.d.ts
+package-lock.json

@@ -547,6 +547,39 @@ mod tests {
     }
 
     #[test]
+    fn the_cross_binding_vector_is_stable() {
+        // A pinned digest and transaction id shared with the Python and Node test
+        // suites. Each asserts it independently, so a drift in any one binding is
+        // caught without needing all three runtimes in one place.
+        let tx = Transaction {
+            ref_block_num: BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd")
+                .unwrap()
+                .ref_block_num,
+            ref_block_prefix: BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd")
+                .unwrap()
+                .ref_block_prefix,
+            expiration: PointInTime::parse("2026-08-22T14:30:00").unwrap(),
+            operations: vec![Operation::CustomJson(CustomJson {
+                required_auths: vec![],
+                required_posting_auths: vec!["alice".into()],
+                id: "my_app".into(),
+                json: r#"{"a":1}"#.into(),
+            })],
+        };
+        let digest: String = tx
+            .digest(Chain::Hive)
+            .unwrap()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            digest,
+            "cef35a5b34e7ee9297de5153b363668245793c8ba719762ccacdde9fd85ad3d6"
+        );
+        assert_eq!(tx.id().unwrap(), "8e4d2bb0d665a855512abf702c2b8e1ad9f6719e");
+    }
+
+    #[test]
     fn signing_round_trips() {
         let key = PrivateKey::from_wif(TEST_WIF).unwrap();
         let signed = fixed_tx()
