@@ -194,7 +194,7 @@ fn hived_transport_form(s: &str) -> std::borrow::Cow<'_, str> {
 
 /// Write a Graphene string: varint byte length, then the UTF-8 bytes.
 ///
-/// The payload is first put through [`hived_transport_form`], because the string that
+/// The payload is first put through `hived_transport_form` (private), because the string
 /// reaches hived is not always the string that left here — see that function. beem
 /// does the same thing in `String.__bytes__`, via a `unicodify()` helper whose missing
 /// backslashes look like a bug and are in fact the point; this crate documented it as a

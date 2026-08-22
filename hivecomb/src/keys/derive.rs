@@ -103,7 +103,7 @@ fn normalize(seed: &str) -> String {
 
 /// Derives a role key from an account name and master password.
 ///
-/// See the [module docs](self) for why this scheme is weak. It is provided for
+/// See this module's documentation for why this scheme is weak. It is provided for
 /// compatibility with Hive's account creation flow, which defines it.
 pub struct PasswordKey {
     account: String,
@@ -226,7 +226,7 @@ impl BrainKey {
     /// Suggest a new brain key of `word_count` words, drawn uniformly at random.
     ///
     /// Uses OS randomness with rejection sampling, so every word in the dictionary is
-    /// exactly equally likely. See the [module docs](self) for the bias this replaces.
+    /// exactly equally likely. See this module's documentation for the bias this replaces.
     ///
     /// Hive wallets conventionally use 16 words (~249.6 bits). Fewer than 12 is
     /// refused.

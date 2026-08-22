@@ -1,0 +1,170 @@
+# Everything here runs offline. Checks that talk to a Hive node live in
+# live-oracles.yml, because a public node being slow must never fail a pull
+# request — and because a scheduled run is how you notice a hardfork changed
+# something under you.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: rust ${{ matrix.rust }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable]
+        include:
+          # The declared MSRV, which is only meaningful if something checks it.
+          # Pinned to the workspace's rust-version; raise both together.
+          - os: ubuntu-latest
+            rust: "1.75"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust }}
+      # hivecomb-node needs 1.77 (napi-build), while the library itself is 1.75.
+      # On the MSRV job, check only the library rather than the workspace.
+      - name: build
+        run: |
+          if [ "${{ matrix.rust }}" = "1.75" ]; then
+            cargo build -p hivecomb --all-features
+          else
+            cargo build --workspace --all-features
+          fi
+        shell: bash
+      - name: test
+        run: |
+          if [ "${{ matrix.rust }}" = "1.75" ]; then
+            cargo test -p hivecomb --all-features
+          else
+            cargo test --workspace --all-features
+          fi
+        shell: bash
+
+  features:
+    name: feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The signing core must keep building with no HTTP client and no executor.
+      # That property is easy to lose to a stray `use` and invisible in a
+      # default build, so it is checked explicitly rather than assumed.
+      - name: no default features
+        run: cargo build -p hivecomb --no-default-features
+      - name: each feature alone
+        run: |
+          for f in rpc ureq-transport memo bip38 bip32 wallet async; do
+            echo "::group::$f"
+            cargo build -p hivecomb --no-default-features --features "$f"
+            echo "::endgroup::"
+          done
+      - name: async without a bundled transport
+        run: cargo build -p hivecomb --no-default-features --features async
+      - name: reqwest transport
+        run: cargo build -p hivecomb --no-default-features --features reqwest-transport
+      - name: all features
+        run: cargo build -p hivecomb --all-features
+
+  lint:
+    name: fmt and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --all-features
+      - run: cargo clippy -p hivecomb --no-default-features
+      - name: docs build without warnings
+        run: cargo doc -p hivecomb --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  python:
+    name: python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # abi3, so one wheel serves all of these. Testing the ends catches an
+        # accidental dependency on a version-specific detail.
+        python: ["3.8", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: build the extension module
+        run: |
+          cargo build --release -p hivecomb-py
+          mkdir -p dist
+          cp target/release/libhivecomb.so dist/hivecomb.so
+      - name: compatibility suite
+        env:
+          PYTHONPATH: dist:python
+          # Never inherit a developer's real config into a test run: test_cli
+          # mutates whatever COMB_CONFIG points at.
+          COMB_CONFIG: ${{ runner.temp }}/comb-config.json
+        run: python python/test_compat.py
+      - name: CLI suite
+        env:
+          PYTHONPATH: dist:python
+          COMB_CONFIG: ${{ runner.temp }}/comb-cli-config.json
+        run: python python/test_cli.py
+
+  node:
+    name: node on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+        working-directory: hivecomb-node
+      - run: npm run build
+        working-directory: hivecomb-node
+      - run: npm test
+        working-directory: hivecomb-node
+
+  packaging:
+    name: crate packages cleanly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Catches a file that only exists locally, or one that should not ship.
+      - run: cargo package -p hivecomb
+      - name: list what would be published
+        run: cargo package -p hivecomb --list

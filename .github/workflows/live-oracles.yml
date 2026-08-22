@@ -1,0 +1,103 @@
+# The checks that ask a Hive node whether we are still right.
+#
+# These are the highest-value tests in the project — on 2026-08-22 the
+# serialization oracle found four defects that 292 unit tests and the beem
+# differential oracle had all missed — but they are also the only ones that can
+# fail for reasons that have nothing to do with this repository: a node being
+# slow, a node being down, rate limiting.
+#
+# So they run on a schedule and on demand, never as a gate on a pull request.
+# A scheduled run is also how a hardfork that changes serialization gets
+# noticed, which is the failure mode no offline test can ever catch.
+name: live oracles
+
+on:
+  schedule:
+    # Daily. The chain does not change often, but when it does, this is the
+    # thing that says so.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      account:
+        description: "Account to read for the authority oracle (never signed for)"
+        required: false
+        default: "noc-dev"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: live-oracles
+  cancel-in-progress: false
+
+jobs:
+  oracles:
+    name: hived oracles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: build the extension module
+        run: |
+          cargo build --release -p hivecomb-py
+          mkdir -p dist
+          cp target/release/libhivecomb.so dist/hivecomb.so
+
+      # Does hived serialize every operation to the same bytes we do? This needs
+      # no account and no key, and writes nothing to the chain.
+      - name: serialization oracle
+        env:
+          PYTHONPATH: dist
+        run: python tests/hived_serialization_oracle.py
+
+      # Does every operation ask for the authority hived requires? Also keyless:
+      # get_potential_signatures answers it from an unsigned transaction.
+      - name: authority oracle
+        env:
+          PYTHONPATH: dist
+          HIVE_ACCOUNT: ${{ github.event.inputs.account || 'noc-dev' }}
+        run: python tests/hived_authority_oracle.py
+
+      - name: open an issue if an oracle failed
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Live oracle failed on ' +
+              new Date().toISOString().slice(0, 10);
+            // Do not pile up one issue per day for the same outage.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'live-oracle',
+            });
+            if (existing.data.length > 0) {
+              core.info('An open live-oracle issue already exists; not filing another.');
+              return;
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              labels: ['live-oracle'],
+              body: [
+                'A scheduled live oracle run failed.',
+                '',
+                `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+                  `/actions/runs/${context.runId}`,
+                '',
+                'This is either a public node being unavailable — in which case',
+                're-run it and close this — or hived changed something we',
+                'encode. The second case is the reason this workflow exists.',
+                '',
+                'Check the serialization oracle first: it names the operation',
+                'whose digest stopped matching.',
+              ].join('\n'),
+            });

@@ -26,7 +26,12 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 aes-gcm = "0.10"
 scrypt = { version = "0.11", default-features = false }
-pbkdf2 = { version = "0.12", default-features = false }
+# `hmac` is what provides `pbkdf2_hmac`, used by BIP-39 seed derivation. It is a
+# default feature, so `default-features = false` drops it -- and the build still
+# succeeded because `scrypt` (pulled in by `wallet` and `bip38`, both on by
+# default) enabled it through feature unification. `--features bip32` alone did
+# not compile. Named explicitly so the feature stands on its own.
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 unicode-normalization = "0.1"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }

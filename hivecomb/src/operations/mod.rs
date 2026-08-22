@@ -210,9 +210,9 @@ impl<'de> serde::Deserialize<'de> for RecurrentTransferExtension {
                     .clone()
             }
             serde_json::Value::Array(items) if items.len() == 2 => {
-                let tag = items[0].as_u64().ok_or_else(|| {
-                    D::Error::custom("extension tag is not an integer")
-                })?;
+                let tag = items[0]
+                    .as_u64()
+                    .ok_or_else(|| D::Error::custom("extension tag is not an integer"))?;
                 if tag != 1 {
                     return Err(D::Error::custom(format!(
                         "unknown recurrent_transfer extension variant {tag}"

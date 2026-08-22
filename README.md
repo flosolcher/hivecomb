@@ -1,5 +1,8 @@
 # hivecomb
 
+[![CI](https://github.com/flosolcher/hivecomb/actions/workflows/ci.yml/badge.svg)](https://github.com/flosolcher/hivecomb/actions/workflows/ci.yml)
+[![live oracles](https://github.com/flosolcher/hivecomb/actions/workflows/live-oracles.yml/badge.svg)](https://github.com/flosolcher/hivecomb/actions/workflows/live-oracles.yml)
+
 Hive blockchain keys, Graphene serialization and **offline** transaction signing — in
 Rust, with Python bindings.
 
@@ -61,7 +64,7 @@ is slow — and signing usually sits inside somebody's deadline. Removing the ro
 removes an entire class of failure that no amount of retry tuning can remove, because
 the retry tuning *is* the workaround.
 
-**2. beem has defects that fail silently.** Twenty-one of them are catalogued in
+**2. beem has defects that fail silently.** Twenty-five of them are catalogued in
 [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md) with file, line, and consequence. The ones
 that matter most are not crashes — they are the paths that produce a *valid-looking
 signature over the wrong bytes*: a bare `except:` that falls back to the pre-hardfork-24
@@ -148,6 +151,7 @@ tests/  differential_beem.py         — the oracle against beem
         hived_broadcast_check.py      — the one thing that needs a real account
 SECURITY_FINDINGS.md                  — findings in beem, with file:line
 BROADCAST.md                          — what is proven, and what needs the chain
+CHANGELOG.md                          — what changed, and what was retracted
 CREDITS.md                            — upstream authorship
 ```
 
