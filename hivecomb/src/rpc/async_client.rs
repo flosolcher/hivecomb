@@ -23,10 +23,15 @@
 //! `#[async_trait]` box, and the retry backoff takes a **caller-supplied sleep**, so
 //! tokio, async-std and smol all work:
 //!
-//! ```ignore
+//! ```text
 //! let client = AsyncNodeClient::new(transport, nodes)?
 //!     .with_retries(3, Duration::from_millis(250), |d| Box::pin(tokio::time::sleep(d)));
 //! ```
+//!
+//! That is a sketch — `transport` stands for whichever `AsyncTransport` you supply, so
+//! it is marked `text` rather than `ignore`. `ignore` would claim it is Rust that
+//! happens not to be run, which invites someone to paste it. For a compiled version see
+//! [`tokio_sleeper`](crate::rpc::tokio_sleeper), whose example is a real doctest.
 //!
 //! Enable `reqwest-transport` for a working transport and a tokio sleeper if you would
 //! rather not wire that up.

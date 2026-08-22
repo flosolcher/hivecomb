@@ -71,10 +71,24 @@ impl AsyncTransport for ReqwestTransport {
 /// The client takes the sleep rather than assuming one so that no executor is baked
 /// into the async layer. This is the convenience for the common case:
 ///
-/// ```ignore
-/// let client = AsyncNodeClient::new(ReqwestTransport::new()?, nodes)?
-///     .with_retries(3, Duration::from_millis(250), tokio_sleeper());
+/// ```no_run
+/// use hivecomb::rpc::{AsyncNodeClient, ReqwestTransport, tokio_sleeper};
+/// use std::time::Duration;
+///
+/// # fn main() -> hivecomb::Result<()> {
+/// let client = AsyncNodeClient::new(
+///     ReqwestTransport::new()?,
+///     vec!["https://api.hive.blog".into()],
+/// )?
+/// .with_retries(3, Duration::from_millis(250), tokio_sleeper());
+/// # let _ = client;
+/// # Ok(())
+/// # }
 /// ```
+///
+/// `no_run`, not `ignore`: it is compiled on every `cargo test`, so a change to
+/// either signature breaks the build rather than rotting silently in a comment. It
+/// is not executed, because that would need a network and a tokio runtime.
 pub fn tokio_sleeper() -> impl Fn(Duration) -> tokio::time::Sleep + Send + Sync + 'static {
     tokio::time::sleep
 }

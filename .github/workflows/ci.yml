@@ -146,6 +146,17 @@ jobs:
       - run: npm test
         working-directory: hivecomb-node
 
+  audit:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # A signing library inherits its dependencies' vulnerabilities. This checks the
+      # tree against the RustSec advisory database.
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   packaging:
     name: crate packages cleanly
     runs-on: ubuntu-latest

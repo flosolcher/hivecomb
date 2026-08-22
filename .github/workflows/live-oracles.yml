@@ -26,12 +26,24 @@ on:
 permissions:
   contents: read
   issues: write
+  checks: write
 
 concurrency:
   group: live-oracles
   cancel-in-progress: false
 
 jobs:
+  # An advisory is published against a dependency without anyone touching this
+  # repository, which is the same reason the oracles run on a schedule.
+  audit:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   oracles:
     name: hived oracles
     runs-on: ubuntu-latest
