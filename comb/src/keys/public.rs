@@ -138,6 +138,14 @@ impl Ord for PublicKey {
     }
 }
 
+impl crate::reader::GrapheneDeserialize for PublicKey {
+    /// A public key is a bare 33-byte fixed array with no length prefix.
+    fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
+        let bytes = r.raw(COMPRESSED_PUBKEY_LEN)?;
+        Self::from_bytes(&bytes)
+    }
+}
+
 /// Public keys render in their prefixed form. The `STM` prefix is used, which is
 /// correct for Hive mainnet; testnet callers should render explicitly with
 /// [`PublicKey::to_prefixed`].

@@ -21,6 +21,7 @@ use crate::asset::Amount;
 use crate::authority::Authority;
 use crate::error::{Error, Result};
 use crate::keys::PublicKey;
+use crate::reader::{GrapheneDeserialize, Reader};
 use crate::types::{
     write_array, write_bool, write_i16, write_optional, write_string, write_u16, write_u32,
     write_u64, write_varint32, GrapheneSerialize, PointInTime,
@@ -1440,6 +1441,464 @@ impl serde::Serialize for Operation {
     }
 }
 
+/// Read an `extensions_type` that this crate always writes empty.
+///
+/// A non-empty extensions array means the sender is using a protocol feature this
+/// build does not model. Silently dropping it would produce a value that
+/// re-serializes to different bytes, so it is refused.
+fn read_no_extensions(r: &mut Reader<'_>) -> Result<NoExtensions> {
+    let count = r.varint32()?;
+    if count != 0 {
+        return Err(Error::ser(format!(
+            "operation carries {count} extension(s), which this build does not model"
+        )));
+    }
+    Ok(NoExtensions)
+}
+
+impl GrapheneDeserialize for ChainProperties {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(ChainProperties {
+            account_creation_fee: Amount::read_from(r)?,
+            maximum_block_size: r.u32()?,
+            hbd_interest_rate: r.u16()?,
+        })
+    }
+}
+
+impl GrapheneDeserialize for BlockId {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        let bytes = r.raw(20)?;
+        let mut out = [0u8; 20];
+        out.copy_from_slice(&bytes);
+        Ok(BlockId(out))
+    }
+}
+
+impl GrapheneDeserialize for Price {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Price {
+            base: Amount::read_from(r)?,
+            quote: Amount::read_from(r)?,
+        })
+    }
+}
+
+impl GrapheneDeserialize for Beneficiary {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(Beneficiary {
+            account: r.string()?,
+            weight: r.u16()?,
+        })
+    }
+}
+
+impl GrapheneDeserialize for WitnessProperty {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(WitnessProperty {
+            key: r.string()?,
+            value: r.bytes()?,
+        })
+    }
+}
+
+impl GrapheneDeserialize for CommentOptionsExtension {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        match r.varint32()? {
+            0 => Ok(CommentOptionsExtension::Beneficiaries(r.array()?)),
+            tag => Err(Error::ser(format!(
+                "unknown comment_options extension variant {tag}"
+            ))),
+        }
+    }
+}
+
+impl GrapheneDeserialize for RecurrentTransferExtension {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        match r.varint32()? {
+            1 => Ok(RecurrentTransferExtension::PairId(r.u16()?)),
+            tag => Err(Error::ser(format!(
+                "unknown recurrent_transfer extension variant {tag}"
+            ))),
+        }
+    }
+}
+
+impl GrapheneDeserialize for Operation {
+    /// Read the variant tag, then the payload.
+    ///
+    /// A virtual operation id is refused: virtual operations never appear inside a
+    /// transaction, so encountering one means the bytes are not a transaction.
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        let tag = r.varint32()?;
+        let id = OperationId::from_u32(tag)?;
+        if id.is_virtual() {
+            return Err(Error::ser(format!(
+                "{} is a virtual operation and cannot appear in a transaction",
+                id.name()
+            )));
+        }
+        Ok(match id {
+            OperationId::Vote => Operation::Vote(Vote {
+                voter: r.string()?,
+                author: r.string()?,
+                permlink: r.string()?,
+                weight: r.i16()?,
+            }),
+            OperationId::Comment => Operation::Comment(Comment {
+                parent_author: r.string()?,
+                parent_permlink: r.string()?,
+                author: r.string()?,
+                permlink: r.string()?,
+                title: r.string()?,
+                body: r.string()?,
+                json_metadata: r.string()?,
+            }),
+            OperationId::AccountCreate => Operation::AccountCreate(AccountCreate {
+                fee: Amount::read_from(r)?,
+                creator: r.string()?,
+                new_account_name: r.string()?,
+                owner: Authority::read_from(r)?,
+                active: Authority::read_from(r)?,
+                posting: Authority::read_from(r)?,
+                memo_key: PublicKey::read_from(r)?,
+                json_metadata: r.string()?,
+            }),
+            OperationId::AccountUpdate => Operation::AccountUpdate(AccountUpdate {
+                account: r.string()?,
+                owner: r.optional::<Authority>()?,
+                active: r.optional::<Authority>()?,
+                posting: r.optional::<Authority>()?,
+                memo_key: PublicKey::read_from(r)?,
+                json_metadata: r.string()?,
+            }),
+            OperationId::WitnessUpdate => Operation::WitnessUpdate(WitnessUpdate {
+                owner: r.string()?,
+                url: r.string()?,
+                block_signing_key: PublicKey::read_from(r)?,
+                props: ChainProperties::read_from(r)?,
+                fee: Amount::read_from(r)?,
+            }),
+            OperationId::WitnessBlockApprove => {
+                Operation::WitnessBlockApprove(WitnessBlockApprove {
+                    witness: r.string()?,
+                    block_id: BlockId::read_from(r)?,
+                })
+            }
+            OperationId::RequestAccountRecovery => {
+                Operation::RequestAccountRecovery(RequestAccountRecovery {
+                    recovery_account: r.string()?,
+                    account_to_recover: r.string()?,
+                    new_owner_authority: Authority::read_from(r)?,
+                    extensions: read_no_extensions(r)?,
+                })
+            }
+            OperationId::RecoverAccount => Operation::RecoverAccount(RecoverAccount {
+                account_to_recover: r.string()?,
+                new_owner_authority: Authority::read_from(r)?,
+                recent_owner_authority: Authority::read_from(r)?,
+                extensions: read_no_extensions(r)?,
+            }),
+            OperationId::EscrowTransfer => Operation::EscrowTransfer(EscrowTransfer {
+                from: r.string()?,
+                to: r.string()?,
+                agent: r.string()?,
+                escrow_id: r.u32()?,
+                hbd_amount: Amount::read_from(r)?,
+                hive_amount: Amount::read_from(r)?,
+                fee: Amount::read_from(r)?,
+                ratification_deadline: r.point_in_time()?,
+                escrow_expiration: r.point_in_time()?,
+                json_meta: r.string()?,
+            }),
+            OperationId::EscrowDispute => Operation::EscrowDispute(EscrowDispute {
+                from: r.string()?,
+                to: r.string()?,
+                agent: r.string()?,
+                who: r.string()?,
+                escrow_id: r.u32()?,
+            }),
+            OperationId::EscrowRelease => Operation::EscrowRelease(EscrowRelease {
+                from: r.string()?,
+                to: r.string()?,
+                agent: r.string()?,
+                who: r.string()?,
+                receiver: r.string()?,
+                escrow_id: r.u32()?,
+                hbd_amount: Amount::read_from(r)?,
+                hive_amount: Amount::read_from(r)?,
+            }),
+            OperationId::EscrowApprove => Operation::EscrowApprove(EscrowApprove {
+                from: r.string()?,
+                to: r.string()?,
+                agent: r.string()?,
+                who: r.string()?,
+                escrow_id: r.u32()?,
+                approve: r.bool()?,
+            }),
+            OperationId::CustomBinary => Operation::CustomBinary(CustomBinary {
+                required_owner_auths: r.array::<String>()?,
+                required_active_auths: r.array::<String>()?,
+                required_posting_auths: r.array::<String>()?,
+                required_auths: r.array::<Authority>()?,
+                id: r.string()?,
+                data: r.bytes()?,
+            }),
+            OperationId::ResetAccount => Operation::ResetAccount(ResetAccount {
+                reset_account: r.string()?,
+                account_to_reset: r.string()?,
+                new_owner_authority: Authority::read_from(r)?,
+            }),
+            OperationId::SetResetAccount => Operation::SetResetAccount(SetResetAccount {
+                account: r.string()?,
+                current_reset_account: r.string()?,
+                reset_account: r.string()?,
+            }),
+            OperationId::AccountCreateWithDelegation => {
+                Operation::AccountCreateWithDelegation(AccountCreateWithDelegation {
+                    fee: Amount::read_from(r)?,
+                    delegation: Amount::read_from(r)?,
+                    creator: r.string()?,
+                    new_account_name: r.string()?,
+                    owner: Authority::read_from(r)?,
+                    active: Authority::read_from(r)?,
+                    posting: Authority::read_from(r)?,
+                    memo_key: PublicKey::read_from(r)?,
+                    json_metadata: r.string()?,
+                    extensions: read_no_extensions(r)?,
+                })
+            }
+            OperationId::WitnessSetProperties => {
+                Operation::WitnessSetProperties(WitnessSetProperties {
+                    owner: r.string()?,
+                    props: r.array::<WitnessProperty>()?,
+                    extensions: read_no_extensions(r)?,
+                })
+            }
+            OperationId::Transfer => Operation::Transfer(Transfer {
+                from: r.string()?,
+                to: r.string()?,
+                amount: Amount::read_from(r)?,
+                memo: r.string()?,
+            }),
+            OperationId::TransferToVesting => Operation::TransferToVesting(TransferToVesting {
+                from: r.string()?,
+                to: r.string()?,
+                amount: Amount::read_from(r)?,
+            }),
+            OperationId::WithdrawVesting => Operation::WithdrawVesting(WithdrawVesting {
+                account: r.string()?,
+                vesting_shares: Amount::read_from(r)?,
+            }),
+            OperationId::LimitOrderCreate => Operation::LimitOrderCreate(LimitOrderCreate {
+                owner: r.string()?,
+                orderid: r.u32()?,
+                amount_to_sell: Amount::read_from(r)?,
+                min_to_receive: Amount::read_from(r)?,
+                fill_or_kill: r.bool()?,
+                expiration: r.point_in_time()?,
+            }),
+            OperationId::LimitOrderCancel => Operation::LimitOrderCancel(LimitOrderCancel {
+                owner: r.string()?,
+                orderid: r.u32()?,
+            }),
+            OperationId::FeedPublish => Operation::FeedPublish(FeedPublish {
+                publisher: r.string()?,
+                exchange_rate: Price::read_from(r)?,
+            }),
+            OperationId::Convert => Operation::Convert(Convert {
+                owner: r.string()?,
+                requestid: r.u32()?,
+                amount: Amount::read_from(r)?,
+            }),
+            OperationId::AccountWitnessVote => Operation::AccountWitnessVote(AccountWitnessVote {
+                account: r.string()?,
+                witness: r.string()?,
+                approve: r.bool()?,
+            }),
+            OperationId::AccountWitnessProxy => {
+                Operation::AccountWitnessProxy(AccountWitnessProxy {
+                    account: r.string()?,
+                    proxy: r.string()?,
+                })
+            }
+            OperationId::Custom => Operation::Custom(Custom {
+                required_auths: r.array::<String>()?,
+                id: r.u16()?,
+                data: r.bytes()?,
+            }),
+            OperationId::DeleteComment => Operation::DeleteComment(DeleteComment {
+                author: r.string()?,
+                permlink: r.string()?,
+            }),
+            OperationId::CustomJson => Operation::CustomJson(CustomJson {
+                required_auths: r.array::<String>()?,
+                required_posting_auths: r.array::<String>()?,
+                id: r.string()?,
+                json: r.string()?,
+            }),
+            OperationId::CommentOptions => Operation::CommentOptions(CommentOptions {
+                author: r.string()?,
+                permlink: r.string()?,
+                max_accepted_payout: Amount::read_from(r)?,
+                percent_hbd: r.u16()?,
+                allow_votes: r.bool()?,
+                allow_curation_rewards: r.bool()?,
+                extensions: r.array::<CommentOptionsExtension>()?,
+            }),
+            OperationId::SetWithdrawVestingRoute => {
+                Operation::SetWithdrawVestingRoute(SetWithdrawVestingRoute {
+                    from_account: r.string()?,
+                    to_account: r.string()?,
+                    percent: r.u16()?,
+                    auto_vest: r.bool()?,
+                })
+            }
+            OperationId::LimitOrderCreate2 => Operation::LimitOrderCreate2(LimitOrderCreate2 {
+                owner: r.string()?,
+                orderid: r.u32()?,
+                amount_to_sell: Amount::read_from(r)?,
+                fill_or_kill: r.bool()?,
+                exchange_rate: Price::read_from(r)?,
+                expiration: r.point_in_time()?,
+            }),
+            OperationId::ClaimAccount => Operation::ClaimAccount(ClaimAccount {
+                creator: r.string()?,
+                fee: Amount::read_from(r)?,
+                extensions: read_no_extensions(r)?,
+            }),
+            OperationId::CreateClaimedAccount => {
+                Operation::CreateClaimedAccount(CreateClaimedAccount {
+                    creator: r.string()?,
+                    new_account_name: r.string()?,
+                    owner: Authority::read_from(r)?,
+                    active: Authority::read_from(r)?,
+                    posting: Authority::read_from(r)?,
+                    memo_key: PublicKey::read_from(r)?,
+                    json_metadata: r.string()?,
+                    extensions: read_no_extensions(r)?,
+                })
+            }
+            OperationId::ChangeRecoveryAccount => {
+                Operation::ChangeRecoveryAccount(ChangeRecoveryAccount {
+                    account_to_recover: r.string()?,
+                    new_recovery_account: r.string()?,
+                    extensions: read_no_extensions(r)?,
+                })
+            }
+            OperationId::TransferToSavings => Operation::TransferToSavings(TransferToSavings {
+                from: r.string()?,
+                to: r.string()?,
+                amount: Amount::read_from(r)?,
+                memo: r.string()?,
+            }),
+            OperationId::TransferFromSavings => {
+                Operation::TransferFromSavings(TransferFromSavings {
+                    from: r.string()?,
+                    request_id: r.u32()?,
+                    to: r.string()?,
+                    amount: Amount::read_from(r)?,
+                    memo: r.string()?,
+                })
+            }
+            OperationId::CancelTransferFromSavings => {
+                Operation::CancelTransferFromSavings(CancelTransferFromSavings {
+                    from: r.string()?,
+                    request_id: r.u32()?,
+                })
+            }
+            OperationId::DeclineVotingRights => {
+                Operation::DeclineVotingRights(DeclineVotingRights {
+                    account: r.string()?,
+                    decline: r.bool()?,
+                })
+            }
+            OperationId::ClaimRewardBalance => Operation::ClaimRewardBalance(ClaimRewardBalance {
+                account: r.string()?,
+                reward_hive: Amount::read_from(r)?,
+                reward_hbd: Amount::read_from(r)?,
+                reward_vests: Amount::read_from(r)?,
+            }),
+            OperationId::DelegateVestingShares => {
+                Operation::DelegateVestingShares(DelegateVestingShares {
+                    delegator: r.string()?,
+                    delegatee: r.string()?,
+                    vesting_shares: Amount::read_from(r)?,
+                })
+            }
+            OperationId::AccountUpdate2 => Operation::AccountUpdate2(AccountUpdate2 {
+                account: r.string()?,
+                owner: r.optional::<Authority>()?,
+                active: r.optional::<Authority>()?,
+                posting: r.optional::<Authority>()?,
+                memo_key: r.optional::<PublicKey>()?,
+                json_metadata: r.string()?,
+                posting_json_metadata: r.string()?,
+                extensions: read_no_extensions(r)?,
+            }),
+            OperationId::CreateProposal => Operation::CreateProposal(CreateProposal {
+                creator: r.string()?,
+                receiver: r.string()?,
+                start_date: r.point_in_time()?,
+                end_date: r.point_in_time()?,
+                daily_pay: Amount::read_from(r)?,
+                subject: r.string()?,
+                permlink: r.string()?,
+                extensions: read_no_extensions(r)?,
+            }),
+            OperationId::UpdateProposalVotes => {
+                Operation::UpdateProposalVotes(UpdateProposalVotes {
+                    voter: r.string()?,
+                    proposal_ids: r.array::<u64>()?,
+                    approve: r.bool()?,
+                    extensions: read_no_extensions(r)?,
+                })
+            }
+            OperationId::RemoveProposal => Operation::RemoveProposal(RemoveProposal {
+                proposal_owner: r.string()?,
+                proposal_ids: r.array::<u64>()?,
+                extensions: read_no_extensions(r)?,
+            }),
+            OperationId::UpdateProposal => Operation::UpdateProposal(UpdateProposal {
+                proposal_id: r.u64()?,
+                creator: r.string()?,
+                daily_pay: Amount::read_from(r)?,
+                subject: r.string()?,
+                permlink: r.string()?,
+                extensions: read_no_extensions(r)?,
+            }),
+            OperationId::CollateralizedConvert => {
+                Operation::CollateralizedConvert(CollateralizedConvert {
+                    owner: r.string()?,
+                    requestid: r.u32()?,
+                    amount: Amount::read_from(r)?,
+                })
+            }
+            OperationId::RecurrentTransfer => Operation::RecurrentTransfer(RecurrentTransfer {
+                from: r.string()?,
+                to: r.string()?,
+                amount: Amount::read_from(r)?,
+                memo: r.string()?,
+                recurrence: r.u16()?,
+                executions: r.u16()?,
+                extensions: r.array::<RecurrentTransferExtension>()?,
+            }),
+            OperationId::Pow | OperationId::Pow2 => {
+                return Err(Error::ser(format!(
+                    "{} is an obsolete mining operation that this build does not decode",
+                    id.name()
+                )))
+            }
+            other => {
+                return Err(Error::ser(format!(
+                    "operation {} has no decoder",
+                    other.name()
+                )))
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1816,6 +2275,81 @@ mod tests {
             built.len(),
             (FIRST_VIRTUAL_OP as usize) - obsolete_mining.len()
         );
+    }
+
+    #[test]
+    fn every_operation_round_trips_through_the_wire_format() {
+        // The property that hand-written assertions cannot give: serialize every
+        // variant, read it back, serialize again, and require the bytes to match.
+        // Any field written but not read (or read in the wrong order) shows up here
+        // without anyone having to remember to assert on it.
+        for op in sample_of_every_variant() {
+            let wire = op.to_wire().unwrap();
+            let mut r = Reader::new(&wire, Chain::Hive);
+            let back = Operation::read_from(&mut r)
+                .unwrap_or_else(|e| panic!("{:?} failed to decode: {e}", op.id()));
+            r.expect_end()
+                .unwrap_or_else(|e| panic!("{:?} left bytes unread: {e}", op.id()));
+            assert_eq!(back.id(), op.id());
+            assert_eq!(
+                back.to_wire().unwrap(),
+                wire,
+                "{:?} did not round trip",
+                op.id()
+            );
+        }
+    }
+
+    #[test]
+    fn decoding_refuses_virtual_operations() {
+        // A virtual operation can never be in a transaction; seeing one means the
+        // bytes are not a transaction.
+        let mut wire = Vec::new();
+        crate::types::write_varint32(&mut wire, OperationId::ProducerReward.as_u32());
+        let mut r = Reader::new(&wire, Chain::Hive);
+        let err = Operation::read_from(&mut r).unwrap_err();
+        assert!(format!("{err}").contains("virtual"));
+    }
+
+    #[test]
+    fn decoding_refuses_unknown_operation_ids() {
+        let mut wire = Vec::new();
+        crate::types::write_varint32(&mut wire, 200);
+        let mut r = Reader::new(&wire, Chain::Hive);
+        assert!(Operation::read_from(&mut r).is_err());
+    }
+
+    #[test]
+    fn decoding_refuses_unmodelled_extensions() {
+        // claim_account with a non-empty extensions array. Dropping it silently would
+        // give a value that re-serializes to different bytes.
+        let mut wire = Vec::new();
+        crate::types::write_varint32(&mut wire, OperationId::ClaimAccount.as_u32());
+        crate::types::write_string(&mut wire, "alice").unwrap();
+        hive("0.000 HIVE").append_to(&mut wire).unwrap();
+        crate::types::write_varint32(&mut wire, 1); // one extension
+        let mut r = Reader::new(&wire, Chain::Hive);
+        let err = Operation::read_from(&mut r).unwrap_err();
+        assert!(format!("{err}").contains("extension"));
+    }
+
+    #[test]
+    fn truncated_operations_error_rather_than_panic() {
+        let op = Operation::Transfer(Transfer {
+            from: "alice".into(),
+            to: "bob".into(),
+            amount: hive("1.000 HIVE"),
+            memo: "hello".into(),
+        });
+        let wire = op.to_wire().unwrap();
+        for cut in 1..wire.len() {
+            let mut r = Reader::new(&wire[..cut], Chain::Hive);
+            let decoded = Operation::read_from(&mut r).and_then(|o| {
+                r.expect_end()?;
+                Ok(o)
+            });
+            assert!(decoded.is_err(), "truncating to {cut} bytes should fail");
+        }
     }
 
     /// One value of every `Operation` variant, so the tests above cover all of them.

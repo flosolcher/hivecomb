@@ -37,6 +37,7 @@ pub mod chains;
 pub mod error;
 pub mod keys;
 pub mod operations;
+pub mod reader;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 pub mod sign;
@@ -50,6 +51,7 @@ pub use chains::{Chain, ChainId};
 pub use error::{Error, Result};
 pub use keys::{PrivateKey, PublicKey};
 pub use operations::{Operation, OperationId};
+pub use reader::{GrapheneDeserialize, Reader};
 pub use sign::Signature;
 pub use tapos::TaposCache;
 pub use transaction::{BlockRef, SignedTransaction, Transaction};

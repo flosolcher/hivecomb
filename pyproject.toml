@@ -23,8 +23,8 @@ classifiers = [
 dynamic = ["version"]
 
 [project.urls]
-Repository = "https://github.com/monacofriends/comb-rs"
-Issues = "https://github.com/monacofriends/comb-rs/issues"
+Repository = "https://github.com/flosolcher/comb-rs"
+Issues = "https://github.com/flosolcher/comb-rs/issues"
 
 [tool.maturin]
 manifest-path = "comb-py/Cargo.toml"

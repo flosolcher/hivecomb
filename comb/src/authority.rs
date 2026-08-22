@@ -27,6 +27,7 @@
 
 use crate::error::{Error, Result};
 use crate::keys::PublicKey;
+use crate::reader::GrapheneDeserialize;
 use crate::types::{write_array, write_u16, write_u32, GrapheneSerialize};
 
 /// A weighted account entry.
@@ -161,6 +162,36 @@ impl GrapheneSerialize for Authority {
         write_array(out, &self.account_auths)?;
         write_array(out, &self.key_auths)?;
         Ok(())
+    }
+}
+
+impl crate::reader::GrapheneDeserialize for AccountAuth {
+    fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
+        Ok(AccountAuth {
+            account: r.string()?,
+            weight: r.u16()?,
+        })
+    }
+}
+
+impl crate::reader::GrapheneDeserialize for KeyAuth {
+    fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
+        Ok(KeyAuth {
+            key: PublicKey::read_from(r)?,
+            weight: r.u16()?,
+        })
+    }
+}
+
+impl crate::reader::GrapheneDeserialize for Authority {
+    /// Reads and re-validates: the sort and uniqueness invariants are enforced on the
+    /// way in, so a peer that sent an unsorted or duplicated map is rejected rather
+    /// than quietly accepted into a value that would then re-serialize differently.
+    fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
+        let weight_threshold = r.u32()?;
+        let account_auths: Vec<AccountAuth> = r.array()?;
+        let key_auths: Vec<KeyAuth> = r.array()?;
+        Authority::new(weight_threshold, account_auths, key_auths)
     }
 }
 

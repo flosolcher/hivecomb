@@ -250,6 +250,40 @@ impl GrapheneSerialize for Amount {
     }
 }
 
+impl crate::reader::GrapheneDeserialize for Amount {
+    /// Read the 16-byte legacy asset: `int64` units, `uint8` precision, 7-byte
+    /// NUL-padded symbol.
+    ///
+    /// The symbol is resolved against the reader's chain and cross-checked: an asset
+    /// whose declared precision disagrees with the chain's is refused rather than
+    /// silently reinterpreted, because that mismatch means the bytes are not the asset
+    /// they claim to be.
+    fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
+        let units = r.i64()?;
+        let precision = r.u8()?;
+        let raw = r.raw(SYMBOL_FIELD_LEN)?;
+        let end = raw.iter().position(|&b| b == 0).unwrap_or(SYMBOL_FIELD_LEN);
+        if raw[end..].iter().any(|&b| b != 0) {
+            return Err(Error::ser("asset symbol has data after its NUL terminator"));
+        }
+        let symbol = std::str::from_utf8(&raw[..end])
+            .map_err(|_| Error::ser("asset symbol is not valid UTF-8"))?;
+        let asset = r.chain().asset(symbol)?;
+        if asset.precision != precision {
+            return Err(Error::ser(format!(
+                "asset {symbol} declares precision {precision}, but the chain uses {}",
+                asset.precision
+            )));
+        }
+        Ok(Amount {
+            units,
+            precision,
+            symbol: asset.symbol,
+            wire_symbol: asset.wire_symbol,
+        })
+    }
+}
+
 /// Amounts render in Hive's textual form, `"1.234 HIVE"`, which is what
 /// `condenser_api` and `network_broadcast_api` accept.
 impl serde::Serialize for Amount {
@@ -366,6 +400,50 @@ mod tests {
         // Account history still returns legacy symbols in places.
         let a = Amount::parse("1.000 STEEM", Chain::Hive).unwrap();
         assert_eq!(a.symbol(), "HIVE");
+    }
+
+    #[test]
+    fn wire_round_trip() {
+        use crate::reader::{GrapheneDeserialize, Reader};
+        for text in [
+            "1.234 HIVE",
+            "-1.234 HIVE",
+            "0.000 HBD",
+            "9007199254740.993 HIVE",
+            "123456789012.345678 VESTS",
+        ] {
+            let a = Amount::parse(text, Chain::Hive).unwrap();
+            let wire = a.to_wire().unwrap();
+            let mut r = Reader::new(&wire, Chain::Hive);
+            let back = Amount::read_from(&mut r).unwrap();
+            r.expect_end().unwrap();
+            assert_eq!(back, a, "round trip of {text}");
+            assert_eq!(back.to_string(), text);
+        }
+    }
+
+    #[test]
+    fn a_mismatched_precision_is_refused_on_read() {
+        use crate::reader::{GrapheneDeserialize, Reader};
+        let mut wire = Amount::parse("1.000 HIVE", Chain::Hive)
+            .unwrap()
+            .to_wire()
+            .unwrap();
+        wire[8] = 6; // claim VESTS precision on a STEEM symbol
+        let mut r = Reader::new(&wire, Chain::Hive);
+        assert!(Amount::read_from(&mut r).is_err());
+    }
+
+    #[test]
+    fn an_unknown_symbol_is_refused_on_read() {
+        use crate::reader::{GrapheneDeserialize, Reader};
+        let mut wire = Amount::parse("1.000 HIVE", Chain::Hive)
+            .unwrap()
+            .to_wire()
+            .unwrap();
+        wire[9..16].copy_from_slice(b"DOGE\0\0\0");
+        let mut r = Reader::new(&wire, Chain::Hive);
+        assert!(Amount::read_from(&mut r).is_err());
     }
 
     #[test]

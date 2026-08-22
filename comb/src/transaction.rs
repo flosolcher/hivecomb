@@ -33,6 +33,7 @@ use crate::chains::{Chain, ChainId};
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey};
 use crate::operations::Operation;
+use crate::reader::Reader;
 use crate::sign::{self, Signature};
 use crate::types::{
     write_array, write_u16, write_u32, write_varint32, GrapheneSerialize, PointInTime,
@@ -267,6 +268,87 @@ fn operation_to_json(op: &Operation) -> Result<serde_json::Value> {
     Ok(serde_json::json!([op.id().name(), value]))
 }
 
+impl Transaction {
+    /// Decode a transaction body from the Graphene wire format.
+    ///
+    /// This is the inverse of [`Transaction::body_bytes`] and reads the same field set
+    /// — signatures are not part of it.
+    pub fn from_body_bytes(bytes: &[u8], chain: Chain) -> Result<Self> {
+        let mut r = Reader::new(bytes, chain);
+        let tx = Self::read_body(&mut r)?;
+        r.expect_end()?;
+        Ok(tx)
+    }
+
+    fn read_body(r: &mut Reader<'_>) -> Result<Self> {
+        let ref_block_num = r.u16()?;
+        let ref_block_prefix = r.u32()?;
+        let expiration = r.point_in_time()?;
+        let operations: Vec<Operation> = r.array()?;
+        let extension_count = r.varint32()?;
+        if extension_count != 0 {
+            return Err(Error::ser(format!(
+                "transaction carries {extension_count} extension(s), which this build does not model"
+            )));
+        }
+        if operations.is_empty() {
+            return Err(Error::ser("transaction contains no operations"));
+        }
+        Ok(Transaction {
+            ref_block_num,
+            ref_block_prefix,
+            expiration,
+            operations,
+        })
+    }
+}
+
+impl SignedTransaction {
+    /// Serialize the full transaction including its signatures.
+    ///
+    /// This is the form used for peer-to-peer transmission and for storing a
+    /// transaction in a block. It is **not** what gets hashed for the digest — see
+    /// [`Transaction::body_bytes`].
+    pub fn to_wire(&self) -> Result<Vec<u8>> {
+        let mut out = self.transaction.body_bytes()?;
+        write_varint32(
+            &mut out,
+            u32::try_from(self.signatures.len()).map_err(|_| {
+                Error::ser("transaction carries an implausible number of signatures")
+            })?,
+        );
+        for sig in &self.signatures {
+            out.extend_from_slice(sig.as_bytes());
+        }
+        Ok(out)
+    }
+
+    /// Decode a full signed transaction.
+    pub fn from_wire(bytes: &[u8], chain: Chain) -> Result<Self> {
+        let mut r = Reader::new(bytes, chain);
+        let transaction = Transaction::read_body(&mut r)?;
+        let count = r.varint32()? as usize;
+        // Each signature is 65 bytes; refuse a count the buffer cannot hold before
+        // allocating for it.
+        if count.saturating_mul(crate::sign::SIGNATURE_LEN) > r.remaining() {
+            return Err(Error::ser(format!(
+                "transaction claims {count} signatures but only {} bytes remain",
+                r.remaining()
+            )));
+        }
+        let mut signatures = Vec::with_capacity(count);
+        for _ in 0..count {
+            let raw = r.raw(crate::sign::SIGNATURE_LEN)?;
+            signatures.push(Signature::from_bytes(&raw)?);
+        }
+        r.expect_end()?;
+        Ok(SignedTransaction {
+            transaction,
+            signatures,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,6 +381,87 @@ mod tests {
             expiration: PointInTime::from_unix(1_700_000_000).unwrap(),
             operations: vec![a_vote()],
         }
+    }
+
+    #[test]
+    fn transaction_body_round_trips() {
+        let tx = fixed_tx();
+        let bytes = tx.body_bytes().unwrap();
+        let back = Transaction::from_body_bytes(&bytes, Chain::Hive).unwrap();
+        assert_eq!(back, tx);
+        assert_eq!(
+            back.digest(Chain::Hive).unwrap(),
+            tx.digest(Chain::Hive).unwrap()
+        );
+        assert_eq!(back.id().unwrap(), tx.id().unwrap());
+    }
+
+    #[test]
+    fn signed_transaction_round_trips_with_its_signatures() {
+        let key = PrivateKey::from_wif(TEST_WIF).unwrap();
+        let other = PrivateKey::generate();
+        let signed = fixed_tx()
+            .sign(&[key.clone(), other.clone()], Chain::Hive)
+            .unwrap();
+        let bytes = signed.to_wire().unwrap();
+        let back = SignedTransaction::from_wire(&bytes, Chain::Hive).unwrap();
+        assert_eq!(back, signed);
+        // ...and the recovered signatures still verify.
+        back.verify(&[key.public_key(), other.public_key()], Chain::Hive)
+            .unwrap();
+    }
+
+    #[test]
+    fn signatures_are_not_part_of_the_digest() {
+        let key = PrivateKey::from_wif(TEST_WIF).unwrap();
+        let tx = fixed_tx();
+        let unsigned_digest = tx.digest(Chain::Hive).unwrap();
+        let signed = tx.clone().sign(&[key], Chain::Hive).unwrap();
+        assert_eq!(
+            signed.transaction.digest(Chain::Hive).unwrap(),
+            unsigned_digest
+        );
+        // The full wire form is longer than the body by exactly the signature block.
+        assert_eq!(
+            signed.to_wire().unwrap().len(),
+            tx.body_bytes().unwrap().len() + 1 + 65
+        );
+    }
+
+    #[test]
+    fn a_truncated_transaction_errors_at_every_cut() {
+        let key = PrivateKey::from_wif(TEST_WIF).unwrap();
+        let signed = fixed_tx().sign(&[key], Chain::Hive).unwrap();
+        let bytes = signed.to_wire().unwrap();
+        for cut in 0..bytes.len() {
+            assert!(
+                SignedTransaction::from_wire(&bytes[..cut], Chain::Hive).is_err(),
+                "truncating to {cut} bytes should fail"
+            );
+        }
+        assert!(SignedTransaction::from_wire(&bytes, Chain::Hive).is_ok());
+    }
+
+    #[test]
+    fn an_implausible_signature_count_is_refused_before_allocating() {
+        let mut bytes = fixed_tx().body_bytes().unwrap();
+        write_varint32(&mut bytes, 4_000_000_000);
+        let err = SignedTransaction::from_wire(&bytes, Chain::Hive).unwrap_err();
+        assert!(format!("{err}").contains("only"));
+    }
+
+    #[test]
+    fn a_transaction_with_no_operations_is_refused_on_read() {
+        let mut bytes = Vec::new();
+        write_u16(&mut bytes, 1);
+        write_u32(&mut bytes, 2);
+        PointInTime::from_unix(1_700_000_000)
+            .unwrap()
+            .append_to(&mut bytes)
+            .unwrap();
+        write_varint32(&mut bytes, 0); // zero operations
+        write_varint32(&mut bytes, 0); // no extensions
+        assert!(Transaction::from_body_bytes(&bytes, Chain::Hive).is_err());
     }
 
     #[test]
