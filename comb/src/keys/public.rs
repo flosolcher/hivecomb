@@ -146,6 +146,15 @@ impl crate::reader::GrapheneDeserialize for PublicKey {
     }
 }
 
+/// Public keys arrive as prefixed strings; any known Hive prefix is accepted.
+impl<'de> serde::Deserialize<'de> for PublicKey {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let s = String::deserialize(d)?;
+        PublicKey::from_prefixed_any(&s).map_err(D::Error::custom)
+    }
+}
+
 /// Public keys render in their prefixed form. The `STM` prefix is used, which is
 /// correct for Hive mainnet; testnet callers should render explicitly with
 /// [`PublicKey::to_prefixed`].

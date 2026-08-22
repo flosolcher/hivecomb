@@ -249,6 +249,15 @@ impl GrapheneSerialize for PointInTime {
     }
 }
 
+/// Timestamps arrive as `2026-08-22T14:30:00`, always UTC.
+impl<'de> serde::Deserialize<'de> for PointInTime {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let s = String::deserialize(d)?;
+        PointInTime::parse(&s).map_err(D::Error::custom)
+    }
+}
+
 /// Timestamps render in Hive's JSON form, `2026-08-22T14:30:00`.
 impl serde::Serialize for PointInTime {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {

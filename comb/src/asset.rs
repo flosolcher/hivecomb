@@ -284,6 +284,68 @@ impl crate::reader::GrapheneDeserialize for Amount {
     }
 }
 
+/// Amounts arrive from the API in two different shapes, and both are accepted.
+///
+/// `condenser_api` and the legacy forms send the textual `"1.234 HIVE"`. `database_api`
+/// and `account_history_api` in appbase mode send the NAI object
+/// `{"amount": "1234", "precision": 3, "nai": "@@000000021"}`. beem handled both too,
+/// but by branching on `isinstance` inside `Amount.__init__` across four cases.
+///
+/// Deserialization resolves symbols against **Hive mainnet**. For a testnet, decode
+/// the raw JSON and use [`Amount::from_units`] with the right chain.
+impl<'de> serde::Deserialize<'de> for Amount {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Text(String),
+            Nai {
+                amount: NaiAmount,
+                precision: u8,
+                nai: String,
+            },
+        }
+
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum NaiAmount {
+            // hived sends the unit count as a string to survive JSON's 53-bit number
+            // limit -- the same limit that corrupts beem's float parsing (finding 16).
+            Text(String),
+            Number(i64),
+        }
+
+        match Repr::deserialize(d)? {
+            Repr::Text(text) => Amount::parse(&text, Chain::Hive).map_err(D::Error::custom),
+            Repr::Nai {
+                amount,
+                precision,
+                nai,
+            } => {
+                let units = match amount {
+                    NaiAmount::Text(t) => t.parse::<i64>().map_err(D::Error::custom)?,
+                    NaiAmount::Number(n) => n,
+                };
+                let asset = Chain::Hive.asset(&nai).map_err(D::Error::custom)?;
+                if asset.precision != precision {
+                    return Err(D::Error::custom(format!(
+                        "asset {nai} declares precision {precision}, chain uses {}",
+                        asset.precision
+                    )));
+                }
+                Ok(Amount {
+                    units,
+                    precision,
+                    symbol: asset.symbol,
+                    wire_symbol: asset.wire_symbol,
+                })
+            }
+        }
+    }
+}
+
 /// Amounts render in Hive's textual form, `"1.234 HIVE"`, which is what
 /// `condenser_api` and `network_broadcast_api` accept.
 impl serde::Serialize for Amount {
@@ -444,6 +506,46 @@ mod tests {
         wire[9..16].copy_from_slice(b"DOGE\0\0\0");
         let mut r = Reader::new(&wire, Chain::Hive);
         assert!(Amount::read_from(&mut r).is_err());
+    }
+
+    #[test]
+    fn json_accepts_both_the_textual_and_nai_forms() {
+        let from_text: Amount = serde_json::from_str(r#""1.234 HIVE""#).unwrap();
+        assert_eq!(from_text.units(), 1234);
+
+        let from_nai: Amount =
+            serde_json::from_str(r#"{"amount":"1234","precision":3,"nai":"@@000000021"}"#).unwrap();
+        assert_eq!(from_nai, from_text);
+
+        // A numeric (rather than string) amount is also accepted.
+        let numeric: Amount =
+            serde_json::from_str(r#"{"amount":1234,"precision":3,"nai":"@@000000021"}"#).unwrap();
+        assert_eq!(numeric, from_text);
+    }
+
+    #[test]
+    fn json_keeps_full_precision_on_large_nai_amounts() {
+        // hived sends the unit count as a string precisely so it survives JSON's
+        // 53-bit number limit. This is the value beem's float path corrupts.
+        let big: Amount = serde_json::from_str(
+            r#"{"amount":"123456789012345678","precision":6,"nai":"@@000000037"}"#,
+        )
+        .unwrap();
+        assert_eq!(big.units(), 123_456_789_012_345_678);
+        assert_eq!(big.to_string(), "123456789012.345678 VESTS");
+    }
+
+    #[test]
+    fn json_rejects_a_mismatched_precision_or_unknown_nai() {
+        assert!(serde_json::from_str::<Amount>(
+            r#"{"amount":"1","precision":9,"nai":"@@000000021"}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<Amount>(
+            r#"{"amount":"1","precision":3,"nai":"@@999999999"}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<Amount>(r#""1.234 DOGE""#).is_err());
     }
 
     #[test]

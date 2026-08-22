@@ -50,7 +50,7 @@ pub use authority::Authority;
 pub use chains::{Chain, ChainId};
 pub use error::{Error, Result};
 pub use keys::{PrivateKey, PublicKey};
-pub use operations::{Operation, OperationId};
+pub use operations::{AnyOperation, Operation, OperationId, VirtualOperation};
 pub use reader::{GrapheneDeserialize, Reader};
 pub use sign::Signature;
 pub use tapos::TaposCache;

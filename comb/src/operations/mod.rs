@@ -14,8 +14,10 @@
 //! order is pinned by tests.
 
 mod ids;
+pub mod virtual_ops;
 
 pub use ids::{OperationId, FIRST_VIRTUAL_OP, LAST_OP};
+pub use virtual_ops::VirtualOperation;
 
 use crate::asset::Amount;
 use crate::authority::Authority;
@@ -31,7 +33,7 @@ use crate::types::{
 pub const MAX_CUSTOM_ID_LEN: usize = 32;
 
 /// A price, as used by `feed_publish` and `limit_order_create2`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Price {
     pub base: Amount,
     pub quote: Amount,
@@ -45,7 +47,7 @@ impl GrapheneSerialize for Price {
 }
 
 /// A comment beneficiary route.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Beneficiary {
     pub account: String,
     /// Share in basis points; the total across all beneficiaries may not exceed 10000.
@@ -108,6 +110,27 @@ impl serde::Serialize for CommentOptionsExtension {
     }
 }
 
+/// Parsed from `[0, {"beneficiaries": [...]}]`.
+impl<'de> serde::Deserialize<'de> for CommentOptionsExtension {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        #[derive(serde::Deserialize)]
+        struct Beneficiaries {
+            beneficiaries: Vec<Beneficiary>,
+        }
+        let (tag, value) = <(u32, serde_json::Value)>::deserialize(d)?;
+        match tag {
+            0 => {
+                let b: Beneficiaries = serde_json::from_value(value).map_err(D::Error::custom)?;
+                Ok(CommentOptionsExtension::Beneficiaries(b.beneficiaries))
+            }
+            other => Err(D::Error::custom(format!(
+                "unknown comment_options extension variant {other}"
+            ))),
+        }
+    }
+}
+
 /// A `recurrent_transfer` extension. Tag 1 carries the HF28 `pair_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -145,6 +168,93 @@ impl serde::Serialize for RecurrentTransferExtension {
     }
 }
 
+/// Parsed from `[1, {"pair_id": n}]`.
+impl<'de> serde::Deserialize<'de> for RecurrentTransferExtension {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        #[derive(serde::Deserialize)]
+        struct PairId {
+            pair_id: u16,
+        }
+        let (tag, value) = <(u32, serde_json::Value)>::deserialize(d)?;
+        match tag {
+            1 => {
+                let p: PairId = serde_json::from_value(value).map_err(D::Error::custom)?;
+                Ok(RecurrentTransferExtension::PairId(p.pair_id))
+            }
+            other => Err(D::Error::custom(format!(
+                "unknown recurrent_transfer extension variant {other}"
+            ))),
+        }
+    }
+}
+
+/// A `vector<char>` field, which hived renders in JSON as a hex string.
+///
+/// `custom` and `custom_binary` both carry one. Modelling it as a distinct type keeps
+/// the hex encoding in one place instead of at each call site.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HexBytes(pub Vec<u8>);
+
+impl HexBytes {
+    /// Parse a hex string.
+    pub fn from_hex(s: &str) -> Result<Self> {
+        let s = s.trim();
+        if s.len() % 2 != 0 {
+            return Err(Error::field("hex buffer has an odd number of characters"));
+        }
+        (0..s.len() / 2)
+            .map(|i| {
+                u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+                    .map_err(|_| Error::field("buffer is not valid hex"))
+            })
+            .collect::<Result<Vec<u8>>>()
+            .map(HexBytes)
+    }
+
+    /// Lowercase hex.
+    pub fn to_hex(&self) -> String {
+        self.0.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// The raw bytes.
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<Vec<u8>> for HexBytes {
+    fn from(v: Vec<u8>) -> Self {
+        HexBytes(v)
+    }
+}
+
+impl serde::Serialize for HexBytes {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_hex())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for HexBytes {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let s = String::deserialize(d)?;
+        HexBytes::from_hex(&s).map_err(D::Error::custom)
+    }
+}
+
+impl GrapheneSerialize for HexBytes {
+    fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+        crate::types::write_bytes(out, &self.0)
+    }
+}
+
+impl GrapheneDeserialize for HexBytes {
+    fn read_from(r: &mut Reader<'_>) -> Result<Self> {
+        Ok(HexBytes(r.bytes()?))
+    }
+}
+
 /// An empty `extensions_type`, which most operations carry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct NoExtensions;
@@ -153,6 +263,21 @@ impl GrapheneSerialize for NoExtensions {
     fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
         write_varint32(out, 0);
         Ok(())
+    }
+}
+
+/// Accepts `[]`; a non-empty array is refused rather than silently dropped.
+impl<'de> serde::Deserialize<'de> for NoExtensions {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let v = Vec::<serde_json::Value>::deserialize(d)?;
+        if !v.is_empty() {
+            return Err(D::Error::custom(format!(
+                "operation carries {} extension(s), which this build does not model",
+                v.len()
+            )));
+        }
+        Ok(NoExtensions)
     }
 }
 
@@ -171,7 +296,7 @@ macro_rules! op_struct {
         }
     ) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
         pub struct $name {
             $( $(#[$fmeta])* pub $field : $ty ),*
         }
@@ -293,7 +418,7 @@ op_struct! {
     Custom {
         required_auths: Vec<String>,
         id: u16,
-        data: Vec<u8>,
+        data: HexBytes,
     }
 }
 
@@ -568,6 +693,14 @@ impl GrapheneSerialize for BlockId {
     }
 }
 
+impl<'de> serde::Deserialize<'de> for BlockId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let s = String::deserialize(d)?;
+        BlockId::from_hex(&s).map_err(D::Error::custom)
+    }
+}
+
 impl serde::Serialize for BlockId {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         s.serialize_str(&self.to_hex())
@@ -576,7 +709,7 @@ impl serde::Serialize for BlockId {
 
 /// `legacy_chain_properties` — the witness-voted chain parameters carried by
 /// `witness_update` and `pow`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChainProperties {
     /// Fee to create an account. Serialized as a legacy asset.
     pub account_creation_fee: Amount,
@@ -655,6 +788,18 @@ impl GrapheneSerialize for WitnessProperty {
         write_string(out, &self.key)?;
         crate::types::write_bytes(out, &self.value)?;
         Ok(())
+    }
+}
+
+/// Parsed from `["key", "<hex>"]`.
+impl<'de> serde::Deserialize<'de> for WitnessProperty {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let (key, hex) = <(String, String)>::deserialize(d)?;
+        Ok(WitnessProperty {
+            key,
+            value: HexBytes::from_hex(&hex).map_err(D::Error::custom)?.0,
+        })
     }
 }
 
@@ -813,7 +958,7 @@ op_struct! {
         required_posting_auths: Vec<String>,
         required_auths: Vec<Authority>,
         id: String,
-        data: Vec<u8>,
+        data: HexBytes,
     }
 }
 
@@ -1098,7 +1243,7 @@ impl Operation {
                 // keeps the caller's order.
                 write_array(out, &o.required_auths)?;
                 write_string(out, &o.id)?;
-                crate::types::write_bytes(out, &o.data)?;
+                o.data.append_to(out)?;
             }
             Operation::ResetAccount(o) => {
                 write_string(out, &o.reset_account)?;
@@ -1183,7 +1328,7 @@ impl Operation {
             Operation::Custom(o) => {
                 write_sorted_account_set(out, &o.required_auths, "required_auths")?;
                 write_u16(out, o.id);
-                crate::types::write_bytes(out, &o.data)?;
+                o.data.append_to(out)?;
             }
             Operation::DeleteComment(o) => {
                 write_string(out, &o.author)?;
@@ -1642,7 +1787,7 @@ impl GrapheneDeserialize for Operation {
                 required_posting_auths: r.array::<String>()?,
                 required_auths: r.array::<Authority>()?,
                 id: r.string()?,
-                data: r.bytes()?,
+                data: HexBytes::read_from(r)?,
             }),
             OperationId::ResetAccount => Operation::ResetAccount(ResetAccount {
                 reset_account: r.string()?,
@@ -1725,7 +1870,7 @@ impl GrapheneDeserialize for Operation {
             OperationId::Custom => Operation::Custom(Custom {
                 required_auths: r.array::<String>()?,
                 id: r.u16()?,
-                data: r.bytes()?,
+                data: HexBytes::read_from(r)?,
             }),
             OperationId::DeleteComment => Operation::DeleteComment(DeleteComment {
                 author: r.string()?,
@@ -1896,6 +2041,246 @@ impl GrapheneDeserialize for Operation {
                 )))
             }
         })
+    }
+}
+
+impl Operation {
+    /// Parse from either JSON shape the API uses.
+    ///
+    /// `condenser_api` sends `["transfer", {...}]`; appbase APIs send
+    /// `{"type": "transfer_operation", "value": {...}}`. beem handled both too, in
+    /// `Operation.__init__`, by branching on `isinstance` and slicing the `_operation`
+    /// suffix with a hard-coded `[:-10]`.
+    ///
+    /// A virtual operation name is refused: virtual operations cannot be broadcast, so
+    /// decoding one into a signable [`Operation`] would invite exactly that mistake.
+    /// Use [`AnyOperation::from_json`] when reading history, where both kinds appear.
+    pub fn from_json(value: &serde_json::Value) -> Result<Self> {
+        let (name, payload) = virtual_ops::split_operation_json(value)?;
+        let id = OperationId::from_name(&name)?;
+        if id.is_virtual() {
+            return Err(Error::ser(format!(
+                "{} is a virtual operation and cannot be built as a signable operation",
+                id.name()
+            )));
+        }
+        Self::from_parts(id, payload)
+    }
+
+    fn from_parts(id: OperationId, value: serde_json::Value) -> Result<Self> {
+        let de_err =
+            |e: serde_json::Error| Error::ser(format!("could not decode {}: {e}", id.name()));
+        Ok(match id {
+            OperationId::Vote => Operation::Vote(serde_json::from_value(value).map_err(de_err)?),
+            OperationId::Comment => {
+                Operation::Comment(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::AccountCreate => {
+                Operation::AccountCreate(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::AccountUpdate => {
+                Operation::AccountUpdate(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::WitnessUpdate => {
+                Operation::WitnessUpdate(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::WitnessBlockApprove => {
+                Operation::WitnessBlockApprove(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::RequestAccountRecovery => {
+                Operation::RequestAccountRecovery(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::RecoverAccount => {
+                Operation::RecoverAccount(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::EscrowTransfer => {
+                Operation::EscrowTransfer(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::EscrowDispute => {
+                Operation::EscrowDispute(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::EscrowRelease => {
+                Operation::EscrowRelease(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::EscrowApprove => {
+                Operation::EscrowApprove(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CustomBinary => {
+                Operation::CustomBinary(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::ResetAccount => {
+                Operation::ResetAccount(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::SetResetAccount => {
+                Operation::SetResetAccount(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::AccountCreateWithDelegation => Operation::AccountCreateWithDelegation(
+                serde_json::from_value(value).map_err(de_err)?,
+            ),
+            OperationId::WitnessSetProperties => {
+                Operation::WitnessSetProperties(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::Transfer => {
+                Operation::Transfer(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::TransferToVesting => {
+                Operation::TransferToVesting(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::WithdrawVesting => {
+                Operation::WithdrawVesting(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::LimitOrderCreate => {
+                Operation::LimitOrderCreate(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::LimitOrderCancel => {
+                Operation::LimitOrderCancel(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::FeedPublish => {
+                Operation::FeedPublish(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::Convert => {
+                Operation::Convert(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::AccountWitnessVote => {
+                Operation::AccountWitnessVote(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::AccountWitnessProxy => {
+                Operation::AccountWitnessProxy(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::Custom => {
+                Operation::Custom(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::DeleteComment => {
+                Operation::DeleteComment(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CustomJson => {
+                Operation::CustomJson(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CommentOptions => {
+                Operation::CommentOptions(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::SetWithdrawVestingRoute => {
+                Operation::SetWithdrawVestingRoute(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::LimitOrderCreate2 => {
+                Operation::LimitOrderCreate2(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::ClaimAccount => {
+                Operation::ClaimAccount(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CreateClaimedAccount => {
+                Operation::CreateClaimedAccount(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::ChangeRecoveryAccount => {
+                Operation::ChangeRecoveryAccount(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::TransferToSavings => {
+                Operation::TransferToSavings(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::TransferFromSavings => {
+                Operation::TransferFromSavings(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CancelTransferFromSavings => {
+                Operation::CancelTransferFromSavings(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::DeclineVotingRights => {
+                Operation::DeclineVotingRights(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::ClaimRewardBalance => {
+                Operation::ClaimRewardBalance(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::DelegateVestingShares => {
+                Operation::DelegateVestingShares(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::AccountUpdate2 => {
+                Operation::AccountUpdate2(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CreateProposal => {
+                Operation::CreateProposal(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::UpdateProposalVotes => {
+                Operation::UpdateProposalVotes(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::RemoveProposal => {
+                Operation::RemoveProposal(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::UpdateProposal => {
+                Operation::UpdateProposal(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::CollateralizedConvert => {
+                Operation::CollateralizedConvert(serde_json::from_value(value).map_err(de_err)?)
+            }
+            OperationId::RecurrentTransfer => {
+                Operation::RecurrentTransfer(serde_json::from_value(value).map_err(de_err)?)
+            }
+            other => {
+                return Err(Error::ser(format!(
+                    "operation {} cannot be built from JSON",
+                    other.name()
+                )))
+            }
+        })
+    }
+
+    /// Render as `[name, {fields}]`, the form `network_broadcast_api` expects.
+    pub fn to_json(&self) -> Result<serde_json::Value> {
+        let value = serde_json::to_value(self)
+            .map_err(|e| Error::ser(format!("could not render operation as JSON: {e}")))?;
+        Ok(serde_json::json!([self.id().name(), value]))
+    }
+}
+
+/// An operation of either kind, as it appears in account history and block output.
+///
+/// History interleaves both: a `transfer` a user signed sits next to the
+/// `fill_recurrent_transfer` the chain emitted. Keeping them one type to read and two
+/// types to construct is the point — you can iterate history without special-casing,
+/// but you cannot accidentally try to broadcast something the chain emits.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(untagged)]
+pub enum AnyOperation {
+    /// An operation someone signed and broadcast.
+    Signed(Operation),
+    /// An operation the chain emitted.
+    Virtual(VirtualOperation),
+}
+
+impl AnyOperation {
+    /// Parse from either JSON shape, accepting both kinds.
+    pub fn from_json(value: &serde_json::Value) -> Result<Self> {
+        let (name, payload) = virtual_ops::split_operation_json(value)?;
+        let id = OperationId::from_name(&name)?;
+        if id.is_virtual() {
+            VirtualOperation::from_json(value).map(AnyOperation::Virtual)
+        } else {
+            Operation::from_parts(id, payload).map(AnyOperation::Signed)
+        }
+    }
+
+    /// The operation's id.
+    pub fn id(&self) -> OperationId {
+        match self {
+            AnyOperation::Signed(o) => o.id(),
+            AnyOperation::Virtual(o) => o.id(),
+        }
+    }
+
+    /// The hived name, without the `_operation` suffix.
+    pub fn name(&self) -> &'static str {
+        self.id().name()
+    }
+
+    /// Whether this is an operation the chain emitted.
+    pub fn is_virtual(&self) -> bool {
+        matches!(self, AnyOperation::Virtual(_))
+    }
+
+    /// The signable operation, if this is one.
+    pub fn as_signed(&self) -> Option<&Operation> {
+        match self {
+            AnyOperation::Signed(o) => Some(o),
+            AnyOperation::Virtual(_) => None,
+        }
     }
 }
 
@@ -2187,7 +2572,7 @@ mod tests {
             required_posting_auths: vec![],
             required_auths: vec![],
             id: "app".into(),
-            data: vec![0xde, 0xad],
+            data: HexBytes(vec![0xde, 0xad]),
         });
         let wire = op.to_wire().unwrap();
         assert_eq!(wire[0], 35);
@@ -2352,6 +2737,166 @@ mod tests {
         }
     }
 
+    #[test]
+    fn json_round_trips_every_operation() {
+        // Same property as the wire round trip, over the JSON representation the API
+        // uses. Catches a field that serializes but does not parse back.
+        for op in sample_of_every_variant() {
+            let json = op.to_json().unwrap();
+            let back = Operation::from_json(&json)
+                .unwrap_or_else(|e| panic!("{:?} failed to parse back: {e}", op.id()));
+            assert_eq!(back, op, "{:?} did not round trip through JSON", op.id());
+        }
+    }
+
+    #[test]
+    fn json_accepts_both_the_condenser_and_appbase_shapes() {
+        let condenser = serde_json::json!([
+            "transfer",
+            {"from": "alice", "to": "bob", "amount": "1.000 HIVE", "memo": "hi"}
+        ]);
+        let appbase = serde_json::json!({
+            "type": "transfer_operation",
+            "value": {"from": "alice", "to": "bob", "amount": "1.000 HIVE", "memo": "hi"}
+        });
+        let a = Operation::from_json(&condenser).unwrap();
+        let b = Operation::from_json(&appbase).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(a.id(), OperationId::Transfer);
+    }
+
+    #[test]
+    fn json_refuses_a_virtual_operation_as_signable() {
+        let vop = serde_json::json!([
+            "producer_reward",
+            {"producer": "alice", "vesting_shares": "1.000000 VESTS"}
+        ]);
+        assert!(Operation::from_json(&vop).is_err());
+        // ...but AnyOperation reads it happily.
+        let any = AnyOperation::from_json(&vop).unwrap();
+        assert!(any.is_virtual());
+        assert_eq!(any.name(), "producer_reward");
+        assert!(any.as_signed().is_none());
+    }
+
+    #[test]
+    fn json_refuses_malformed_and_unknown_shapes() {
+        assert!(Operation::from_json(&serde_json::json!("transfer")).is_err());
+        assert!(Operation::from_json(&serde_json::json!(["transfer"])).is_err());
+        assert!(Operation::from_json(&serde_json::json!(["nope", {}])).is_err());
+        assert!(Operation::from_json(&serde_json::json!({"type": 1, "value": {}})).is_err());
+    }
+
+    #[test]
+    fn json_refuses_unmodelled_extensions() {
+        let op = serde_json::json!([
+            "claim_account",
+            {"creator": "alice", "fee": "0.000 HIVE", "extensions": [[99, {}]]}
+        ]);
+        assert!(Operation::from_json(&op).is_err());
+    }
+
+    #[test]
+    fn any_operation_reads_a_mixed_history_stream() {
+        // What account_history_api actually hands back: signed and virtual, interleaved.
+        let stream = serde_json::json!([
+            ["transfer", {"from": "a", "to": "b", "amount": "1.000 HIVE", "memo": ""}],
+            ["producer_reward", {"producer": "w", "vesting_shares": "1.000000 VESTS"}],
+            ["fill_recurrent_transfer", {"from": "a", "to": "b", "amount": "1.000 HIVE",
+                                         "memo": "", "remaining_executions": 5}],
+            ["curation_reward", {"curator": "c", "reward": "1.000000 VESTS",
+                                 "author": "a", "permlink": "p",
+                                 "payout_must_be_claimed": true}],
+        ]);
+        let ops: Vec<AnyOperation> = stream
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| AnyOperation::from_json(v).unwrap())
+            .collect();
+        assert_eq!(ops.len(), 4);
+        assert!(!ops[0].is_virtual());
+        assert!(ops[1].is_virtual() && ops[2].is_virtual() && ops[3].is_virtual());
+        assert_eq!(
+            ops.iter().map(|o| o.id().as_u32()).collect::<Vec<_>>(),
+            vec![2, 64, 83, 52]
+        );
+    }
+
+    #[test]
+    fn hf25_and_later_virtual_operations_parse() {
+        // Everything here postdates beem's last release.
+        let cases = [
+            (
+                "limit_order_cancelled",
+                serde_json::json!({"seller": "a", "orderid": 1, "amount_back": "1.000 HIVE"}),
+            ),
+            (
+                "proposal_fee",
+                serde_json::json!({"creator": "a", "treasury": "t", "proposal_id": 1, "fee": "10.000 HBD"}),
+            ),
+            ("producer_missed", serde_json::json!({"producer": "w"})),
+            (
+                "proxy_cleared",
+                serde_json::json!({"account": "a", "proxy": "p"}),
+            ),
+            (
+                "escrow_approved",
+                serde_json::json!({"from": "a", "to": "b", "agent": "c", "escrow_id": 1, "fee": "0.100 HIVE"}),
+            ),
+            (
+                "declined_voting_rights",
+                serde_json::json!({"account": "a"}),
+            ),
+            (
+                "expired_account_notification",
+                serde_json::json!({"account": "a"}),
+            ),
+            (
+                "collateralized_convert_immediate_conversion",
+                serde_json::json!({"owner": "a", "requestid": 1, "hbd_out": "1.000 HBD"}),
+            ),
+        ];
+        for (name, value) in cases {
+            let json = serde_json::json!([name, value]);
+            let op = AnyOperation::from_json(&json)
+                .unwrap_or_else(|e| panic!("{name} failed to parse: {e}"));
+            assert!(op.is_virtual(), "{name} should be virtual");
+            assert_eq!(op.name(), name);
+        }
+    }
+
+    #[test]
+    fn a_recurrent_transfer_fill_carries_its_pair_id() {
+        let json = serde_json::json!([
+            "fill_recurrent_transfer",
+            {"from": "a", "to": "b", "amount": "1.000 HIVE", "memo": "",
+             "remaining_executions": 3, "extensions": [[1, {"pair_id": 7}]]}
+        ]);
+        let op = AnyOperation::from_json(&json).unwrap();
+        match op {
+            AnyOperation::Virtual(VirtualOperation::FillRecurrentTransfer(v)) => {
+                assert_eq!(v.remaining_executions, 3);
+                assert_eq!(v.extensions, vec![RecurrentTransferExtension::PairId(7)]);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn virtual_operation_ids_are_the_chains_not_beems() {
+        // beem reports each of these two lower, because two non-virtual operations are
+        // missing from its table.
+        for (name, id) in [
+            ("fill_convert_request", 50u32),
+            ("producer_reward", 64),
+            ("fill_recurrent_transfer", 83),
+            ("declined_voting_rights", 92),
+        ] {
+            assert_eq!(OperationId::from_name(name).unwrap().as_u32(), id);
+        }
+    }
+
     /// One value of every `Operation` variant, so the tests above cover all of them.
     fn sample_of_every_variant() -> Vec<Operation> {
         let key = crate::keys::PrivateKey::generate().public_key();
@@ -2450,7 +2995,7 @@ mod tests {
                 required_posting_auths: vec![],
                 required_auths: vec![],
                 id: "x".into(),
-                data: vec![1, 2, 3],
+                data: HexBytes(vec![1, 2, 3]),
             }),
             Operation::ResetAccount(ResetAccount {
                 reset_account: "a".into(),
@@ -2545,7 +3090,7 @@ mod tests {
             Operation::Custom(Custom {
                 required_auths: vec!["a".into()],
                 id: 1,
-                data: vec![1, 2, 3],
+                data: HexBytes(vec![1, 2, 3]),
             }),
             Operation::DeleteComment(DeleteComment {
                 author: "a".into(),

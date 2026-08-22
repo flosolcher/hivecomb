@@ -165,6 +165,42 @@ impl GrapheneSerialize for Authority {
     }
 }
 
+/// hived sends authority entries as `["name", weight]` pairs.
+impl<'de> serde::Deserialize<'de> for AccountAuth {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let (account, weight) = <(String, u16)>::deserialize(d)?;
+        Ok(AccountAuth { account, weight })
+    }
+}
+
+/// Sent as `["STM7...", weight]`.
+impl<'de> serde::Deserialize<'de> for KeyAuth {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let (key, weight) = <(PublicKey, u16)>::deserialize(d)?;
+        Ok(KeyAuth { key, weight })
+    }
+}
+
+/// Re-validates on the way in: an authority from the network that is unsorted or
+/// duplicated is refused rather than accepted into a value that would then
+/// re-serialize differently.
+impl<'de> serde::Deserialize<'de> for Authority {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        #[derive(serde::Deserialize)]
+        struct Raw {
+            weight_threshold: u32,
+            #[serde(default)]
+            account_auths: Vec<AccountAuth>,
+            #[serde(default)]
+            key_auths: Vec<KeyAuth>,
+        }
+        let raw = Raw::deserialize(d)?;
+        Authority::new(raw.weight_threshold, raw.account_auths, raw.key_auths)
+            .map_err(D::Error::custom)
+    }
+}
+
 impl crate::reader::GrapheneDeserialize for AccountAuth {
     fn read_from(r: &mut crate::reader::Reader<'_>) -> Result<Self> {
         Ok(AccountAuth {
