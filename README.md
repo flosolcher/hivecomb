@@ -185,6 +185,8 @@ tests/  differential_beem.py          the oracle against beem
         hived_broadcast_check.py      the one thing that needs a real account
 
 README.md            you are here
+CONTRIBUTING.md      how to verify a change — read before touching serialization
+SECURITY.md          how to report a defect that could cost someone funds
 MIGRATION.md         replacing beem: what is identical, what diverges, what is missing
 SECURITY_FINDINGS.md what was wrong in beem, with file:line — and one retraction
 BROADCAST.md         what is proven against the live chain, and what is not
