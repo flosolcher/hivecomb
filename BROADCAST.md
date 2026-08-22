@@ -25,20 +25,23 @@ PYTHONPATH=<dir with hivecomb.so> python3 tests/hived_serialization_oracle.py
 57 cases, one per signable operation plus awkward values where they matter. No account,
 no keys with value, no broadcast.
 
-**This found three real defects that 292 unit tests and a 134-case differential oracle
+**This found four real defects that 292 unit tests and a 134-case differential oracle
 against beem had all missed:**
 
 | defect | why the existing tests could not see it |
 |---|---|
 | `escrow_transfer` field order — amounts before `escrow_id`/`agent`, `json_meta` before the deadlines | round-trip tests wrote and read with the same wrong order |
 | `limit_order_create2` — `exchange_rate` precedes `fill_or_kill` | same |
-| `recurrent_transfer` `pair_id` extension serialized to JSON as `[1, {…}]`, which hived rejects outright | the binary form was right; only the node objects |
+| `recurrent_transfer` `pair_id` is `uint8_t`, written here as `u16` | the beem corpus never reached this operation |
+| that extension's JSON must be `{"type","value"}`; hived refuses `[1, {…}]` outright | the binary form was right; only the node objects |
 
-and it overturned a fourth — see [finding 8](SECURITY_FINDINGS.md#8), which claimed
-beem mangles control characters and was exactly backwards.
+and it overturned a fifth thing, in the other direction — see
+[finding 8](SECURITY_FINDINGS.md#8), which claimed beem mangles control characters and
+was exactly backwards, so `hivecomb` had "fixed" something that was never broken and
+broke itself doing it.
 
-All four would have produced transactions the chain refuses. None of them were
-detectable without asking hived.
+All four defects would have produced transactions the chain refuses, and so would the
+control-character handling. None were detectable without asking hived.
 
 ---
 
