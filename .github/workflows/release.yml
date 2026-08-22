@@ -1,0 +1,337 @@
+# Publishes to crates.io, PyPI and npm from one tag.
+#
+# The default is a DRY RUN. Publishing is irreversible in a way most CI is not:
+# crates.io cannot unpublish, npm only within 72 hours and under conditions,
+# PyPI never reuses a filename. So this workflow is built to be exercised fully
+# without publishing anything, and only a pushed tag actually releases.
+#
+#   Rehearse:  Actions -> release -> Run workflow  (dry run: true)
+#   Release:   git tag v0.1.0 && git push origin v0.1.0
+#
+# One-time setup before the first real release:
+#
+#   crates.io  a CARGO_REGISTRY_TOKEN secret with publish scope
+#   npm        an NPM_TOKEN secret (automation token)
+#   PyPI       trusted publishing configured for BOTH projects, `hivecomb` and
+#              `hivecomb-beem`, each pointing at this repository and the
+#              environment named below. No token is stored for PyPI.
+#
+# Four artifacts share one version number: the crate, the `hivecomb` wheels, the
+# `hivecomb-beem` shim, and the npm package with its five platform packages.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and validate everything, publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------- guard
+  guard:
+    name: versions agree
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      dry_run: ${{ steps.check.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # A tag push is the only thing that publishes.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            dry_run=false
+          else
+            dry_run="${{ inputs.dry_run }}"
+          fi
+          echo "dry_run=$dry_run" >> "$GITHUB_OUTPUT"
+
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          node=$(node -p "require('./hivecomb-node/package.json').version")
+          shim=$(sed -n 's/^version = "\(.*\)"/\1/p' python/pyproject.toml | head -1)
+
+          echo "workspace     $crate"
+          echo "npm package   $node"
+          echo "hivecomb-beem $shim"
+
+          # Four things carry this number; a mismatch ships a lie.
+          for v in "$node" "$shim"; do
+            if [ "$v" != "$crate" ]; then
+              echo "::error::version mismatch: workspace $crate, but found $v"
+              exit 1
+            fi
+          done
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF#refs/tags/v}"
+            if [ "$tag" != "$crate" ]; then
+              echo "::error::tag v$tag does not match version $crate"
+              exit 1
+            fi
+          fi
+
+          echo "version=$crate" >> "$GITHUB_OUTPUT"
+
+      # The changelog must actually mention what is being released. Cheap, and
+      # it catches the classic "tagged without writing it down".
+      - name: changelog mentions this version
+        shell: bash
+        run: |
+          v="${{ steps.check.outputs.version }}"
+          grep -q "^## \[$v\]" CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no '## [$v]' section"; exit 1; }
+
+  # ------------------------------------------------------------- crates.io
+  crate:
+    name: crates.io
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ "${{ needs.guard.outputs.dry_run }}" = "true" ]; then
+            cargo publish -p hivecomb --dry-run
+          else
+            cargo publish -p hivecomb
+          fi
+
+  # ------------------------------------------------------------ python wheels
+  wheels:
+    name: wheel ${{ matrix.name }}
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,  os: ubuntu-latest,  target: x86_64,  manylinux: "2014" }
+          - { name: linux-aarch64, os: ubuntu-latest,  target: aarch64, manylinux: "2014" }
+          - { name: macos-x86_64,  os: macos-13,       target: x86_64 }
+          - { name: macos-aarch64, os: macos-latest,   target: aarch64 }
+          - { name: windows-x64,   os: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          # abi3, so one wheel per platform serves CPython 3.8 and up.
+          args: --release --out dist
+          sccache: "true"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.name }}
+          path: dist
+
+  sdist:
+    name: sdist
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  # A wheel that imports is worth more than a wheel that builds.
+  wheel-smoke-test:
+    name: installed wheel works
+    needs: wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+      - name: install and check the cross-binding vector
+        run: |
+          python -m pip install --find-links dist --no-index hivecomb
+          cd "$(mktemp -d)"    # not the repo, so the module cannot shadow it
+          python - <<'EOF'
+          import hivecomb
+          ref = hivecomb.BlockRef.from_block_id(
+              "00000005aabbccdd00000000000000000000abcd")
+          tx = hivecomb.sign_transaction(
+              [("custom_json", {"required_auths": [],
+                                "required_posting_auths": ["alice"],
+                                "id": "my_app", "json": '{"a":1}'})],
+              ref, ["5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3"])
+          digest = hivecomb.transaction_digest(
+              [("custom_json", {"required_auths": [],
+                                "required_posting_auths": ["alice"],
+                                "id": "my_app", "json": '{"a":1}'})],
+              ref, "2026-08-22T14:30:00").hex()
+          expected = ("cef35a5b34e7ee9297de5153b363668245793c8b"
+                      "a719762ccacdde9fd85ad3d6")
+          assert digest == expected, f"{digest} != {expected}"
+          print("cross-binding digest vector matches:", digest)
+          EOF
+
+  pypi:
+    name: PyPI (hivecomb)
+    needs: [guard, wheels, sdist, wheel-smoke-test]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write        # trusted publishing; no token is stored
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - run: ls -la dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: needs.guard.outputs.dry_run == 'false'
+        with:
+          packages-dir: dist
+      - name: dry run
+        if: needs.guard.outputs.dry_run == 'true'
+        run: |
+          echo "dry run - $(ls dist | wc -l) files would be published"
+
+  # ---------------------------------------------------- the beem drop-in shim
+  pypi-shim:
+    name: PyPI (hivecomb-beem)
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pure Python: one sdist and one wheel serve every platform.
+      - run: python -m pip install build
+      - run: python -m build --outdir ../dist-shim
+        working-directory: python
+      - run: ls -la dist-shim
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: needs.guard.outputs.dry_run == 'false'
+        with:
+          packages-dir: dist-shim
+      - name: dry run
+        if: needs.guard.outputs.dry_run == 'true'
+        run: |
+          echo "dry run - $(ls dist-shim | wc -l) files would be published"
+
+  # -------------------------------------------------------------- node addon
+  node-build:
+    name: addon ${{ matrix.target }}
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          # Cross-compiled rather than built on an arm runner, which is not
+          # available on every plan for a private repository.
+          - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu, cross: true }
+          - { os: macos-13,       target: x86_64-apple-darwin }
+          - { os: macos-latest,   target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: npm install
+        working-directory: hivecomb-node
+      - name: build
+        working-directory: hivecomb-node
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            npx napi build --platform --release \
+              --target ${{ matrix.target }} --use-napi-cross
+          else
+            npx napi build --platform --release --target ${{ matrix.target }}
+          fi
+      # Only the native builds can run their own tests.
+      - name: test
+        if: matrix.cross != true
+        working-directory: hivecomb-node
+        run: npm test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: addon-${{ matrix.target }}
+          path: hivecomb-node/*.node
+          if-no-files-found: error
+
+  npm:
+    name: npm
+    needs: [guard, node-build]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+      - run: npm install
+        working-directory: hivecomb-node
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: addon-*
+          merge-multiple: true
+          path: hivecomb-node/artifacts
+      - name: assemble the platform packages
+        working-directory: hivecomb-node
+        run: |
+          ls -la artifacts
+          npx napi create-npm-dirs
+          npx napi artifacts --output-dir artifacts
+          ls -R npm
+      - name: publish
+        working-directory: hivecomb-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ needs.guard.outputs.dry_run }}" = "true" ]; then
+            npx napi pre-publish -t npm --dry-run
+            npm publish --dry-run
+          else
+            npx napi pre-publish -t npm
+            npm publish --access public
+          fi

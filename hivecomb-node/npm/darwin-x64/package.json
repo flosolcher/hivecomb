@@ -1,0 +1,32 @@
+{
+  "name": "hivecomb-darwin-x64",
+  "version": "0.1.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "hivecomb.darwin-x64.node",
+  "files": [
+    "hivecomb.darwin-x64.node"
+  ],
+  "description": "Hive blockchain keys, serialization and offline transaction signing. Native, from Rust.",
+  "keywords": [
+    "hive",
+    "blockchain",
+    "graphene",
+    "secp256k1",
+    "signing",
+    "memo",
+    "napi-rs"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flosolcher/hivecomb.git"
+  },
+  "os": [
+    "darwin"
+  ]
+}

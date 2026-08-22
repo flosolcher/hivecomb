@@ -1,0 +1,32 @@
+{
+  "name": "hivecomb-win32-x64-msvc",
+  "version": "0.1.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "hivecomb.win32-x64-msvc.node",
+  "files": [
+    "hivecomb.win32-x64-msvc.node"
+  ],
+  "description": "Hive blockchain keys, serialization and offline transaction signing. Native, from Rust.",
+  "keywords": [
+    "hive",
+    "blockchain",
+    "graphene",
+    "secp256k1",
+    "signing",
+    "memo",
+    "napi-rs"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flosolcher/hivecomb.git"
+  },
+  "os": [
+    "win32"
+  ]
+}
