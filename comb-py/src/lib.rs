@@ -28,9 +28,7 @@ use pyo3::types::{PyBytes, PyDict, PyList};
 
 use comb_core::chains::Chain as RsChain;
 use comb_core::keys::{PrivateKey as RsPrivateKey, PublicKey as RsPublicKey};
-use comb_core::operations::{
-    CustomJson as RsCustomJson, Operation as RsOperation, Transfer as RsTransfer, Vote as RsVote,
-};
+use comb_core::operations::Operation as RsOperation;
 use comb_core::sign as rs_sign;
 use comb_core::tapos::TaposCache as RsTaposCache;
 use comb_core::transaction::{BlockRef as RsBlockRef, Transaction as RsTransaction};
