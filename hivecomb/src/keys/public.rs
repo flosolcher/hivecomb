@@ -261,13 +261,17 @@ mod tests {
     use super::*;
     use crate::keys::PrivateKey;
 
+    /// A fixed key used throughout these tests.
+    ///
+    /// It is published here on purpose and must never hold value. Checked against
+    /// `account_by_key_api.get_key_references` on 2026-08-22: **no Hive account uses
+    /// it.** Do not fund it, and do not copy it into anything that will.
     const TEST_WIF: &str = "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3";
 
     #[test]
     fn derives_the_known_public_key() {
         let priv_key = PrivateKey::from_wif(TEST_WIF).unwrap();
         let pubkey = priv_key.public_key();
-        // This WIF is the standard graphenelib fixture; its STM address is stable.
         let text = pubkey.to_prefixed("STM");
         assert!(text.starts_with("STM"));
         assert_eq!(pubkey.to_bytes().len(), 33);

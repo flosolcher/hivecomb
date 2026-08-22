@@ -288,6 +288,11 @@ pub fn recover_message(message: &[u8], signature: &Signature) -> Result<PublicKe
 mod tests {
     use super::*;
 
+    /// A fixed key used throughout these tests.
+    ///
+    /// It is published here on purpose and must never hold value. Checked against
+    /// `account_by_key_api.get_key_references` on 2026-08-22: **no Hive account uses
+    /// it.** Do not fund it, and do not copy it into anything that will.
     const TEST_WIF: &str = "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3";
 
     fn key() -> PrivateKey {

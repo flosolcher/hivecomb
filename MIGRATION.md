@@ -56,9 +56,8 @@ hive = Hive(node=nodes, keys=[posting_wif], nobroadcast=True)
 tx = hive.custom_json("my_app", {"hello": "hive"}, required_posting_auths=["alice"])
 ```
 
-`python/test_compat.py` runs 25 such checks — code written against beem's API, run
-through the layer without modification — and `python/test_cli.py` runs 21 more over
-`beempy`, offline.
+`python/test_compat.py` is exactly that: code written against beem's API, run through
+the layer without modification. `python/test_cli.py` covers `beempy` offline.
 
 ### The one thing to check before you switch
 
@@ -441,7 +440,7 @@ generated corpus. `hivecomb/tests/live_fixtures.rs` parses real captured node re
 | `beem.nodelist` | `NodeList`, ranking by measured latency |
 | `beem.transactionbuilder` | `TransactionBuilder` |
 | `beem.exceptions` | the full hierarchy, names unchanged |
-| `beem.cli` (`beempy`) | all 99 beem commands registered, plus 7 new; see below |
+| `beem.cli` (`beempy`) | every beem command registered, plus 9 new; see below |
 
 ### Raises `NotImplementedError`, naming an alternative
 

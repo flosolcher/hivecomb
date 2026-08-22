@@ -168,12 +168,13 @@ class NodeClient:
         sick nodes at ten seconds each is thirty seconds before the fourth is
         tried. Racing has a worst case of **one** timeout.
 
-        That difference is the reason this exists. The specification this
-        project came from records a submit burning ~46 s on unresponsive nodes
-        and forfeiting a match, and records the fix as racing three nodes per
-        wave. :meth:`call` is still the default everywhere, because racing costs
-        the network `width` times the requests; reach for this when latency
-        matters more, which usually means a deadline.
+        That difference is the reason this exists: a transaction that misses its
+        expiration window is lost, and public Hive nodes go unresponsive often
+        enough for this to be a routine failure rather than a rare one.
+
+        :meth:`call` is still the default everywhere, because racing costs the
+        network `width` times the requests. Reach for this when latency matters
+        more, which usually means a deadline.
 
         **Safe for reads unconditionally.** Safe for broadcasting an
         already-signed transaction, because the chain deduplicates by

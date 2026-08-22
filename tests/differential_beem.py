@@ -92,7 +92,7 @@ def corpus():
         json.dumps({"k": "v" * 20000}, separators=(",", ":")),  # past a 2-byte varint
         json.dumps({"nested": {"deep": {"deeper": [1, 2, 3]}}}, separators=(",", ":")),
     ]
-    ids = ["x", "sm_team_reveal", "a" * 32]                   # 32 is hived's limit
+    ids = ["x", "my_app_action", "a" * 32]                   # 32 is hived's limit
     auth_sets = [
         ([], ["alice"]),
         ([], ["alice", "bob"]),

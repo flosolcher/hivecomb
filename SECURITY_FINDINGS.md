@@ -14,6 +14,36 @@ why these defects are still open.
 Severity is judged by **what a failure produces**, not by how hard it is to trigger.
 A bug that yields a silently-invalid signature ranks above one that raises.
 
+## Why this is published
+
+Every finding below was derived by **reading beem's published source**. Nothing was
+obtained from a running system, no credentials or user data were involved, and no
+working exploit is included or withheld.
+
+beem is **unmaintained**: 0.24.26 is its last release, its trove classifiers stop at
+Python 3.9, and its status is still `Development Status :: 4 - Beta`. There is no
+upstream that will ship a fix, so the usual sequence — report privately, wait, then
+disclose — has no counterparty. Holding these back would protect nobody and leave the
+people still running beem unable to judge their own exposure.
+
+Most of what follows is **correctness**, not security: wrong operation ids, dropped
+fields, mangled strings. Four findings are security-relevant and worth naming plainly
+for anyone still using beem today:
+
+* [3](#3) — signing can fall through to variable-time pure-Python ECDSA. This is the
+  Minerva class: signing timings leak nonce bits, and enough nonce bits recover the key.
+  Reaching it requires an attacker able to measure your signing timings, so it is a real
+  risk for a signing *service* and a remote one for a desktop wallet.
+* [4](#4) — that same path seeds the nonce partly from the wall clock.
+* [9](#9) — `repr()` of a private key is the raw scalar, so keys reach logs and
+  tracebacks through ordinary code.
+* [25](#25) — the key store at rest uses one unsalted SHA-256 and unauthenticated
+  AES-CBC. An attacker who already has the wallet file can test passphrases at raw
+  SHA-256 speed.
+
+If someone picks beem up again, this document is meant to be useful to them rather than
+adversarial, and corrections are welcome.
+
 | # | Severity | Area | One line |
 |---|---|---|---|
 | [1](#1) | Critical | op ids | Missing comma concatenates two operation names, shifting every HF25 id |

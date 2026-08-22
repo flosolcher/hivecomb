@@ -52,6 +52,9 @@ from beemgraphenebase.account import (                       # noqa: E402
 )
 from beemgraphenebase.ecdsasig import sign_message, verify_message  # noqa: E402
 
+# A fixed test key, published on purpose. Checked against
+# account_by_key_api.get_key_references on 2026-08-22: no Hive account uses it.
+# It must never hold value.
 WIF = "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3"
 PUB = "STM6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV"
 BLOCK_ID = "00000005aabbccdd00000000000000000000abcd"
@@ -195,7 +198,7 @@ def _():
     op = Custom_json(
         required_auths=[],
         required_posting_auths=["alice"],
-        id="sm_team_reveal",
+        id="my_app_action",
         json={"trx_id": "abc"},
     )
     name, fields = op.json()
@@ -283,7 +286,7 @@ def _():
     hive = Hive(node="https://invalid.example", keys=[WIF], nobroadcast=True)
     hive._tapos.store_block_id(BLOCK_ID)  # stand in for a background refresh
     tx = hive.custom_json(
-        "sm_team_reveal",
+        "my_app_action",
         {"trx_id": "abc"},
         required_posting_auths=["alice"],
     )

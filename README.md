@@ -115,9 +115,9 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Mana / voting power / RC arithmetic | done |
 | JSON-RPC client with node failover + typed accessors | done |
 | Python bindings (PyO3 / abi3) | done — keys, signing, memos, all 48 ops |
-| beem-compatible Python layer | done — drop-in, 25 checks |
+| beem-compatible Python layer | done — drop-in, with its own test suite |
 | beem object wrappers (Account, Market, …) | done |
-| `beempy` CLI | done — all 99 commands, plus 7 new |
+| `beempy` CLI | done — every beem command, plus 9 new |
 | Differential oracle vs beem | done, green |
 | Live-node fixture tests | done |
 | Authority satisfaction checking | done |
@@ -144,7 +144,7 @@ CREDITS.md                          — upstream authorship
 ## Building
 
 ```bash
-cargo test                                 # 262 tests, including 10 against live fixtures
+cargo test --all-features                  # 300 tests, 10 of them against live fixtures
 cargo build -p hivecomb --no-default-features  # signing only: no network, no cipher, no scrypt
 ```
 
@@ -155,9 +155,10 @@ combination is checked warning-free.
 
 ### Racing nodes
 
-Sequential failover has a worst case of *the sum of the timeouts*. Racing has a worst
-case of **one** — which is the difference the specification behind this project records
-as having cost it matches:
+Sequential failover has a worst case of *the sum of the timeouts*: three sick nodes at
+fifteen seconds each is forty-five seconds before the fourth is tried. Racing has a
+worst case of **one**, which is the difference between a transaction landing inside its
+window and being lost:
 
 ```rust
 // Rust, async feature: fire at three nodes, take the first acceptance.
@@ -241,10 +242,10 @@ pip install hivecomb hivecomb-beem
 
 [MIGRATION.md](MIGRATION.md) is the complete record: every defect fixed and where it is
 fixed, every deliberate behavioural divergence, everything `hivecomb` adds that beem cannot
-do, and exactly what is not implemented. `python/test_compat.py` runs 25 checks written
-against beem's API unmodified, and `python/test_cli.py` runs 21 more over `beempy`.
+do, and exactly what is not implemented. `python/test_compat.py` runs beem's own API
+unmodified through the layer, and `python/test_cli.py` covers `beempy` offline.
 
-`beempy commands --new` lists the seven commands beem has no equivalent for.
+`beempy commands --new` lists the nine commands beem has no equivalent for.
 
 ## Names
 

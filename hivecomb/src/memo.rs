@@ -312,6 +312,8 @@ pub fn decode(key: &PrivateKey, memo: &str) -> Result<String> {
 mod tests {
     use super::*;
 
+    // Fixed test keys, published on purpose. Checked on 2026-08-22: no Hive
+    // account uses either. They must never hold value.
     fn alice() -> PrivateKey {
         PrivateKey::from_wif("5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3").unwrap()
     }

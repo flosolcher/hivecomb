@@ -35,8 +35,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 14,343 lines |
-| Tests | 48 | 286 |
+| Rust source | 4,556 lines | 15,619 lines |
+| Tests | 48 | 300 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |
@@ -135,15 +135,15 @@ Reading xylem prompted the question, and the answer turned out to be more specif
 "Rust services are async".
 
 Signing in `hivecomb` needs no network, so async buys nothing there. It buys something
-on **broadcast**, which is a real call inside somebody's deadline. Sequential failover —
-what `hivecomb` did and what **xylem also does** — has a worst case of *the sum of the
-timeouts*. Three sick nodes at fifteen seconds each is forty-five seconds before the
-fourth is tried.
+on **broadcast**, which is a real call and is often inside a deadline. Sequential
+failover — what `hivecomb` did and what **xylem also does** — has a worst case of *the
+sum of the timeouts*. Three sick nodes at fifteen seconds each is forty-five seconds
+before the fourth is even tried, and a transaction that misses its window is simply
+lost.
 
-The specification this project came from records exactly that failure: a submit burning
-~46 s and forfeiting a match, with the fix being to race three nodes per wave. So the
-async layer exists to express that, and `AsyncNodeClient::race` is it — worst case one
-timeout rather than the sum.
+Racing removes that: fire at several nodes at once, take the first answer, worst case
+one timeout. `AsyncNodeClient::race` is it, and expressing it is the reason the layer is
+async at all.
 
 Two differences from xylem's async design:
 
@@ -174,6 +174,13 @@ executor.
 Reported here because it is verifiable and because it affects interoperability. It is
 not a criticism of the project — it is the kind of thing differential testing exists to
 catch, and `hivecomb` found two of its own the same way.
+
+> **Disclosure status.** Unlike beem, xylem is **actively maintained** (last commit
+> 2026-07-18), so there is someone to tell. The courteous order is to report upstream
+> first and link the report here. If you are reading this and no issue link appears
+> below, that report has not been filed yet and this section should be treated as a
+> heads-up to the maintainers rather than a public advisory. It is a correctness and
+> interoperability defect, not a key-disclosure or signature-forgery one.
 
 **`src/memo.rs` derives the ECDH shared secret from the wrong 32 bytes.**
 

@@ -2327,7 +2327,7 @@ mod tests {
         let op = Operation::CustomJson(CustomJson {
             required_auths: vec![],
             required_posting_auths: vec!["alice".into()],
-            id: "sm_team_reveal".into(),
+            id: "my_app_action".into(),
             json: r#"{"trx_id":"abc"}"#.into(),
         });
         let wire = op.to_wire().unwrap();

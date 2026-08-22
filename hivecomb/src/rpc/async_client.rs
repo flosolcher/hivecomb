@@ -8,9 +8,9 @@
 //!
 //! Sequential failover — try node 1, then node 2, then node 3 — has a worst case of
 //! *the sum of the timeouts*. Three sick nodes at 15 seconds each is 45 seconds before
-//! the fourth is even attempted. That is precisely the failure that motivated this
-//! project: the specification it came from records a submit burning ~46 s and forfeiting
-//! a match, and records the fix as racing three nodes concurrently per wave.
+//! the fourth is even attempted, and a transaction that misses its expiration window is
+//! simply lost. Public Hive nodes go unresponsive often enough that this is a routine
+//! failure rather than a rare one.
 //!
 //! [`AsyncNodeClient::race`] is that fix. It fires the same request at several nodes at
 //! once and takes the first success, so the worst case is **one** timeout rather than

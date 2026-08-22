@@ -36,9 +36,9 @@ python test_cli.py       # beempy, offline
 
 ## beempy
 
-Every one of beem's 99 commands is registered. Those this layer does not provide say so
+Every one of beem's commands is registered. The ten this layer does not provide say so
 and name an alternative rather than failing obscurely.
 
-`beempy commands` lists everything; `beempy commands --new` lists the seven that have no
+`beempy commands` lists everything; `beempy commands --new` lists the nine that have no
 beem equivalent — `recurrenttransfer`, `collateralizedconvert`, `mnemonic`, `bip38`,
-`decodetx`, `virtualops` and `commands` itself.
+`decodetx`, `virtualops`, `opsinblock`, `verifyauthority` and `commands` itself.

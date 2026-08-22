@@ -29,6 +29,9 @@ os.environ.pop("COMB_WALLET_PASSPHRASE", None)
 
 from beem.cli import COMMANDS, build_parser, main  # noqa: E402
 
+# A fixed test key, published on purpose. Checked against
+# account_by_key_api.get_key_references on 2026-08-22: no Hive account uses it.
+# It must never hold value.
 WIF = "5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3"
 PUB = "STM6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV"
 
