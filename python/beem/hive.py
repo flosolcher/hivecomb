@@ -67,6 +67,7 @@ class Hive:
         self.chain = chain
         self._tapos = comb.TaposCache(max_age_seconds=tapos_max_age)
         self.wifs = self._collect_keys(keys)
+        self._wallet = kwargs.pop("wallet", None)
 
         # beem accepted a long tail of constructor arguments. Anything unknown is
         # reported rather than ignored, because silently dropping a setting the
@@ -91,6 +92,39 @@ class Hive:
         if isinstance(keys, dict):
             return [str(v) for v in keys.values() if v]
         return [str(k) for k in keys if k]
+
+    @property
+    def wallet(self):
+        """The key store, created on first use.
+
+        Returns ``None`` when the instance was given keys directly and no wallet
+        exists, so callers can tell the two apart.
+        """
+        if self._wallet is None:
+            from .wallet import Wallet, default_wallet_path
+
+            if default_wallet_path().exists():
+                self._wallet = Wallet(blockchain_instance=self)
+        return self._wallet
+
+    @wallet.setter
+    def wallet(self, value):
+        self._wallet = value
+
+    def unlock(self, passphrase):
+        """Unlock the key store and use its keys for signing."""
+        from .wallet import Wallet
+
+        wallet = self._wallet or Wallet(blockchain_instance=self)
+        wallet.unlock(passphrase)
+        self._wallet = wallet
+        return wallet
+
+    def is_hive(self):
+        return True
+
+    def is_steem(self):
+        return False
 
     # -- chain state ------------------------------------------------------
 
@@ -313,6 +347,137 @@ class Hive:
             **kwargs,
         )
 
+    def post(self, title, body, author=None, permlink=None, reply_identifier=None,
+             json_metadata=None, comment_options=None, community=None, tags=None,
+             beneficiaries=None, self_vote=False, parse_body=False, app=None, **kwargs):
+        """Broadcast a ``comment``, optionally with ``comment_options``.
+
+        ``reply_identifier`` makes it a reply; without one it is a root post and
+        needs a category, taken from ``community`` or the first tag.
+        """
+        if author is None:
+            raise ValueError("post needs an author")
+        if reply_identifier:
+            parent_author, parent_permlink = _split_identifier(reply_identifier)
+        else:
+            parent_author = ""
+            parent_permlink = community or (tags[0] if tags else "")
+            if not parent_permlink:
+                raise ValueError("a root post needs a community or at least one tag")
+        if permlink is None:
+            permlink = _permlink_from(title) if title else f"re-{int(time.time())}"
+
+        metadata = dict(json_metadata or {})
+        if tags:
+            metadata.setdefault("tags", list(tags))
+        if app:
+            metadata.setdefault("app", app)
+
+        ops = [
+            (
+                "comment",
+                {
+                    "parent_author": parent_author,
+                    "parent_permlink": parent_permlink,
+                    "author": author,
+                    "permlink": permlink,
+                    "title": title or "",
+                    "body": body,
+                    "json_metadata": metadata,
+                },
+            )
+        ]
+
+        if comment_options or beneficiaries:
+            options = dict(comment_options or {})
+            options.setdefault("author", author)
+            options.setdefault("permlink", permlink)
+            options.setdefault("max_accepted_payout", "1000000.000 HBD")
+            options.setdefault("percent_hbd", 10000)
+            options.setdefault("allow_votes", True)
+            options.setdefault("allow_curation_rewards", True)
+            if beneficiaries:
+                options["extensions"] = [[0, {"beneficiaries": beneficiaries}]]
+            options.setdefault("extensions", [])
+            ops.append(("comment_options", options))
+
+        return self.finalizeOp(ops, **kwargs)
+
+    def comment_options(self, options, identifier, beneficiaries=None, account=None,
+                        **kwargs):
+        """Broadcast a ``comment_options`` for an existing post."""
+        author, permlink = _split_identifier(identifier)
+        fields = dict(options or {})
+        fields.update({"author": author, "permlink": permlink})
+        fields.setdefault("max_accepted_payout", "1000000.000 HBD")
+        fields.setdefault("percent_hbd", 10000)
+        fields.setdefault("allow_votes", True)
+        fields.setdefault("allow_curation_rewards", True)
+        if beneficiaries:
+            fields["extensions"] = [[0, {"beneficiaries": beneficiaries}]]
+        fields.setdefault("extensions", [])
+        return self.finalizeOp(("comment_options", fields), **kwargs)
+
+    def delete_comment(self, identifier, account=None, **kwargs):
+        author, permlink = _split_identifier(identifier)
+        return self.finalizeOp(
+            ("delete_comment", {"author": author, "permlink": permlink}), **kwargs
+        )
+
+    def claim_account(self, creator, fee="0.000 HIVE", **kwargs):
+        """Claim an account creation token."""
+        return self.finalizeOp(
+            ("claim_account", {"creator": creator, "fee": fee, "extensions": []}),
+            **kwargs,
+        )
+
+    def create_claimed_account(self, new_account_name, creator, owner_key, active_key,
+                               posting_key, memo_key, json_metadata=None, **kwargs):
+        """Create an account from a claimed token."""
+        def authority(key):
+            return {"weight_threshold": 1, "account_auths": [], "key_auths": [[key, 1]]}
+
+        return self.finalizeOp(
+            (
+                "create_claimed_account",
+                {
+                    "creator": creator,
+                    "new_account_name": new_account_name,
+                    "owner": authority(owner_key),
+                    "active": authority(active_key),
+                    "posting": authority(posting_key),
+                    "memo_key": memo_key,
+                    "json_metadata": json_metadata or {},
+                    "extensions": [],
+                },
+            ),
+            **kwargs,
+        )
+
+    def witness_feed_publish(self, base, quote="1.000 HIVE", account=None, **kwargs):
+        """Publish a witness price feed."""
+        if account is None:
+            raise ValueError("feed publishing needs the witness account")
+        return self.finalizeOp(
+            (
+                "feed_publish",
+                {
+                    "publisher": account,
+                    "exchange_rate": {"base": str(base), "quote": str(quote)},
+                },
+            ),
+            **kwargs,
+        )
+
+    def decline_voting_rights(self, decline=True, account=None, **kwargs):
+        """Irreversibly decline voting rights, after a 30-day delay."""
+        if account is None:
+            raise ValueError("decline_voting_rights needs an account")
+        return self.finalizeOp(
+            ("decline_voting_rights", {"account": account, "decline": bool(decline)}),
+            **kwargs,
+        )
+
     # -- niceties ---------------------------------------------------------
 
     def __repr__(self):
@@ -379,6 +544,14 @@ def _format_amount(amount, asset):
     quantum = Decimal(1).scaleb(-precision)
     value = Decimal(str(amount)).quantize(quantum)
     return f"{value} {asset}"
+
+
+def _permlink_from(title):
+    """A permlink from a title, the way Hive clients build one."""
+    import re as _re
+
+    slug = _re.sub(r"[^a-z0-9]+", "-", str(title).lower()).strip("-")
+    return f"{slug[:200] or 'post'}-{int(time.time())}"
 
 
 def _split_identifier(identifier):

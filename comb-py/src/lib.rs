@@ -425,6 +425,132 @@ impl PyTaposCache {
 }
 
 // ---------------------------------------------------------------------------
+// Wallet
+// ---------------------------------------------------------------------------
+
+/// An encrypted key store.
+///
+/// scrypt for the passphrase, AES-256-GCM for every entry, so a tampered file
+/// fails authentication rather than decrypting to something. beem's used one
+/// unsalted SHA-256 and AES-CBC with no MAC.
+#[pyclass(name = "Wallet", module = "comb")]
+pub struct PyWallet {
+    inner: comb_core::wallet::Wallet,
+}
+
+#[pymethods]
+impl PyWallet {
+    /// Create a new wallet. Refuses to overwrite an existing file.
+    #[staticmethod]
+    fn create(path: &str, passphrase: &str) -> PyResult<Self> {
+        Ok(PyWallet {
+            inner: comb_core::wallet::Wallet::create(path, passphrase).map_err(to_py_err)?,
+        })
+    }
+
+    /// Open an existing wallet, locked.
+    #[staticmethod]
+    fn open(path: &str) -> PyResult<Self> {
+        Ok(PyWallet {
+            inner: comb_core::wallet::Wallet::open(path).map_err(to_py_err)?,
+        })
+    }
+
+    /// Whether the wallet is locked.
+    fn is_locked(&self) -> bool {
+        self.inner.is_locked()
+    }
+
+    /// Unlock with a passphrase. Reports a wrong passphrase as such.
+    fn unlock(&mut self, passphrase: &str) -> PyResult<()> {
+        self.inner.unlock(passphrase).map_err(to_py_err)
+    }
+
+    /// Lock, dropping the derived key.
+    fn lock(&mut self) {
+        self.inner.lock();
+    }
+
+    /// Add a key, optionally tagged with the account and role it belongs to.
+    #[pyo3(signature = (wif, account = None, role = None))]
+    fn add_key(
+        &mut self,
+        wif: &str,
+        account: Option<&str>,
+        role: Option<&str>,
+    ) -> PyResult<String> {
+        let key = RsPrivateKey::parse(wif).map_err(to_py_err)?;
+        let role = role
+            .map(|r| r.parse::<comb_core::keys::Role>())
+            .transpose()
+            .map_err(to_py_err)?;
+        let public = self.inner.add_key(&key, account, role).map_err(to_py_err)?;
+        Ok(public.to_prefixed("STM"))
+    }
+
+    /// The public keys held.
+    fn public_keys(&self) -> Vec<String> {
+        self.inner.public_keys()
+    }
+
+    /// The accounts and roles known, readable while locked.
+    fn index(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        self.inner.index()
+    }
+
+    /// The WIF for a public key.
+    fn get_key(&self, public_key: &str) -> PyResult<String> {
+        let public = RsPublicKey::from_prefixed_any(public_key).map_err(to_py_err)?;
+        Ok(self
+            .inner
+            .key_for_public(&public)
+            .map_err(to_py_err)?
+            .to_wif()
+            .to_string())
+    }
+
+    /// The WIF for an account and role.
+    fn get_key_for_role(&self, account: &str, role: &str) -> PyResult<String> {
+        let role: comb_core::keys::Role = role.parse().map_err(to_py_err)?;
+        Ok(self
+            .inner
+            .key_for_role(account, role)
+            .map_err(to_py_err)?
+            .to_wif()
+            .to_string())
+    }
+
+    /// Remove a key. Returns whether one was removed.
+    fn remove_key(&mut self, public_key: &str) -> PyResult<bool> {
+        let public = RsPublicKey::from_prefixed_any(public_key).map_err(to_py_err)?;
+        self.inner.remove_key(&public).map_err(to_py_err)
+    }
+
+    /// Re-encrypt everything under a new passphrase, with a fresh salt.
+    fn change_passphrase(&mut self, new_passphrase: &str) -> PyResult<()> {
+        self.inner
+            .change_passphrase(new_passphrase)
+            .map_err(to_py_err)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<Wallet keys={} {}>",
+            self.inner.len(),
+            if self.inner.is_locked() {
+                "locked"
+            } else {
+                "unlocked"
+            }
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Transactions
 // ---------------------------------------------------------------------------
 
@@ -738,6 +864,7 @@ fn comb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPublicKey>()?;
     m.add_class::<PyBlockRef>()?;
     m.add_class::<PyTaposCache>()?;
+    m.add_class::<PyWallet>()?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_message, m)?)?;
     m.add_function(wrap_pyfunction!(recover_message, m)?)?;
