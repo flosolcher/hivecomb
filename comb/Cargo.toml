@@ -25,6 +25,7 @@ subtle.workspace = true
 rand.workspace = true
 aes = { workspace = true, optional = true }
 cbc = { workspace = true, optional = true }
+aes-gcm = { workspace = true, optional = true }
 scrypt = { workspace = true, optional = true }
 pbkdf2 = { workspace = true, optional = true }
 unicode-normalization = { workspace = true, optional = true }
@@ -33,7 +34,9 @@ time.workspace = true
 ureq = { version = "2", optional = true, default-features = false, features = ["tls", "json"] }
 
 [features]
-default = ["rpc", "ureq-transport", "memo", "bip38", "bip32"]
+default = ["rpc", "ureq-transport", "memo", "bip38", "bip32", "wallet"]
+# Encrypted key storage.
+wallet = ["dep:aes-gcm", "dep:scrypt"]
 # Encrypted memos (ECDH + AES-CBC).
 memo = ["dep:aes", "dep:cbc"]
 # BIP-38 encrypted WIF keys.

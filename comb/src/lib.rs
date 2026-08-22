@@ -53,6 +53,8 @@ pub mod sign;
 pub mod tapos;
 pub mod transaction;
 pub mod types;
+#[cfg(feature = "wallet")]
+pub mod wallet;
 
 pub use asset::Amount;
 pub use authority::Authority;

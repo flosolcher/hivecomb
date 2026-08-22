@@ -117,7 +117,7 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Python bindings (PyO3 / abi3) | partial — signing, memos, keys |
 | Differential oracle vs beem | done, green |
 | Live-node fixture tests | done |
-| Wallet / encrypted key storage | not yet |
+| Wallet / encrypted key storage | done — scrypt + AES-GCM |
 | CLI (`beempy` equivalent) | not yet |
 | Comment / Market / Discussions wrappers | not yet |
 

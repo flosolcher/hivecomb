@@ -40,6 +40,7 @@ A bug that yields a silently-invalid signature ranks above one that raises.
 | [22](#22) | Critical | operations | `escrow_release` omits `agent` and `receiver`; `escrow_dispute` omits `agent` |
 | [23](#23) | High | operations | `custom_binary` serializes 2 of 6 fields, and mistypes `id` |
 | [24](#24) | Medium | memo | Encrypted memos omit the varint length prefix the ecosystem writes |
+| [25](#25) | High | wallet | Key store uses unsalted SHA-256 and unauthenticated AES-CBC |
 
 ---
 
@@ -813,6 +814,56 @@ Note the residual ambiguity is inherent: a beem-written memo that begins with a
 length-like byte cannot be told apart from a correctly-prefixed one. `comb` resolves it
 the way every other client does, which means such a memo decodes the same way in `comb`
 as it does in Keychain — consistent, even where it is not what beem's author intended.
+
+---
+
+<a id="25"></a>
+## 25. The wallet encrypts keys with an unsalted SHA-256 and no MAC — High
+
+**`beemgraphenebase/aes.py`**, used by **`beemstorage/masterpassword.py`** and
+**`beemstorage/base.py`**
+
+beem stores private keys encrypted under a random master password, which is itself
+encrypted under the user's passphrase with `AESCipher`. That class is:
+
+```python
+class AESCipher(object):
+    def __init__(self, key):
+        self.bs = 32
+        self.key = hashlib.sha256(AESCipher.str_to_bytes(key)).digest()
+
+    def encrypt(self, raw):
+        raw = self._pad(AESCipher.str_to_bytes(raw))
+        iv = Random.new().read(AES.block_size)
+        cipher = AES.new(self.key, AES.MODE_CBC, iv)
+        return base64.b64encode(iv + cipher.encrypt(raw)).decode('utf-8')
+```
+
+Three problems, all in the same six lines:
+
+1. **No key derivation function.** The encryption key is one SHA-256 of the passphrase
+   — no iterations, no memory hardness, no work factor of any kind. An attacker holding
+   the wallet file tests candidate passphrases at raw SHA-256 speed, which on commodity
+   GPU hardware is billions per second.
+2. **No salt.** Two users who choose the same passphrase get byte-identical encryption
+   keys. One precomputed table therefore attacks every beem wallet in existence
+   simultaneously, and a passphrase cracked once is cracked everywhere.
+3. **No authentication.** AES-CBC with no MAC. Nothing detects a modified wallet file,
+   and `_unpad` — like the memo one in [finding 15](#15) — does not validate its
+   padding. The decrypt path is a padding-oracle shape.
+
+For a file whose entire purpose is to hold private keys at rest, all three matter. The
+IV is random, which is the one thing done right.
+
+**In `comb`:** `wallet::Wallet` uses **scrypt** (`N = 2^15, r = 8, p = 1`, random
+16-byte salt per wallet) to derive the key, and **AES-256-GCM** for every ciphertext, so
+a tampered file fails authentication rather than decrypting to something. The file is
+written to a temporary path and renamed, so an interrupted write cannot truncate a key
+store, and is `0600` on Unix.
+
+There is deliberately **no reader for beem's format**. Supporting it would mean shipping
+the weak construction in order to read files this crate should be helping people leave.
+Migrate with `beempy listkeys` / `beempy getkey` and `Wallet::add_key`.
 
 ---
 
