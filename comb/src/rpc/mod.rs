@@ -22,7 +22,7 @@
 mod client;
 mod types;
 
-pub use client::{NodeClient, Transport};
+pub use client::{BlockOperation, BlockStream, NodeClient, StreamMode, Transport};
 pub use types::{DynamicGlobalProperties, RpcRequest, RpcResponse};
 
 #[cfg(feature = "ureq-transport")]

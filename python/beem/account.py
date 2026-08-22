@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json as _json
 import time
+
+import comb
 from datetime import datetime, timedelta, timezone
 
 from .amount import Amount
@@ -757,6 +759,44 @@ class Account(dict):
             "authority set; build it with beembase.operations.Account_update2 "
             "and Hive.finalizeOp"
         )
+
+    def verify_account_authority(self, keys, role="posting"):
+        """Check whether ``keys`` satisfy this account's authority for ``role``.
+
+        Offline: the authority is already on this object. Returns the report
+        :func:`comb.check_authority` produces.
+
+        **The answer can be inconclusive.** An authority may delegate to another
+        account, and following that means fetching *its* authority. Rather than
+        ignore such entries, they are listed under ``unresolved_accounts`` and
+        ``conclusive`` is ``False`` — so a "no" from keys alone is not mistaken
+        for a "no" outright. That matters for any account sharing posting
+        rights, which on Hive is most of them.
+
+        beem's method of this name asked the *node* to verify, which needs a
+        round trip and tells you nothing about why.
+        """
+        authority = self.get(role)
+        if role == "memo":
+            authority = {
+                "weight_threshold": 1,
+                "account_auths": [],
+                "key_auths": [[self["memo_key"], 1]],
+            }
+        if not authority:
+            raise ValueError(f"{self.name} has no {role} authority")
+        if isinstance(keys, str):
+            keys = [keys]
+        return comb.check_authority(authority, [str(k) for k in keys])
+
+    def verify_authority_via_node(self, transaction):
+        """Ask the node whether a transaction satisfies the required authority.
+
+        This is what beem's ``verify_account_authority`` did. Kept because it
+        follows account delegations, which an offline check cannot.
+        """
+        payload = {k: v for k, v in transaction.items() if k != "trx_id"}
+        return self.blockchain.rpc.call("database_api.verify_authority", {"trx": payload})
 
     def print_info(self, force_refresh=False, return_str=False, use_table=False, **kwargs):
         """A short human-readable summary."""

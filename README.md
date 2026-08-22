@@ -120,6 +120,9 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | `beempy` CLI | done — all 99 commands, plus 7 new |
 | Differential oracle vs beem | done, green |
 | Live-node fixture tests | done |
+| Authority satisfaction checking | done |
+| Block streaming, `get_ops_in_block` | done |
+| Async API | no — sync, with a pluggable transport |
 | Wallet / encrypted key storage | done — scrypt + AES-GCM |
 
 Chain state is modelled as plain data (`comb::chain`), read from the API rather than
@@ -218,6 +221,14 @@ do, and exactly what is not implemented. `python/test_compat.py` runs 25 checks 
 against beem's API unmodified, and `python/test_cli.py` runs 21 more over `beempy`.
 
 `beempy commands --new` lists the seven commands beem has no equivalent for.
+
+## Other Rust Hive libraries
+
+`comb` is not the first. [COMPARISON.md](COMPARISON.md) measures it against
+[`hive-xylem`](https://github.com/srbde/hive-xylem) in both directions, records the
+five things `comb` gained from reading it, notes a memo-encryption defect found while
+comparing, and answers the maturity question plainly: **xylem is published and `comb`
+is not**, and on production exposure neither is mature.
 
 ## Licence
 

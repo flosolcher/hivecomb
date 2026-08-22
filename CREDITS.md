@@ -77,9 +77,35 @@ carried forward unchanged from python-graphenelib via beem
 (`beemgraphenebase/dictionary.py`). It must not be modified: the words and their order
 determine which brain keys can be regenerated.
 
-beem's `Mnemonic` implementation, which `comb` does not currently port, was itself
-taken from [python-mnemonic](https://github.com/trezor/python-mnemonic) —
-copyright (c) 2013 Pavol Rusnak, (c) 2017 mruddy.
+`comb/data/bip39_english.txt` is the standard BIP-39 English word list, carried
+forward from beem's `Mnemonic`, which was itself taken from
+[python-mnemonic](https://github.com/trezor/python-mnemonic) — copyright (c) 2013
+Pavol Rusnak, (c) 2017 mruddy. `comb/src/bip39.rs` is cross-checked against that
+implementation's output.
+
+## Honourable mention — other Rust work on Hive
+
+`comb` is not the first Rust library for Hive, and it is better for the ones that came
+before it.
+
+**[hive-xylem](https://github.com/srbde/hive-xylem)** — by **SRBDE**, part of a
+cross-language suite alongside Pollen (TypeScript), Anther (Go) and Nectar (Python).
+MIT/Apache-2.0.
+
+An async-first Hive SDK built on Tokio, published on crates.io while this crate was
+not. Reading it directly improved `comb` in five places: authority satisfaction
+checking, `get_ops_in_block` (the only route to virtual operations), block streaming in
+Rust, exponential backoff on node failover, and a handful of conveniences. Its
+async-native design is a real advantage `comb` does not have — see
+[COMPARISON.md](COMPARISON.md), which also records a memo-encryption defect found while
+comparing, and answers the maturity question honestly rather than flatteringly.
+
+None of its code was copied. What was taken was the knowledge of what a Hive library
+ought to be able to do.
+
+**[hive_memo](https://crates.io/crates/hive_memo)** and
+**[hive-rs](https://crates.io/crates/hive-rs)** — smaller, focused crates in the same
+space, noted so that anyone weighing options can find them.
 
 ## Rust dependencies
 

@@ -809,6 +809,67 @@ fn recover_digest(digest: &[u8], signature: &str) -> PyResult<PyPublicKey> {
     })
 }
 
+/// Check whether a set of public keys satisfies an authority.
+///
+/// `authority` is the shape the API returns:
+/// `{"weight_threshold": 1, "account_auths": [["bot", 1]], "key_auths": [["STM7...", 1]]}`.
+///
+/// Returns `{"satisfied", "conclusive", "weight", "threshold", "shortfall",
+/// "matched_keys", "unresolved_accounts"}`.
+///
+/// **`satisfied` is a lower bound.** An authority can delegate to another account
+/// through `account_auths`, and following those means fetching that account's
+/// authority — possibly recursively, since hived allows four levels. This check is
+/// offline, so it lists them under `unresolved_accounts` instead of ignoring them:
+///
+/// * `satisfied` true means definitely satisfied, from keys alone;
+/// * `satisfied` false with no unresolved accounts means definitely not;
+/// * `satisfied` false with unresolved accounts means *not from keys alone* — the
+///   answer depends on accounts this call did not look up. `conclusive` says which.
+///
+/// Collapsing that third case into a plain "no" is what makes an offline authority
+/// check quietly wrong for any account that shares posting rights.
+#[pyfunction]
+#[pyo3(signature = (authority, public_keys))]
+fn check_authority(
+    py: Python<'_>,
+    authority: &Bound<'_, PyDict>,
+    public_keys: Vec<String>,
+) -> PyResult<PyObject> {
+    let raw = py_to_json(authority.as_any())?;
+    let auth: comb_core::authority::Authority =
+        serde_json::from_value(raw).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let keys: Vec<RsPublicKey> = public_keys
+        .iter()
+        .map(|k| RsPublicKey::from_prefixed_any(k).map_err(to_py_err))
+        .collect::<PyResult<_>>()?;
+
+    let check = auth.check(&keys);
+    let out = PyDict::new_bound(py);
+    out.set_item("satisfied", check.satisfied)?;
+    out.set_item("conclusive", check.is_conclusive())?;
+    out.set_item("weight", check.weight)?;
+    out.set_item("threshold", check.threshold)?;
+    out.set_item("shortfall", check.shortfall())?;
+    out.set_item(
+        "matched_keys",
+        check
+            .matched_keys
+            .iter()
+            .map(|k| k.to_prefixed("STM"))
+            .collect::<Vec<_>>(),
+    )?;
+    out.set_item(
+        "unresolved_accounts",
+        check
+            .unresolved_accounts
+            .iter()
+            .map(|a| (a.account.clone(), a.weight))
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(out.into())
+}
+
 /// Generate a new BIP-39 mnemonic.
 #[pyfunction]
 #[pyo3(signature = (strength = 256))]
@@ -878,5 +939,6 @@ fn comb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(validate_mnemonic, m)?)?;
     m.add_function(wrap_pyfunction!(transaction_id, m)?)?;
     m.add_function(wrap_pyfunction!(recover_digest, m)?)?;
+    m.add_function(wrap_pyfunction!(check_authority, m)?)?;
     Ok(())
 }

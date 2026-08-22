@@ -375,6 +375,68 @@ def _():
 
 
 # --------------------------------------------------------------------------
+# ADDITION -- authority checking (offline)
+# --------------------------------------------------------------------------
+@check("ADDITION: check_authority reports weight, not just yes/no")
+def _():
+    import comb
+
+    key_a = str(PrivateKey(WIF).pubkey)
+    other = str(PrivateKey().pubkey)
+    authority = {
+        "weight_threshold": 2,
+        "account_auths": [],
+        "key_auths": [[key_a, 1], [other, 1]],
+    }
+    one = comb.check_authority(authority, [key_a])
+    assert one["satisfied"] is False
+    assert one["weight"] == 1 and one["threshold"] == 2 and one["shortfall"] == 1
+    assert one["conclusive"] is True, "no delegations, so this is a real no"
+    assert one["matched_keys"] == [key_a]
+
+    both = comb.check_authority(authority, [key_a, other])
+    assert both["satisfied"] is True and both["shortfall"] == 0
+
+
+@check("ADDITION: a delegated authority is inconclusive, not a plain no")
+def _():
+    import comb
+
+    key_a = str(PrivateKey(WIF).pubkey)
+    authority = {
+        "weight_threshold": 1,
+        "account_auths": [["bot", 1]],
+        "key_auths": [[key_a, 1]],
+    }
+    stranger = comb.check_authority(authority, [str(PrivateKey().pubkey)])
+    assert stranger["satisfied"] is False
+    assert stranger["conclusive"] is False, (
+        "the answer depends on @bot's authority, which was not fetched -- "
+        "collapsing that to 'no' is what makes an offline check quietly wrong"
+    )
+    assert [tuple(a) for a in stranger["unresolved_accounts"]] == [("bot", 1)]
+
+    holder = comb.check_authority(authority, [key_a])
+    assert holder["satisfied"] and holder["conclusive"]
+
+
+@check("ADDITION: check_authority refuses a malformed authority")
+def _():
+    import comb
+
+    for bad in (
+        {"weight_threshold": 0, "key_auths": [], "account_auths": []},
+        {"key_auths": [], "account_auths": []},
+        {"weight_threshold": 1, "key_auths": [["not-a-key", 1]], "account_auths": []},
+    ):
+        try:
+            comb.check_authority(bad, [])
+        except Exception:
+            continue
+        raise AssertionError(f"should have refused {bad}")
+
+
+# --------------------------------------------------------------------------
 # Gaps must be loud
 # --------------------------------------------------------------------------
 @check("gaps raise NotImplementedError naming an alternative")

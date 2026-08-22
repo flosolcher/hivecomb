@@ -1863,6 +1863,69 @@ def cmd_virtualops(args):
         out("\nstopped")
 
 
+@arg("account")
+@arg("keys", nargs="+", metavar="PUBKEY", help="public keys to test")
+@arg("--role", default="posting", choices=["owner", "active", "posting", "memo"])
+@command("verifyauthority", "check whether keys satisfy an account's authority",
+         group="account", new=True)
+def cmd_verifyauthority(args):
+    """Not a beem command. beem's library asked the *node* to verify a whole
+    transaction, which needs a round trip and says nothing about why."""
+    from .account import Account
+
+    hive = make_hive(args)
+    account = Account(args.account.lstrip("@"), blockchain_instance=hive)
+    report = account.verify_account_authority(args.keys, role=args.role)
+
+    table(
+        ["property", "value"],
+        [
+            ("account", f"@{account.name}"),
+            ("role", args.role),
+            ("satisfied", "yes" if report["satisfied"] else "no"),
+            ("weight", f"{report['weight']} of {report['threshold']} needed"),
+            ("shortfall", report["shortfall"]),
+            ("matched keys", len(report["matched_keys"])),
+        ],
+    )
+    if report["matched_keys"]:
+        out("\nmatched:")
+        for key in report["matched_keys"]:
+            out(f"  {key}")
+    if not report["conclusive"]:
+        out("\nINCONCLUSIVE — this authority also delegates to other accounts,")
+        out("whose own authorities were not fetched. 'no' here means 'not from")
+        out("these keys alone', not 'no'.")
+        table(["delegated to", "weight"], report["unresolved_accounts"])
+
+
+@arg("block", type=int)
+@arg("--virtual", action="store_true", help="only operations the chain emitted")
+@arg("--json", dest="as_json", action="store_true")
+@command("opsinblock", "show every operation recorded for a block", group="stream", new=True)
+def cmd_opsinblock(args):
+    """Not a beem command. This is the only way to reach virtual operations:
+    they are emitted by consensus, not carried in a transaction, so they are not
+    in `block_api.get_block` at all."""
+    from .blockchain import Blockchain
+
+    chain = Blockchain(blockchain_instance=make_hive(args))
+    operations = chain.get_ops_in_block(args.block, only_virtual=args.virtual)
+    if args.as_json:
+        emit_json(operations)
+        return
+    if not operations:
+        out(f"block {args.block} has no {'virtual ' if args.virtual else ''}operations")
+        return
+    table(
+        ["kind", "type", "detail"],
+        [
+            ("virtual" if op.get("virtual_op") else "signed", op["type"], _summarise(op))
+            for op in operations
+        ],
+    )
+
+
 @arg("--new", action="store_true", help="only commands beem does not have")
 @command("commands", "list every command", group="general", new=True)
 def cmd_commands(args):

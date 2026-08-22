@@ -94,7 +94,8 @@ def _():
 @check("commands beem lacks are registered and marked new")
 def _():
     for name in ("recurrenttransfer", "collateralizedconvert", "mnemonic",
-                 "bip38", "decodetx", "virtualops", "commands"):
+                 "bip38", "decodetx", "virtualops", "opsinblock",
+                 "verifyauthority", "commands"):
         assert name in COMMANDS, f"{name} is not registered"
         assert COMMANDS[name]["new"], f"{name} should be marked new"
 

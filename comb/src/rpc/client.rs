@@ -26,6 +26,8 @@ pub struct NodeClient<T: Transport> {
     transport: T,
     nodes: Vec<String>,
     timeout: Duration,
+    passes: u32,
+    initial_backoff: Duration,
     next_id: AtomicU64,
 }
 
@@ -39,6 +41,8 @@ impl<T: Transport> NodeClient<T> {
             transport,
             nodes,
             timeout: Duration::from_secs(10),
+            passes: 1,
+            initial_backoff: Duration::from_millis(250),
             next_id: AtomicU64::new(1),
         })
     }
@@ -46,6 +50,19 @@ impl<T: Transport> NodeClient<T> {
     /// Set the per-node timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// Retry the whole node list this many times before giving up.
+    ///
+    /// Each pass waits longer than the last. One pass (the default) is right
+    /// for a call on a deadline — a submit window, say — where failing fast and
+    /// letting the caller decide beats sleeping. More passes suit a background
+    /// task, where an outage that clears in a second should not surface as an
+    /// error.
+    pub fn with_retries(mut self, passes: u32, initial_backoff: Duration) -> Self {
+        self.passes = passes.max(1);
+        self.initial_backoff = initial_backoff;
         self
     }
 
@@ -66,15 +83,28 @@ impl<T: Transport> NodeClient<T> {
             .map_err(|e| Error::Rpc(format!("could not encode request: {e}")))?;
 
         let mut failures = Vec::with_capacity(self.nodes.len());
-        for node in &self.nodes {
-            match self.try_node(node, &body) {
-                Ok(value) => return Ok(value),
-                Err(e) => failures.push(format!("{node}: {e}")),
+        for pass in 0..self.passes {
+            if pass > 0 {
+                // Exponential backoff between passes, capped so a long retry
+                // budget cannot turn into an unbounded sleep.
+                let wait = self
+                    .initial_backoff
+                    .saturating_mul(1u32 << (pass - 1).min(6))
+                    .min(Duration::from_secs(30));
+                std::thread::sleep(wait);
+                failures.push(format!("(retry pass {} after {:?})", pass + 1, wait));
+            }
+            for node in &self.nodes {
+                match self.try_node(node, &body) {
+                    Ok(value) => return Ok(value),
+                    Err(e) => failures.push(format!("{node}: {e}")),
+                }
             }
         }
         Err(Error::Rpc(format!(
-            "all {} nodes failed for {method} — {}",
+            "all {} node(s) failed for {method} over {} pass(es) — {}",
             self.nodes.len(),
+            self.passes,
             failures.join("; ")
         )))
     }
@@ -291,6 +321,60 @@ impl<T: Transport> NodeClient<T> {
         .map_err(|e| Error::Rpc(format!("unexpected key references: {e}")))
     }
 
+    /// Every operation the chain recorded for a block.
+    ///
+    /// This is the **only** way to reach virtual operations. They are emitted by
+    /// consensus rather than carried in a transaction, so they do not appear in
+    /// `block_api.get_block` at all — filtering a block's transactions for them
+    /// yields nothing rather than an error.
+    pub fn ops_in_block(&self, block_num: u32, only_virtual: bool) -> Result<Vec<BlockOperation>> {
+        let value = self.call(
+            "condenser_api.get_ops_in_block",
+            serde_json::json!([block_num, only_virtual]),
+        )?;
+        serde_json::from_value(value)
+            .map_err(|e| Error::Rpc(format!("unexpected get_ops_in_block response: {e}")))
+    }
+
+    /// Operations across a range of blocks, inclusive.
+    ///
+    /// One request per block: `condenser_api` has no batched form, and
+    /// `account_history_api.enum_virtual_ops` covers only the virtual half.
+    pub fn ops_in_block_range(
+        &self,
+        from: u32,
+        to: u32,
+        only_virtual: bool,
+    ) -> Result<Vec<BlockOperation>> {
+        if to < from {
+            return Err(Error::Rpc(format!(
+                "block range {from}..={to} runs backwards"
+            )));
+        }
+        let mut out = Vec::new();
+        for block_num in from..=to {
+            out.extend(self.ops_in_block(block_num, only_virtual)?);
+        }
+        Ok(out)
+    }
+
+    /// Iterate blocks from `start`, following the head.
+    ///
+    /// The iterator is lazy and never ends on its own — take from it, or use
+    /// [`BlockStream::until`]. It sleeps between polls rather than spinning,
+    /// and yields an error item rather than stopping when a call fails, so a
+    /// transient outage does not silently end a stream.
+    pub fn stream_blocks(&self, start: Option<u32>, mode: StreamMode) -> BlockStream<'_, T> {
+        BlockStream {
+            client: self,
+            next: start,
+            stop: None,
+            mode,
+            head: 0,
+            poll_interval: Duration::from_secs(3),
+        }
+    }
+
     /// Whether an account has at least `rc` resource credits at `now`.
     ///
     /// The extrapolation to "right now" happens locally, so repeated checks against a
@@ -309,6 +393,133 @@ impl<T: Transport> NodeClient<T> {
             "transaction_status_api.find_transaction",
             serde_json::json!({ "transaction_id": trx_id }),
         )
+    }
+}
+
+/// One operation as `get_ops_in_block` reports it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BlockOperation {
+    /// `[name, fields]`, the condenser shape.
+    pub op: serde_json::Value,
+    #[serde(default)]
+    pub block: u32,
+    #[serde(default)]
+    pub trx_id: String,
+    #[serde(default)]
+    pub trx_in_block: u32,
+    #[serde(default)]
+    pub op_in_trx: u32,
+    #[serde(default)]
+    pub virtual_op: bool,
+    #[serde(default)]
+    pub timestamp: String,
+}
+
+impl BlockOperation {
+    /// Decode into a typed operation, signed or virtual.
+    pub fn parse(&self) -> Result<crate::operations::AnyOperation> {
+        crate::operations::AnyOperation::from_json(&self.op)
+    }
+
+    /// The operation's name, without decoding the payload.
+    pub fn name(&self) -> Option<&str> {
+        self.op.as_array()?.first()?.as_str()
+    }
+}
+
+/// Which head a stream follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamMode {
+    /// Follow the irreversible head: blocks that can no longer be reverted.
+    ///
+    /// About a minute behind, and the right default for anything that acts on
+    /// what it sees.
+    Irreversible,
+    /// Follow the head block, as produced.
+    ///
+    /// Faster, but a block here can still be orphaned by a fork — so treat what
+    /// it reports as provisional.
+    Head,
+}
+
+/// A lazy iterator over blocks. See [`NodeClient::stream_blocks`].
+#[derive(Debug)]
+pub struct BlockStream<'a, T: Transport> {
+    client: &'a NodeClient<T>,
+    next: Option<u32>,
+    stop: Option<u32>,
+    mode: StreamMode,
+    head: u32,
+    poll_interval: Duration,
+}
+
+impl<'a, T: Transport> BlockStream<'a, T> {
+    /// Stop after this block number.
+    pub fn until(mut self, stop: u32) -> Self {
+        self.stop = Some(stop);
+        self
+    }
+
+    /// How long to wait when the stream has caught up with the head.
+    pub fn poll_interval(mut self, interval: Duration) -> Self {
+        self.poll_interval = interval;
+        self
+    }
+
+    fn current_head(&self) -> Result<u32> {
+        let props = self.client.dynamic_global_properties()?;
+        Ok(match self.mode {
+            StreamMode::Irreversible => props.last_irreversible_block_num,
+            StreamMode::Head => props.head_block_number,
+        })
+    }
+}
+
+impl<T: Transport> Iterator for BlockStream<'_, T> {
+    type Item = Result<crate::chain::Block>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let wanted = match self.next {
+                Some(n) => n,
+                None => match self.current_head() {
+                    Ok(head) => {
+                        self.head = head;
+                        head
+                    }
+                    Err(e) => return Some(Err(e)),
+                },
+            };
+
+            if let Some(stop) = self.stop {
+                if wanted > stop {
+                    return None;
+                }
+            }
+
+            if wanted > self.head {
+                match self.current_head() {
+                    Ok(head) => self.head = head,
+                    Err(e) => return Some(Err(e)),
+                }
+                if wanted > self.head {
+                    std::thread::sleep(self.poll_interval);
+                    continue;
+                }
+            }
+
+            self.next = Some(wanted + 1);
+            return match self.client.block(wanted) {
+                // A block the node does not have yet: wait rather than ending.
+                Ok(None) => {
+                    self.next = Some(wanted);
+                    std::thread::sleep(self.poll_interval);
+                    continue;
+                }
+                Ok(Some(block)) => Some(Ok(block)),
+                Err(e) => Some(Err(e)),
+            };
+        }
     }
 }
 
@@ -477,6 +688,116 @@ mod tests {
         assert!(client.account_history("a", -1, 1001).is_err());
         // Nothing was sent.
         assert!(client.transport.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ops_in_block_parses_and_separates_virtual_from_signed() {
+        let t = FakeTransport::new(vec![Ok(r#"{"result":[
+            {"op":["vote",{"voter":"a","author":"b","permlink":"p","weight":100}],
+             "block":1,"trx_id":"aa","virtual_op":false,"timestamp":"2026-08-22T04:00:00"},
+            {"op":["producer_reward",{"producer":"w","vesting_shares":"1.000000 VESTS"}],
+             "block":1,"trx_id":"","virtual_op":true,"timestamp":"2026-08-22T04:00:00"}
+        ]}"#
+        .into())]);
+        let client = NodeClient::new(t, nodes()).unwrap();
+        let ops = client.ops_in_block(1, false).unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].name(), Some("vote"));
+        assert!(!ops[0].virtual_op);
+        assert!(ops[1].virtual_op);
+
+        // Both decode, and the virtual one is recognised as such.
+        assert!(!ops[0].parse().unwrap().is_virtual());
+        assert!(ops[1].parse().unwrap().is_virtual());
+    }
+
+    #[test]
+    fn a_backwards_block_range_is_refused_before_any_request() {
+        let t = FakeTransport::new(vec![]);
+        let client = NodeClient::new(t, nodes()).unwrap();
+        assert!(client.ops_in_block_range(10, 5, false).is_err());
+        assert!(client.transport.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn retry_passes_are_reported_in_the_error() {
+        let t = FakeTransport::new(vec![
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+        ]);
+        let client = NodeClient::new(t, nodes())
+            .unwrap()
+            .with_retries(2, Duration::from_millis(1));
+        let err = format!("{}", client.call("x", serde_json::json!({})).unwrap_err());
+        assert!(err.contains("2 pass(es)"), "{err}");
+        assert!(err.contains("retry pass 2"), "{err}");
+        // Every node was tried on both passes.
+        assert_eq!(client.transport.calls.lock().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn one_pass_is_the_default_so_a_deadline_is_not_slept_through() {
+        let t = FakeTransport::new(vec![
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+            Err(Error::Rpc("down".into())),
+        ]);
+        let client = NodeClient::new(t, nodes()).unwrap();
+        assert!(client.call("x", serde_json::json!({})).is_err());
+        assert_eq!(client.transport.calls.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_bounded_stream_stops_where_it_was_told_to() {
+        // Head at 5; stream 3..=4 and stop.
+        let props = r#"{"result":{"head_block_number":5,
+            "head_block_id":"00000005aabbccdd00000000000000000000abcd",
+            "time":"2026-08-22T04:00:00","last_irreversible_block_num":5}}"#;
+        let block = |n: u32| {
+            format!(
+                r#"{{"result":{{"block":{{"previous":"{:08x}aabbccdd00000000000000000000abcd",
+                "timestamp":"2026-08-22T04:00:00","witness":"w",
+                "transaction_merkle_root":"0000000000000000000000000000000000000000"}}}}}}"#,
+                n - 1
+            )
+        };
+        let t = FakeTransport::new(vec![Ok(props.into()), Ok(block(3)), Ok(block(4))]);
+        let client = NodeClient::new(t, nodes()).unwrap();
+        let blocks: Vec<_> = client
+            .stream_blocks(Some(3), StreamMode::Irreversible)
+            .until(4)
+            .collect();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].as_ref().unwrap().block_num().unwrap(), 3);
+        assert_eq!(blocks[1].as_ref().unwrap().block_num().unwrap(), 4);
+    }
+
+    #[test]
+    fn a_stream_yields_an_error_rather_than_ending_on_one() {
+        let props = r#"{"result":{"head_block_number":5,
+            "head_block_id":"00000005aabbccdd00000000000000000000abcd",
+            "time":"2026-08-22T04:00:00","last_irreversible_block_num":5}}"#;
+        // Every node fails on the block fetch, so the stream reports it.
+        let t = FakeTransport::new(vec![
+            Ok(props.into()),
+            Err(Error::Rpc("boom".into())),
+            Err(Error::Rpc("boom".into())),
+            Err(Error::Rpc("boom".into())),
+        ]);
+        let client = NodeClient::new(t, nodes()).unwrap();
+        let first = client
+            .stream_blocks(Some(3), StreamMode::Head)
+            .until(3)
+            .next()
+            .unwrap();
+        assert!(
+            first.is_err(),
+            "a failed fetch must surface, not end the stream"
+        );
     }
 
     #[test]

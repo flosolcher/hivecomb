@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import threading
 import urllib.error
 import urllib.request
@@ -80,7 +81,7 @@ class NodeClient:
     `websocket-client`.
     """
 
-    def __init__(self, nodes=None, timeout=10, num_retries=3):
+    def __init__(self, nodes=None, timeout=10, num_retries=3, initial_backoff=0.25):
         if nodes is None:
             nodes = list(DEFAULT_NODES)
         elif isinstance(nodes, str):
@@ -92,6 +93,10 @@ class NodeClient:
         self.nodes = nodes
         self.timeout = timeout
         self.num_retries = max(1, num_retries)
+        #: Seconds to wait before the second pass over the node list; doubles
+        #: each pass, capped at 30s. Set to 0 to fail fast, which is what a call
+        #: on a deadline wants.
+        self.initial_backoff = initial_backoff
         self._id = 0
         self._lock = threading.Lock()
 
@@ -117,7 +122,13 @@ class NodeClient:
         ).encode("utf-8")
 
         failures = []
-        for _ in range(self.num_retries):
+        for attempt in range(self.num_retries):
+            if attempt and self.initial_backoff:
+                # Exponential backoff between passes over the whole list, capped
+                # so a long retry budget cannot become an unbounded sleep.
+                wait = min(self.initial_backoff * (2 ** (attempt - 1)), 30.0)
+                time.sleep(wait)
+                failures.append(f"(retry pass {attempt + 1} after {wait:.2f}s)")
             for node in self.nodes:
                 try:
                     request = urllib.request.Request(
@@ -146,7 +157,8 @@ class NodeClient:
                 return body["result"]
 
         raise RPCError(
-            f"all {len(self.nodes)} node(s) failed for {method} — " + "; ".join(failures)
+            f"all {len(self.nodes)} node(s) failed for {method} over "
+            f"{self.num_retries} pass(es) — " + "; ".join(failures)
         )
 
     # beem's NodeRPC proxies unknown attributes to RPC methods. Keeping that

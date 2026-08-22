@@ -10,6 +10,9 @@ This document is the complete record of how `comb` relates to `beem`:
 5. [Coverage](#5-coverage) — what is implemented, what raises, what is not planned
 6. [The native API](#6-the-native-api) — what to use once you are no longer porting
 
+For how `comb` compares to the other Rust Hive libraries — and an honest answer to
+which is more mature — see [COMPARISON.md](COMPARISON.md).
+
 Nothing here silently does something different from what you asked. Every gap raises
 `NotImplementedError` naming an alternative; every divergence is listed below.
 
@@ -338,14 +341,42 @@ authentication rather than decrypting to something.
 | `bip38` | encrypt or decrypt a key under a passphrase |
 | `decodetx` | decode a transaction to JSON |
 | `virtualops` | stream virtual operations, which beem's table cannot name correctly |
+| `opsinblock` | every operation recorded for a block, virtual included |
+| `verifyauthority` | check whether keys satisfy an account's authority, offline |
 | `commands` | list every command, or just the new ones |
 
-### 4.11 Unknown fields survive
+### 4.11 Offline authority checking
+
+Given a set of public keys, does it satisfy an account's authority? Offline, with no
+round trip:
+
+```python
+report = account.verify_account_authority([pubkey], role="posting")
+report["satisfied"]            # definitely satisfied, from keys alone
+report["conclusive"]           # False => depends on accounts not looked up
+report["unresolved_accounts"]  # the delegations that were not followed
+```
+
+`beempy verifyauthority <account> <PUBKEY>` does the same from the shell.
+
+The three-way answer matters. An authority can delegate to another account, and
+following that means fetching *its* authority. Reporting such a case as a plain "no"
+is quietly wrong for any account that shares posting rights — which on Hive is most of
+them. beem's method of this name asked the node to verify a whole transaction, which
+needs a round trip and says nothing about why.
+
+### 4.12 Reaching virtual operations at all
+
+Virtual operations are emitted by consensus, not carried in a transaction, so they are
+**not in `block_api.get_block`**. `Blockchain.get_ops_in_block(n, only_virtual=True)`
+and `beempy opsinblock N --virtual` use the endpoint that has them.
+
+### 4.13 Unknown fields survive
 
 Every chain type carries an `extra` map, so a hardfork that adds a field does not
 silently lose it.
 
-### 4.12 A differential oracle
+### 4.14 A differential oracle
 
 `tests/differential_beem.py` compares digests against beem byte for byte over a
 generated corpus. `comb/tests/live_fixtures.rs` parses real captured node responses.

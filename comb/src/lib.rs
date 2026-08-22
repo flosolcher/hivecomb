@@ -57,7 +57,7 @@ pub mod types;
 pub mod wallet;
 
 pub use asset::Amount;
-pub use authority::Authority;
+pub use authority::{Authority, AuthorityCheck};
 pub use chains::{Chain, ChainId};
 pub use error::{Error, Result};
 pub use keys::{PrivateKey, PublicKey};

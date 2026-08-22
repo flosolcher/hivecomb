@@ -139,6 +139,47 @@ impl Authority {
         &self.key_auths
     }
 
+    /// Check a set of public keys against this authority.
+    ///
+    /// Returns how much weight they carry and whether that meets the threshold.
+    ///
+    /// # `satisfied` is a lower bound, and the report says so
+    ///
+    /// An authority can delegate to **another account** through `account_auths`,
+    /// and resolving those means fetching that account's authority from a node —
+    /// possibly recursively, since hived allows up to 4 levels. This function is
+    /// offline, so it cannot follow them.
+    ///
+    /// Rather than ignore them, it lists them in
+    /// [`AuthorityCheck::unresolved_accounts`]. So:
+    ///
+    /// * `satisfied == true` means **definitely satisfied**, from keys alone;
+    /// * `satisfied == false` with an empty `unresolved_accounts` means
+    ///   **definitely not satisfied**;
+    /// * `satisfied == false` with entries there means **not from keys alone** —
+    ///   the answer depends on accounts this call could not look up.
+    ///
+    /// Collapsing that third case into a plain `false` is what makes an offline
+    /// authority check quietly wrong for any account that shares posting rights,
+    /// which on Hive is most of them.
+    pub fn check(&self, keys: &[PublicKey]) -> AuthorityCheck {
+        let mut weight: u64 = 0;
+        let mut matched = Vec::new();
+        for entry in &self.key_auths {
+            if keys.contains(&entry.key) {
+                weight += u64::from(entry.weight);
+                matched.push(entry.key);
+            }
+        }
+        AuthorityCheck {
+            satisfied: weight >= u64::from(self.weight_threshold),
+            weight,
+            threshold: self.weight_threshold,
+            matched_keys: matched,
+            unresolved_accounts: self.account_auths.clone(),
+        }
+    }
+
     /// Whether the declared weights can ever reach the threshold.
     ///
     /// An authority whose weights sum below its threshold can never be satisfied by
@@ -227,6 +268,36 @@ impl crate::reader::GrapheneDeserialize for Authority {
         let account_auths: Vec<AccountAuth> = r.array()?;
         let key_auths: Vec<KeyAuth> = r.array()?;
         Authority::new(weight_threshold, account_auths, key_auths)
+    }
+}
+
+/// The result of checking keys against an [`Authority`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityCheck {
+    /// Whether the matched keys alone meet the threshold.
+    ///
+    /// `false` with a non-empty [`Self::unresolved_accounts`] means "not from
+    /// keys alone", not "no".
+    pub satisfied: bool,
+    /// Total weight of the keys that matched.
+    pub weight: u64,
+    /// The threshold that weight is measured against.
+    pub threshold: u32,
+    /// The keys that carried weight.
+    pub matched_keys: Vec<PublicKey>,
+    /// Delegations to other accounts, which an offline check cannot follow.
+    pub unresolved_accounts: Vec<AccountAuth>,
+}
+
+impl AuthorityCheck {
+    /// Whether the answer is final, or depends on accounts not looked up.
+    pub fn is_conclusive(&self) -> bool {
+        self.satisfied || self.unresolved_accounts.is_empty()
+    }
+
+    /// How much more weight is needed, if any.
+    pub fn shortfall(&self) -> u64 {
+        u64::from(self.threshold).saturating_sub(self.weight)
     }
 }
 
@@ -356,6 +427,85 @@ mod tests {
             "an owner authority like this locks the account"
         );
         assert!(Authority::from_key(key(1)).unwrap().is_satisfiable());
+    }
+
+    #[test]
+    fn checking_keys_against_an_authority() {
+        let a = key(1);
+        let b = key(2);
+        let stranger = key(3);
+        let auth = Authority::new(
+            2,
+            Vec::new(),
+            vec![KeyAuth { key: a, weight: 1 }, KeyAuth { key: b, weight: 1 }],
+        )
+        .unwrap();
+
+        let neither = auth.check(&[stranger]);
+        assert!(!neither.satisfied);
+        assert_eq!(neither.weight, 0);
+        assert_eq!(neither.shortfall(), 2);
+        assert!(
+            neither.is_conclusive(),
+            "no delegations, so this is a real no"
+        );
+
+        let one = auth.check(&[a]);
+        assert!(!one.satisfied);
+        assert_eq!(one.weight, 1);
+        assert_eq!(one.matched_keys, vec![a]);
+
+        let both = auth.check(&[a, b, stranger]);
+        assert!(both.satisfied);
+        assert_eq!(both.weight, 2);
+        assert_eq!(both.shortfall(), 0);
+    }
+
+    #[test]
+    fn a_delegated_authority_is_reported_as_unresolved_not_as_a_no() {
+        // The case that makes an offline check quietly wrong if account_auths
+        // are ignored: @alice can post through @bot, and the keys alone say no.
+        let auth = Authority::new(
+            1,
+            vec![AccountAuth {
+                account: "bot".into(),
+                weight: 1,
+            }],
+            vec![KeyAuth {
+                key: key(1),
+                weight: 1,
+            }],
+        )
+        .unwrap();
+
+        let stranger = auth.check(&[key(9)]);
+        assert!(!stranger.satisfied);
+        assert!(
+            !stranger.is_conclusive(),
+            "the answer depends on @bot's authority, which was not fetched"
+        );
+        assert_eq!(stranger.unresolved_accounts.len(), 1);
+        assert_eq!(stranger.unresolved_accounts[0].account, "bot");
+
+        // With the key, it is a definite yes and the delegation is moot.
+        let holder = auth.check(&[key(1)]);
+        assert!(holder.satisfied);
+        assert!(holder.is_conclusive());
+    }
+
+    #[test]
+    fn weights_do_not_overflow_on_a_pathological_authority() {
+        let auths: Vec<KeyAuth> = (1..=40)
+            .map(|n| KeyAuth {
+                key: key(n),
+                weight: u16::MAX,
+            })
+            .collect();
+        let keys: Vec<PublicKey> = auths.iter().map(|k| k.key).collect();
+        let auth = Authority::new(u32::MAX, Vec::new(), auths).unwrap();
+        let check = auth.check(&keys);
+        assert_eq!(check.weight, u64::from(u16::MAX) * 40);
+        assert!(!check.satisfied);
     }
 
     #[test]
