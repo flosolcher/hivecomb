@@ -51,6 +51,15 @@ Stage 1 proves hived and `hivecomb` agree on the bytes. It does not prove hived 
 a *signature* over the digest of those bytes. Nothing offline can, because that is the
 one step where the chain's answer is the only answer.
 
+> **Done, 2026-08-22.** A `custom_json` signed by `hivecomb` under posting authority was
+> accepted into **block 109242605** as
+> [`ebb44fb5dedd544b7deeb62f81660983233a559f`](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f),
+> from `@noc-dev`, an unfunded account created for this. The chain filed it under the
+> same transaction id `hivecomb` computed offline, and the result was read back from
+> `api.openhive.network` — a different node from the one that accepted it.
+>
+> The rest of this section is how to repeat it.
+
 ### Is a posting-authority transaction sufficient?
 
 **Yes.** The authority level changes which key signs and nothing else. The digest is
@@ -151,9 +160,12 @@ consumes, so nothing downstream acts on it.
 
 Honest limits, since the point of this document is to say what is actually established:
 
-- **One operation, not 48.** Stage 2 proves the signature path with a `custom_json`.
+- **One operation, not 48.** Stage 2 proved the signature path with a `custom_json`.
   Stage 1 proves the *bytes* of every operation, so the combination is strong, but no
   single broadcast proves that all 48 operations are individually accepted.
+- **One transaction, not a track record.** Being accepted once establishes that the
+  path works. It says nothing about behaviour under node failover, at volume, near
+  expiration boundaries, or across a hardfork.
 - **Acceptance is not correctness of intent.** The chain checks that a transaction is
   well-formed, authorized and unexpired. It does not check that the operation does what
   the caller meant.

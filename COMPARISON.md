@@ -27,8 +27,12 @@ Everything here was measured on 2026-08-22 against
 
 **On the one measure that matters most — production exposure — neither is mature, and
 xylem is slightly ahead of hivecomb.** It is published on crates.io with five releases;
-`hivecomb` is not published and has never had a transaction accepted by a Hive node. 99
-downloads is not adoption, but it is more than zero.
+`hivecomb` is not published. 99 downloads is not adoption, but it is more than zero.
+
+`hivecomb` has now had a transaction accepted by the Hive network — block
+[109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f), 2026-08-22 — so the signing path is no longer
+unproven. One accepted transaction is not production exposure either, and it would be
+dishonest to present it as such.
 
 On every other measure, `hivecomb` is substantially larger and more verified. Both facts
 are true at once, and neither cancels the other.

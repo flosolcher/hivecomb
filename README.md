@@ -126,6 +126,7 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Differential oracle vs beem | done, green |
 | Serialization oracle vs **hived itself** | done, green — all 48 operations |
 | Live-node fixture tests | done |
+| **Transaction accepted by the Hive network** | done — block [109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f) |
 | Authority satisfaction checking | done |
 | Block streaming, `get_ops_in_block` | done |
 | Async RPC layer (`async` feature) | done — runtime-agnostic |
@@ -253,15 +254,19 @@ sides of the `2**53` threshold. **It is a floor. Extend it rather than trusting 
 
 ## Before you trust it
 
-Serialization is proven against hived. A **signature** accepted by a Hive node is not:
-that is the one thing no offline test can establish, and it has not happened yet.
-[BROADCAST.md](BROADCAST.md) explains what each stage proves and how to close the gap
-with one posting-authority transaction on an unfunded throwaway account.
+Serialization is proven against hived, and the signing path is proven on the live
+network: a `custom_json` signed by `hivecomb` was accepted into **block
+[109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f)** on 2026-08-22, and the transaction id the chain
+filed it under is the one `hivecomb` computed offline. [BROADCAST.md](BROADCAST.md)
+records what each stage establishes.
+
+That is the floor, not the ceiling. One accepted transaction is not production
+exposure, and it proves the signature path for one operation, not all 48.
 
 Before putting this in front of anything valuable:
 
-1. **Broadcast one transaction.** `tests/hived_broadcast_check.py`, posting key only.
-   Its `--dry-run` has a node verify the signature without writing to the chain.
+1. **Broadcast one transaction of your own.** `tests/hived_broadcast_check.py`, posting
+   key only. Its `--dry-run` has a node verify the signature without writing anything.
 2. **Run it alongside your existing signer** and compare, for a period, before letting
    it sign alone.
 3. **Extend both corpora** to cover the operations *you* actually send.
