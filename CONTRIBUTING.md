@@ -69,6 +69,20 @@ pull request.
   the Rust, Python and Node suites all fail together — that is intentional, and the fix
   is never to update the vector without understanding why it moved.
 
+## The changelog
+
+Update [CHANGELOG.md](CHANGELOG.md) **in the same commit as the change**, not
+afterwards. Not for tidiness: the reason a change matters is only in your head while
+you are making it. Reconstructed from `git log` a week later you get a list of what
+changed, which is not the same thing — "use the process-wide secp256k1 context" is
+what happened, and "signing is 2.3× faster" is what a reader needs.
+
+Only user-visible changes. CI fixes, refactors and new tests do not belong there
+unless they change what someone can rely on.
+
+While 0.1.0 is unreleased, entries go in its section; `[Unreleased]` returns above it
+after the first release.
+
 ## Adding an operation
 
 1. The struct in `hivecomb/src/operations/mod.rs`, in **hived's field order**. Verify it

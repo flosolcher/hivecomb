@@ -10,9 +10,9 @@ break the API. The one thing that will not change quietly is **the bytes that ge
 signed** — a change there is a breaking change regardless of what the version number
 would otherwise say, and it will be called out here in its own section.
 
-## [Unreleased]
-
-Nothing yet.
+> While 0.1.0 is unreleased, everything lands in its section below. An
+> `[Unreleased]` heading comes back above it once 0.1.0 ships — see
+> [RELEASING.md](RELEASING.md).
 
 ## [0.1.0] — unreleased
 
@@ -117,6 +117,22 @@ rather than false when an authority depends on accounts not looked up; block str
 (measured 878 ms against 3,366 ms with two dead nodes in front of a working one); and an
 encrypted key store using scrypt and AES-256-GCM.
 
+### Performance
+
+Signing is dominated by elliptic curve arithmetic, and was dominated by
+*setup* for it: `Secp256k1::new()` and `signing_only()` build precomputation
+tables on every call, and four hot paths called them per operation. Using the
+process-wide context instead, measured through the Python module:
+
+| | before | after | |
+|---|---|---|---|
+| `sign_transaction` (one `custom_json`) | 117.3 µs | **51.5 µs** | 2.3× |
+| parse a WIF and derive the public key | 62.3 µs | **24.1 µs** | 2.6× |
+| `sign_message` | 105.1 µs | **69.1 µs** | 1.5× |
+| `transaction_digest` (no signing) | 8.8 µs | 7.5 µs | — |
+
+All three bindings share this core, so all three benefit.
+
 ### Requirements
 
 Rust **1.88** or newer. That floor comes from dependencies rather than from this
@@ -125,6 +141,23 @@ all — and it applies even with `--no-default-features`. CI builds and tests ag
 so it is a measured number, not an aspiration.
 
 Python 3.8+ (abi3), Node 20+.
+
+### Hardening
+
+- Key generation draws from `OsRng` rather than `thread_rng`, matching BIP-39
+  entropy. One source for every secret this crate creates.
+- Every parser reachable from untrusted bytes is swept with hostile input — 414
+  cases plus every truncation and every single-bit corruption of a well-formed
+  transaction. All return an error; none panic. A parser that panics is a denial
+  of service in the process holding the keys.
+- The operation table has one owner. It previously existed in both Rust and the
+  beem-compatible Python layer, agreeing on all 93 ids by luck rather than by
+  construction — which is structurally the defect catalogued as findings 1 and 2
+  in beem. Python now derives its table from
+  `hivecomb.operation_names()`.
+- [SECURITY.md](SECURITY.md) sets out how to report a defect, what is in scope,
+  and what is known not to be sound (the master-password and brain-key schemes,
+  which are Hive's design and cannot be changed).
 
 ### Verified
 
