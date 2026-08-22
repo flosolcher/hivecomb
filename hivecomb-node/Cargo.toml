@@ -6,7 +6,10 @@ edition.workspace = true
 # Not the workspace MSRV: napi-build needs 1.77+, while the library itself
 # stays at 1.75 so consumers are not forced upward. This crate is a build
 # artifact, not something anyone depends on as a library.
-rust-version = "1.77"
+# napi-build needs 1.77, but the workspace floor is higher anyway (1.88, set by
+# dependencies), so this inherits rather than stating a number that is not
+# actually achievable.
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true

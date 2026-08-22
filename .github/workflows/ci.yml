@@ -12,7 +12,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  # RUSTFLAGS is deliberately NOT set here. Setting it replaces, rather than
+  # adds to, the per-target rustflags in .cargo/config.toml -- which is what
+  # lets hivecomb-py link on macOS. Warnings are still a hard error, via the
+  # clippy and rustdoc steps in the `lint` job.
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -29,9 +32,9 @@ jobs:
         rust: [stable]
         include:
           # The declared MSRV, which is only meaningful if something checks it.
-          # Pinned to the workspace's rust-version; raise both together.
+          # Keep in step with `rust-version` in the workspace Cargo.toml.
           - os: ubuntu-latest
-            rust: "1.75"
+            rust: "1.88"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -40,24 +43,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.rust }}
-      # hivecomb-node needs 1.77 (napi-build), while the library itself is 1.75.
-      # On the MSRV job, check only the library rather than the workspace.
       - name: build
-        run: |
-          if [ "${{ matrix.rust }}" = "1.75" ]; then
-            cargo build -p hivecomb --all-features
-          else
-            cargo build --workspace --all-features
-          fi
-        shell: bash
+        run: cargo build --workspace --all-features
       - name: test
-        run: |
-          if [ "${{ matrix.rust }}" = "1.75" ]; then
-            cargo test -p hivecomb --all-features
-          else
-            cargo test --workspace --all-features
-          fi
-        shell: bash
+        run: cargo test --workspace --all-features
 
   features:
     name: feature combinations
@@ -95,8 +84,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --all-features
-      - run: cargo clippy -p hivecomb --no-default-features
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy -p hivecomb --no-default-features -- -D warnings
       - name: docs build without warnings
         run: cargo doc -p hivecomb --all-features --no-deps
         env:

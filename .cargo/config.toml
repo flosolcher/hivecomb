@@ -1,0 +1,17 @@
+# A PyO3 extension module deliberately leaves Python's symbols undefined: the
+# interpreter provides them when it loads the module. Linux and Windows tolerate
+# that; macOS's linker does not, and fails the build of `hivecomb-py` with a wall
+# of "Undefined symbols: _PyExc_AttributeError, _PyExc_ImportError, ...".
+#
+# These flags tell it to resolve those at load time instead. maturin passes them
+# itself, so this only matters for a plain `cargo build`/`cargo test` over the
+# workspace -- which is exactly what CI does.
+#
+# Note that the RUSTFLAGS environment variable, if set, *replaces* these rather
+# than adding to them. That is why the CI workflow does not set it globally.
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

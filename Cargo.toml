@@ -5,7 +5,12 @@ members = ["hivecomb", "hivecomb-py", "hivecomb-node"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+# Measured, not aspirational: `cargo tree` puts the floor at 1.88 even with
+# --no-default-features, via the `time` crate. Several transitive dependencies
+# are on edition 2024, which Cargo below 1.85 cannot even parse -- a 1.75
+# toolchain fails at manifest resolution, before compiling anything.
+# Re-measure before lowering this; CI builds and tests against it.
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/flosolcher/hivecomb"
 authors = ["The hivecomb contributors"]

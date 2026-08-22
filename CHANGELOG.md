@@ -117,6 +117,15 @@ rather than false when an authority depends on accounts not looked up; block str
 (measured 878 ms against 3,366 ms with two dead nodes in front of a working one); and an
 encrypted key store using scrypt and AES-256-GCM.
 
+### Requirements
+
+Rust **1.88** or newer. That floor comes from dependencies rather than from this
+crate's own code — several are on edition 2024, which Cargo below 1.85 cannot parse at
+all — and it applies even with `--no-default-features`. CI builds and tests against it,
+so it is a measured number, not an aspiration.
+
+Python 3.8+ (abi3), Node 20+.
+
 ### Verified
 
 - **hived serialization oracle** — 57 cases, all 48 operations, 57 identical
