@@ -45,7 +45,9 @@ are true at once, and neither cancels the other.
 | Live-node fixture tests | none | 10 |
 | Key derivation | WIF only | WIF, BIP-32, BIP-38, BIP-39, brain keys, password keys |
 | Encrypted key store | none | scrypt + AES-256-GCM |
-| Async | **native (Tokio)** | no — sync, with a pluggable transport |
+| Async | native, Tokio-locked | optional `async` feature, runtime-agnostic |
+| Concurrency across nodes | batched range fetches | batched fetches **and** request racing |
+| Failover | sequential, with backoff | sequential (default) or raced |
 | HAF client | minimal (reputation) | no |
 | Other-language bindings | separate sibling projects | Python module, beem drop-in, `beempy` CLI |
 | `unsafe` | none | none (`#![forbid(unsafe_code)]`) |
@@ -53,10 +55,10 @@ are true at once, and neither cancels the other.
 
 ### The fair summary
 
-xylem is a competently built, focused library. Its async-first design is a real
-advantage `hivecomb` does not have, its code is clean, and it avoids `unsafe` entirely. If
-you are writing a Tokio service and need transfers, votes, comments and `custom_json`,
-it will do that today and it is a `cargo add` away.
+xylem is a competently built, focused library. Its code is clean, it avoids `unsafe`
+entirely, and it is async from the ground up rather than as a feature. If you are
+writing a Tokio service and need transfers, votes, comments and `custom_json`, it will
+do that today and it is a `cargo add` away.
 
 `hivecomb` covers far more of the protocol, is verified against a reference implementation
 rather than against its own expectations, and reaches Python. It is also unpublished
@@ -127,6 +129,44 @@ background task. Same in the Python client.
 
 Small conveniences xylem had that `hivecomb` only had on the Python side.
 
+### 6. An async layer — but for a different reason, and doing more
+
+Reading xylem prompted the question, and the answer turned out to be more specific than
+"Rust services are async".
+
+Signing in `hivecomb` needs no network, so async buys nothing there. It buys something
+on **broadcast**, which is a real call inside somebody's deadline. Sequential failover —
+what `hivecomb` did and what **xylem also does** — has a worst case of *the sum of the
+timeouts*. Three sick nodes at fifteen seconds each is forty-five seconds before the
+fourth is tried.
+
+The specification this project came from records exactly that failure: a submit burning
+~46 s and forfeiting a match, with the fix being to race three nodes per wave. So the
+async layer exists to express that, and `AsyncNodeClient::race` is it — worst case one
+timeout rather than the sum.
+
+Two differences from xylem's async design:
+
+* **Runtime-agnostic.** The trait uses `-> impl Future` rather than a boxed
+  `#[async_trait]`, and the retry backoff takes a caller-supplied sleep, so tokio,
+  async-std and smol all work. xylem is Tokio-locked. `hivecomb`'s `async` feature pulls
+  in `futures-util` and no executor at all; `reqwest-transport` is the opt-in
+  batteries-included path.
+* **Racing the same request across nodes**, which xylem does not do. It uses
+  concurrency well elsewhere — `get_ops_in_block_range` fans out with a semaphore-bounded
+  `join_all`, the same shape as `hivecomb`'s `AsyncNodeClient::blocks` — but its
+  *failover* is still one node at a time (`client.rs:60`, a loop over the node list with
+  rotation and backoff). So it keeps the sum-of-timeouts worst case that async was the
+  opportunity to remove.
+
+Measured with two dead nodes in front of a working one, through the Python client's
+threaded equivalent: **878 ms racing against 3,366 ms sequential.** The Rust tests
+assert the same property on a paused virtual clock — one timeout versus the sum.
+
+The sync path keeps sequential failover as its default, and the core still builds with
+`--no-default-features` into keys, serialization and signing with no HTTP client and no
+executor.
+
 ---
 
 ## A defect found in xylem while comparing
@@ -168,12 +208,14 @@ Everything else in that module is right, including the part beem gets wrong: xyl
 
 ## What hivecomb deliberately does not do
 
-**Async.** `hivecomb` is synchronous, with a `Transport` trait as the only network seam.
-That keeps the signing core free of a runtime — it builds with
-`--no-default-features` into keys, serialization and signing with no HTTP client at all
-— and lets a caller bring their own. The cost is real: there is no `async fn` API, and
-wrapping a sync client in `spawn_blocking` is not the same thing as being async-native.
-**If you need that today, xylem is the better fit.**
+**Async by default.** `hivecomb`'s core is synchronous and its async layer is a feature,
+where xylem is async throughout. That is a deliberate trade: the signing core stays free
+of a runtime and builds with `--no-default-features` into keys, serialization and
+signing with no HTTP client and no executor. The cost is that the two clients are
+separate types rather than one, and a caller who wants everything async gets an async
+*RPC* layer over a sync core rather than an async library.
+
+If "the whole SDK is `async fn`" is what you want, xylem is still the closer fit.
 
 **HAF.** The Hive Application Framework is a Postgres-backed REST layer whose endpoints
 vary by deployed app. `hivecomb`'s `NodeClient::call` reaches anything hived exposes over

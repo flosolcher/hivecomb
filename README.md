@@ -122,7 +122,8 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | Live-node fixture tests | done |
 | Authority satisfaction checking | done |
 | Block streaming, `get_ops_in_block` | done |
-| Async API | no — sync, with a pluggable transport |
+| Async RPC layer (`async` feature) | done — runtime-agnostic |
+| Concurrent node racing | done — sync and async |
 | Wallet / encrypted key storage | done — scrypt + AES-GCM |
 
 Chain state is modelled as plain data (`hivecomb::chain`), read from the API rather than
@@ -148,7 +149,30 @@ cargo build -p hivecomb --no-default-features  # signing only: no network, no ci
 ```
 
 Feature flags keep the core small. `--no-default-features` builds keys, serialization
-and signing alone; `memo`, `bip38`, `bip32`, `rpc` and `ureq-transport` are additive.
+and signing alone — no HTTP client, no executor. `memo`, `bip38`, `bip32`, `wallet`,
+`rpc`, `ureq-transport`, `async` and `reqwest-transport` are additive, and every
+combination is checked warning-free.
+
+### Racing nodes
+
+Sequential failover has a worst case of *the sum of the timeouts*. Racing has a worst
+case of **one** — which is the difference the specification behind this project records
+as having cost it matches:
+
+```rust
+// Rust, async feature: fire at three nodes, take the first acceptance.
+let client = AsyncNodeClient::new(ReqwestTransport::new()?, nodes)?;
+client.broadcast_raced(&signed, 3).await?;
+```
+
+```sh
+# beempy: same property, threads rather than asyncio, so beem's sync world is intact.
+beempy --race 3 customjson my_app '{"hello":"hive"}'
+```
+
+Safe for reads unconditionally, and safe for broadcasting an *already-signed*
+transaction because the chain deduplicates by transaction id. Measured against two dead
+nodes: 878 ms racing, 3,366 ms sequential.
 
 Python wheels, via [maturin](https://github.com/PyO3/maturin):
 

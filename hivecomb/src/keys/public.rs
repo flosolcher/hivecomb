@@ -95,6 +95,9 @@ impl PublicKey {
     }
 
     /// The underlying `secp256k1` point, for ECDH.
+    ///
+    /// Only the memo layer needs the raw point; without that feature nothing does.
+    #[cfg(feature = "memo")]
     pub(crate) fn inner_ref(&self) -> &secp256k1::PublicKey {
         &self.inner
     }

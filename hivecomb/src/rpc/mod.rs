@@ -19,11 +19,20 @@
 //! imposes its own would fight it. What this provides is the mechanism: an ordered
 //! list, a per-node timeout, and an error that names every node that failed.
 
+#[cfg(feature = "async")]
+mod async_client;
 mod client;
 mod types;
 
+#[cfg(feature = "async")]
+pub use async_client::{AsyncNodeClient, AsyncTransport, SleepFuture, Sleeper};
 pub use client::{BlockOperation, BlockStream, NodeClient, StreamMode, Transport};
 pub use types::{DynamicGlobalProperties, RpcRequest, RpcResponse};
+
+#[cfg(feature = "reqwest-transport")]
+mod reqwest_transport;
+#[cfg(feature = "reqwest-transport")]
+pub use reqwest_transport::{tokio_sleeper, ReqwestTransport};
 
 #[cfg(feature = "ureq-transport")]
 mod ureq_transport;

@@ -123,6 +123,49 @@ def _():
     ).account == "carol"
 
 
+@check("--race sets the broadcast width without touching reads")
+def _():
+    from beem.cli import make_hive
+
+    parser = build_parser()
+    args = parser.parse_args(["--race", "3", "customjson", "x", "{}"])
+    assert args.race == 3
+    hive = make_hive(args)
+    assert hive.race_width == 3
+    # Default stays 1, which is beem's behaviour.
+    assert make_hive(parser.parse_args(["customjson", "x", "{}"])).race_width == 1
+
+
+@check("racing falls back to a plain call at width 1")
+def _():
+    from hivecomb_compat import NodeClient
+
+    calls = []
+
+    class Recording(NodeClient):
+        def call(self, method, params=None):
+            calls.append(method)
+            return {"ok": True}
+
+    client = Recording(["https://a", "https://b"])
+    assert client.race("x", {}, width=1) == {"ok": True}
+    assert calls == ["x"], "width 1 must not spin up a thread pool"
+
+
+@check("racing reports every node when none answer")
+def _():
+    from hivecomb_compat import NodeClient, RPCError
+
+    client = NodeClient(["http://127.0.0.1:1", "http://127.0.0.1:2"], timeout=1)
+    try:
+        client.race("database_api.get_config", {}, width=2)
+    except RPCError as exc:
+        assert "127.0.0.1:1" in str(exc) and "127.0.0.1:2" in str(exc), str(exc)
+        assert "2 raced" in str(exc)
+        return
+    raise AssertionError("two dead nodes should have failed the race")
+
+
 @check("about and featureflags run offline")
 def _():
     text = run(["about"])

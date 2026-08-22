@@ -35,6 +35,9 @@ unicode-normalization = { workspace = true, optional = true }
 time.workspace = true
 
 ureq = { version = "2", optional = true, default-features = false, features = ["tls", "json"] }
+futures-util = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["time"] }
 
 [features]
 default = ["rpc", "ureq-transport", "memo", "bip38", "bip32", "wallet"]
@@ -49,8 +52,16 @@ bip32 = ["dep:pbkdf2", "dep:unicode-normalization"]
 # The JSON-RPC layer. Disable it to keep the signing path free of any network
 # dependency at all.
 rpc = []
-# A working HTTP transport for the `rpc` layer.
+# A working blocking HTTP transport for the `rpc` layer.
 ureq-transport = ["rpc", "dep:ureq"]
+# The async JSON-RPC layer: an AsyncTransport trait, failover, and concurrent
+# node racing. Runtime-agnostic -- it pulls in no executor, and the retry
+# backoff takes a caller-supplied sleep so tokio, async-std or smol all work.
+async = ["rpc", "dep:futures-util"]
+# A working async HTTP transport on reqwest, plus a tokio sleeper.
+reqwest-transport = ["async", "dep:reqwest", "dep:tokio"]
 
 [dev-dependencies]
 hex = "0.4"
+# For the async tests only; the library itself pulls in no executor.
+tokio = { version = "1", features = ["rt", "macros", "time", "test-util"] }

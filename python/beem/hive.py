@@ -45,6 +45,8 @@ class Hive:
     :param nobroadcast: build and sign but do not broadcast
     :param expiration: seconds until a transaction expires
     :param tapos_max_age: seconds a cached block reference stays usable
+    :param race_width: broadcast to this many nodes at once, taking the first
+        acceptance. 1 (the default) is ordinary failover, as beem did it.
     """
 
     def __init__(
@@ -57,6 +59,7 @@ class Hive:
         num_retries=3,
         timeout=10,
         chain="HIVE",
+        race_width=1,
         **kwargs,
     ):
         self.rpc = NodeClient(
@@ -64,6 +67,8 @@ class Hive:
         )
         self.nobroadcast = nobroadcast
         self.expiration = expiration
+        #: How many nodes a broadcast is sent to at once. 1 is beem's behaviour.
+        self.race_width = max(1, int(race_width))
         self.chain = chain
         self._tapos = hivecomb.TaposCache(max_age_seconds=tapos_max_age)
         self.wifs = self._collect_keys(keys)
@@ -207,10 +212,27 @@ class Hive:
             return signed
         return self.broadcast(signed)
 
-    def broadcast(self, tx, trx_id=True):
-        """Broadcast a signed transaction and wait for the node to accept it."""
+    def broadcast(self, tx, trx_id=True, race_width=None):
+        """Broadcast a signed transaction and wait for the node to accept it.
+
+        ``race_width`` sends the same signed transaction to that many nodes at
+        once and takes the first acceptance, so a sick node costs one timeout
+        rather than delaying the whole failover chain. Defaults to the
+        instance's ``race_width`` (1, i.e. ordinary failover).
+
+        Racing is safe here because the chain deduplicates by transaction id:
+        the same signed bytes arriving at three nodes are accepted once. It
+        would *not* be safe to sign per node -- different expirations mean
+        different ids, and both would land -- which is why this takes one
+        already-signed transaction.
+        """
         payload = {k: v for k, v in tx.items() if k != "trx_id"}
-        self.rpc.call("network_broadcast_api.broadcast_transaction", {"trx": payload})
+        width = race_width if race_width is not None else self.race_width
+        method = "network_broadcast_api.broadcast_transaction"
+        if width and width > 1:
+            self.rpc.race(method, {"trx": payload}, width=width)
+        else:
+            self.rpc.call(method, {"trx": payload})
         return tx
 
     def sign(self, tx=None, wifs=None, reconstruct_tx=True):

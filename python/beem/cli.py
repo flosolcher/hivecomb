@@ -167,6 +167,9 @@ def make_hive(args, keys=None, nobroadcast=None):
         nobroadcast=args.dry_run if nobroadcast is None else nobroadcast,
         expiration=config.get("expiration", 60),
         tapos_max_age=config.get("tapos_max_age", 180),
+        # Reads are left to ordinary failover: racing costs the public nodes N
+        # times the requests, and only a broadcast is usually on a deadline.
+        race_width=getattr(args, "race", 1),
     )
 
 
@@ -431,6 +434,8 @@ def cmd_featureflags(args):
         ("offline signing", "yes — chain id is a local constant"),
         ("memo varint prefix", "yes — beem omits it"),
         ("wallet KDF", "scrypt + AES-256-GCM"),
+        ("node racing", "yes — `--race N` on broadcast"),
+        ("async (Rust only)", "yes — `async` feature, runtime-agnostic"),
     ]
     table(["feature", "state"], rows)
 
@@ -1995,6 +2000,10 @@ def build_parser():
     parser.add_argument("--account", help="the account to act as")
     parser.add_argument("--dry-run", action="store_true",
                         help="build and sign, but do not broadcast")
+    parser.add_argument("--race", type=int, default=1, metavar="N",
+                        help="broadcast to N nodes at once and take the first "
+                             "acceptance; a sick node then costs one timeout "
+                             "instead of delaying the whole failover chain")
     parser.add_argument("--version", action="store_true", help="print the version and exit")
 
     # Flags the top-level parser owns. A subcommand that declares one of these

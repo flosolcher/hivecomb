@@ -371,12 +371,40 @@ Virtual operations are emitted by consensus, not carried in a transaction, so th
 **not in `block_api.get_block`**. `Blockchain.get_ops_in_block(n, only_virtual=True)`
 and `beempy opsinblock N --virtual` use the endpoint that has them.
 
-### 4.13 Unknown fields survive
+### 4.13 Racing nodes on broadcast
+
+```python
+hive = Hive(node=nodes, keys=[wif], race_width=3)   # or per call:
+hive.broadcast(signed, race_width=3)
+```
+
+```sh
+beempy --race 3 customjson my_app '{"hello":"hive"}'
+```
+
+The same signed transaction goes to three nodes at once and the first acceptance wins,
+so a sick node costs one timeout instead of delaying the whole failover chain.
+Measured against two dead nodes: 878 ms racing, 3,366 ms sequential.
+
+Safe because the chain deduplicates by transaction id — the same signed bytes arriving
+at three nodes are accepted once. It would *not* be safe to sign per node: different
+expirations mean different ids and both would land, which is why this takes one
+already-signed transaction.
+
+Default is 1, which is beem's behaviour exactly. Reads are left to ordinary failover,
+since racing costs the public nodes N times the requests and only a broadcast is
+usually on a deadline.
+
+**Python stays synchronous**, deliberately: beem is synchronous and a drop-in must be.
+Racing uses threads rather than asyncio, so nothing about the execution model changes.
+The Rust side has an async equivalent behind the `async` feature.
+
+### 4.14 Unknown fields survive
 
 Every chain type carries an `extra` map, so a hardfork that adds a field does not
 silently lose it.
 
-### 4.14 A differential oracle
+### 4.15 A differential oracle
 
 `tests/differential_beem.py` compares digests against beem byte for byte over a
 generated corpus. `hivecomb/tests/live_fixtures.rs` parses real captured node responses.
