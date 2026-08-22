@@ -37,6 +37,8 @@ A bug that yields a silently-invalid signature ranks above one that raises.
 | [19](#19) | Low | dead code | `init_aes` defined three times; broken import path in base class |
 | [20](#20) | Low | passwords | Master password stretched with a single unsalted SHA-256 |
 | [21](#21) | High | serialization | `flat_set` fields serialized in caller order, not sorted |
+| [22](#22) | Critical | operations | `escrow_release` omits `agent` and `receiver`; `escrow_dispute` omits `agent` |
+| [23](#23) | High | operations | `custom_binary` serializes 2 of 6 fields, and mistypes `id` |
 
 ---
 
@@ -671,6 +673,87 @@ does not change the output bytes.
 
 ---
 
+<a id="22"></a>
+## 22. The escrow operations are missing fields — Critical
+
+**`beembase/operations.py`**, `Escrow_release` and `Escrow_dispute`
+
+hived declares:
+
+```cpp
+struct escrow_release_operation {
+   account_name_type from, to, agent, who, receiver;
+   uint32_t          escrow_id;
+   asset             hbd_amount, hive_amount;
+};
+struct escrow_dispute_operation {
+   account_name_type from, to, agent, who;
+   uint32_t          escrow_id;
+};
+```
+
+beem serializes:
+
+| operation | hived fields | beem fields | omitted |
+|---|---|---|---|
+| `escrow_release` | from, to, **agent**, who, **receiver**, escrow_id, hbd_amount, hive_amount | from, to, who, escrow_id, hbd_amount, hive_amount | **`agent`, `receiver`** |
+| `escrow_dispute` | from, to, **agent**, who, escrow_id | from, to, who, escrow_id | **`agent`** |
+
+Graphene serialization is positional — no names, no padding — so an omitted field does
+not produce a short record with a gap. **Every subsequent field shifts left.** hived
+reads `who` where `agent` should be, `escrow_id` where `receiver` should be, and then
+runs off the end of the buffer or reads an asset out of whatever follows.
+
+For `escrow_release` the omitted `receiver` is *the field that says who the funds go
+to*. There is no interpretation of the resulting bytes under which the operation means
+what the caller asked for.
+
+`Escrow_transfer` and `Escrow_approve` are correct, which is what makes this
+particularly easy to miss: two of the four escrow operations are right.
+
+**In `comb`:** all eight and all five fields respectively, with tests asserting the
+serialized length and that `agent` actually appears in the bytes.
+
+---
+
+<a id="23"></a>
+## 23. `custom_binary` serializes two of its six fields — High
+
+**`beembase/operations.py`**, `Custom_binary`
+
+```python
+super(Custom_binary, self).__init__(OrderedDict([
+    ('id', Uint16(int(kwargs["id"]))),
+    ('data', String(kwargs["data"])),
+]))
+```
+
+hived declares six members:
+
+```cpp
+struct custom_binary_operation {
+   flat_set<account_name_type> required_owner_auths;
+   flat_set<account_name_type> required_active_auths;
+   flat_set<account_name_type> required_posting_auths;
+   vector<authority>           required_auths;
+   custom_id_type              id;      // a string
+   vector<char>                data;
+};
+```
+
+Two problems compound. The three auth sets and the authority vector are missing
+entirely, so nothing declares who must sign. And `id` is a `custom_id_type` — a
+**string** — while beem writes a `uint16`, which is what `custom_operation` (a
+different operation) uses.
+
+The output cannot be deserialized as a `custom_binary_operation` under any reading.
+
+**In `comb`:** all six fields, with the three `flat_set` members sorted and
+deduplicated per [finding 21](#21), and `id` length-checked against
+`custom_id_type`'s 32-byte limit.
+
+---
+
 ## Not defects, but reasons this port exists
 
 * **`beem` cannot sign without a node.** `blockchaininstance.py:496-549` calls
@@ -715,7 +798,9 @@ The corpus is a floor, not a ceiling. It covers varint boundaries (payloads past
 
 Findings were read from the installed source. Findings 1, 2, 8, 10, 11, 12, 13, 14, 18
 and 19 are mechanically verifiable from the code alone and are covered by regression
-tests in `comb`. Findings **16 and 21 were confirmed empirically** by running both
+tests in `comb`. Findings 22 and 23 are field-by-field
+comparisons against hived's `hive_operations.hpp` and are covered by regression tests.
+Findings **16 and 21 were confirmed empirically** by running both
 implementations against each other, with the measurements shown above. Findings 3, 4,
 5, 6, 7, 9, 15, 17 and 20 are correct as descriptions of the code; whether each has
 actually caused a failure in production is **not established here** — several of them

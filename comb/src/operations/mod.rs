@@ -532,6 +532,345 @@ op_struct! {
     }
 }
 
+/// A 20-byte block id, as used by `witness_block_approve` and `pow`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockId(pub [u8; 20]);
+
+impl BlockId {
+    /// Parse a 40-character hex block id.
+    pub fn from_hex(s: &str) -> Result<Self> {
+        let s = s.trim();
+        if s.len() != 40 {
+            return Err(Error::field(format!(
+                "block id must be 40 hex characters, got {}",
+                s.len()
+            )));
+        }
+        let mut out = [0u8; 20];
+        for (i, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+                .map_err(|_| Error::field("block id is not valid hex"))?;
+        }
+        Ok(BlockId(out))
+    }
+
+    /// Lowercase hex.
+    pub fn to_hex(&self) -> String {
+        self.0.iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+impl GrapheneSerialize for BlockId {
+    fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+        crate::types::write_raw(out, &self.0);
+        Ok(())
+    }
+}
+
+impl serde::Serialize for BlockId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_hex())
+    }
+}
+
+/// `legacy_chain_properties` — the witness-voted chain parameters carried by
+/// `witness_update` and `pow`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ChainProperties {
+    /// Fee to create an account. Serialized as a legacy asset.
+    pub account_creation_fee: Amount,
+    /// Maximum block size the witness will accept, in bytes.
+    pub maximum_block_size: u32,
+    /// HBD interest rate in basis points.
+    pub hbd_interest_rate: u16,
+}
+
+impl GrapheneSerialize for ChainProperties {
+    fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+        self.account_creation_fee.append_to(out)?;
+        write_u32(out, self.maximum_block_size);
+        write_u16(out, self.hbd_interest_rate);
+        Ok(())
+    }
+}
+
+/// One entry of `witness_set_properties`'s `flat_map<string, vector<char>>`.
+///
+/// The value is the **hex-encoded binary serialization** of the property, not its JSON
+/// form — hived unpacks each value according to the key. Callers usually build these
+/// with the helpers on [`WitnessProperty`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WitnessProperty {
+    pub key: String,
+    pub value: Vec<u8>,
+}
+
+impl WitnessProperty {
+    /// A property whose value is a `public_key_type`.
+    pub fn public_key(key: &str, value: &PublicKey) -> Result<Self> {
+        Ok(WitnessProperty {
+            key: key.to_string(),
+            value: value.to_wire()?,
+        })
+    }
+
+    /// A property whose value is an `asset`.
+    pub fn asset(key: &str, value: &Amount) -> Result<Self> {
+        Ok(WitnessProperty {
+            key: key.to_string(),
+            value: value.to_wire()?,
+        })
+    }
+
+    /// A property whose value is a `uint32`.
+    pub fn uint32(key: &str, value: u32) -> Self {
+        WitnessProperty {
+            key: key.to_string(),
+            value: value.to_le_bytes().to_vec(),
+        }
+    }
+
+    /// A property whose value is a `uint16`.
+    pub fn uint16(key: &str, value: u16) -> Self {
+        WitnessProperty {
+            key: key.to_string(),
+            value: value.to_le_bytes().to_vec(),
+        }
+    }
+
+    /// A property whose value is a length-prefixed string, such as `url`.
+    pub fn string(key: &str, value: &str) -> Result<Self> {
+        let mut buf = Vec::new();
+        write_string(&mut buf, value)?;
+        Ok(WitnessProperty {
+            key: key.to_string(),
+            value: buf,
+        })
+    }
+}
+
+impl GrapheneSerialize for WitnessProperty {
+    fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+        write_string(out, &self.key)?;
+        crate::types::write_bytes(out, &self.value)?;
+        Ok(())
+    }
+}
+
+impl serde::Serialize for WitnessProperty {
+    /// hived renders these as `["key", "<hex>"]` pairs.
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeTuple;
+        let hex: String = self.value.iter().map(|b| format!("{b:02x}")).collect();
+        let mut t = s.serialize_tuple(2)?;
+        t.serialize_element(&self.key)?;
+        t.serialize_element(&hex)?;
+        t.end()
+    }
+}
+
+op_struct! {
+    /// `account_create_operation` (id 9).
+    AccountCreate {
+        fee: Amount,
+        creator: String,
+        new_account_name: String,
+        owner: Authority,
+        active: Authority,
+        posting: Authority,
+        memo_key: PublicKey,
+        json_metadata: String,
+    }
+}
+
+op_struct! {
+    /// `account_update_operation` (id 10).
+    ///
+    /// Note that `memo_key` is **not** optional here, unlike in `account_update2`.
+    AccountUpdate {
+        account: String,
+        owner: Option<Authority>,
+        active: Option<Authority>,
+        posting: Option<Authority>,
+        memo_key: PublicKey,
+        json_metadata: String,
+    }
+}
+
+op_struct! {
+    /// `witness_update_operation` (id 11).
+    ///
+    /// Setting `block_signing_key` to the null key retires the witness.
+    WitnessUpdate {
+        owner: String,
+        url: String,
+        block_signing_key: PublicKey,
+        props: ChainProperties,
+        fee: Amount,
+    }
+}
+
+op_struct! {
+    /// `witness_block_approve_operation` (id 16).
+    ///
+    /// beem has no class for this operation at all.
+    WitnessBlockApprove {
+        witness: String,
+        block_id: BlockId,
+    }
+}
+
+op_struct! {
+    /// `request_account_recovery_operation` (id 24).
+    RequestAccountRecovery {
+        recovery_account: String,
+        account_to_recover: String,
+        new_owner_authority: Authority,
+        extensions: NoExtensions,
+    }
+}
+
+op_struct! {
+    /// `recover_account_operation` (id 25).
+    RecoverAccount {
+        account_to_recover: String,
+        new_owner_authority: Authority,
+        recent_owner_authority: Authority,
+        extensions: NoExtensions,
+    }
+}
+
+op_struct! {
+    /// `escrow_transfer_operation` (id 27).
+    EscrowTransfer {
+        from: String,
+        to: String,
+        agent: String,
+        escrow_id: u32,
+        hbd_amount: Amount,
+        hive_amount: Amount,
+        fee: Amount,
+        ratification_deadline: PointInTime,
+        escrow_expiration: PointInTime,
+        json_meta: String,
+    }
+}
+
+op_struct! {
+    /// `escrow_dispute_operation` (id 28).
+    ///
+    /// **beem omits `agent`**, serializing four of the five fields. Every field after
+    /// the gap lands in the wrong place, so the operation hived reconstructs is not
+    /// the one that was signed.
+    EscrowDispute {
+        from: String,
+        to: String,
+        agent: String,
+        who: String,
+        escrow_id: u32,
+    }
+}
+
+op_struct! {
+    /// `escrow_release_operation` (id 29).
+    ///
+    /// **beem omits both `agent` and `receiver`**, serializing six of the eight
+    /// fields — including the field that says who the funds go to.
+    EscrowRelease {
+        from: String,
+        to: String,
+        agent: String,
+        who: String,
+        receiver: String,
+        escrow_id: u32,
+        hbd_amount: Amount,
+        hive_amount: Amount,
+    }
+}
+
+op_struct! {
+    /// `escrow_approve_operation` (id 31).
+    EscrowApprove {
+        from: String,
+        to: String,
+        agent: String,
+        who: String,
+        escrow_id: u32,
+        approve: bool,
+    }
+}
+
+op_struct! {
+    /// `custom_binary_operation` (id 35).
+    ///
+    /// **beem serializes two of these six fields** (`id` and `data`) and types `id` as
+    /// a `Uint16`, where hived uses a `custom_id_type` string. Its output cannot be
+    /// deserialized as this operation at all.
+    CustomBinary {
+        required_owner_auths: Vec<String>,
+        required_active_auths: Vec<String>,
+        required_posting_auths: Vec<String>,
+        required_auths: Vec<Authority>,
+        id: String,
+        data: Vec<u8>,
+    }
+}
+
+op_struct! {
+    /// `reset_account_operation` (id 37).
+    ///
+    /// Disabled on chain — hived rejects it. Present so that historical blocks can be
+    /// read and so the operation table stays complete.
+    ResetAccount {
+        reset_account: String,
+        account_to_reset: String,
+        new_owner_authority: Authority,
+    }
+}
+
+op_struct! {
+    /// `set_reset_account_operation` (id 38).
+    ///
+    /// Disabled on chain, like [`ResetAccount`].
+    SetResetAccount {
+        account: String,
+        current_reset_account: String,
+        reset_account: String,
+    }
+}
+
+op_struct! {
+    /// `account_create_with_delegation_operation` (id 41).
+    ///
+    /// Superseded by `claim_account` + `create_claimed_account`, and rejected since
+    /// HF20. Kept for reading history.
+    AccountCreateWithDelegation {
+        fee: Amount,
+        delegation: Amount,
+        creator: String,
+        new_account_name: String,
+        owner: Authority,
+        active: Authority,
+        posting: Authority,
+        memo_key: PublicKey,
+        json_metadata: String,
+        extensions: NoExtensions,
+    }
+}
+
+op_struct! {
+    /// `witness_set_properties_operation` (id 42).
+    ///
+    /// The modern way for a witness to publish parameters. Properties are a
+    /// `flat_map`, so they serialize **sorted by key**; build values with the helpers
+    /// on [`WitnessProperty`].
+    WitnessSetProperties {
+        owner: String,
+        props: Vec<WitnessProperty>,
+        extensions: NoExtensions,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The operation variant
 // ---------------------------------------------------------------------------
@@ -545,6 +884,21 @@ op_struct! {
 pub enum Operation {
     Vote(Vote),
     Comment(Comment),
+    AccountCreate(AccountCreate),
+    AccountUpdate(AccountUpdate),
+    WitnessUpdate(WitnessUpdate),
+    WitnessBlockApprove(WitnessBlockApprove),
+    RequestAccountRecovery(RequestAccountRecovery),
+    RecoverAccount(RecoverAccount),
+    EscrowTransfer(EscrowTransfer),
+    EscrowDispute(EscrowDispute),
+    EscrowRelease(EscrowRelease),
+    EscrowApprove(EscrowApprove),
+    CustomBinary(CustomBinary),
+    ResetAccount(ResetAccount),
+    SetResetAccount(SetResetAccount),
+    AccountCreateWithDelegation(AccountCreateWithDelegation),
+    WitnessSetProperties(WitnessSetProperties),
     Transfer(Transfer),
     TransferToVesting(TransferToVesting),
     WithdrawVesting(WithdrawVesting),
@@ -584,6 +938,21 @@ impl Operation {
         match self {
             Operation::Vote(_) => OperationId::Vote,
             Operation::Comment(_) => OperationId::Comment,
+            Operation::AccountCreate(_) => OperationId::AccountCreate,
+            Operation::AccountUpdate(_) => OperationId::AccountUpdate,
+            Operation::WitnessUpdate(_) => OperationId::WitnessUpdate,
+            Operation::WitnessBlockApprove(_) => OperationId::WitnessBlockApprove,
+            Operation::RequestAccountRecovery(_) => OperationId::RequestAccountRecovery,
+            Operation::RecoverAccount(_) => OperationId::RecoverAccount,
+            Operation::EscrowTransfer(_) => OperationId::EscrowTransfer,
+            Operation::EscrowDispute(_) => OperationId::EscrowDispute,
+            Operation::EscrowRelease(_) => OperationId::EscrowRelease,
+            Operation::EscrowApprove(_) => OperationId::EscrowApprove,
+            Operation::CustomBinary(_) => OperationId::CustomBinary,
+            Operation::ResetAccount(_) => OperationId::ResetAccount,
+            Operation::SetResetAccount(_) => OperationId::SetResetAccount,
+            Operation::AccountCreateWithDelegation(_) => OperationId::AccountCreateWithDelegation,
+            Operation::WitnessSetProperties(_) => OperationId::WitnessSetProperties,
             Operation::Transfer(_) => OperationId::Transfer,
             Operation::TransferToVesting(_) => OperationId::TransferToVesting,
             Operation::WithdrawVesting(_) => OperationId::WithdrawVesting,
@@ -635,6 +1004,135 @@ impl Operation {
                 write_string(out, &o.title)?;
                 write_string(out, &o.body)?;
                 write_string(out, &o.json_metadata)?;
+            }
+            Operation::AccountCreate(o) => {
+                o.fee.append_to(out)?;
+                write_string(out, &o.creator)?;
+                write_string(out, &o.new_account_name)?;
+                o.owner.append_to(out)?;
+                o.active.append_to(out)?;
+                o.posting.append_to(out)?;
+                o.memo_key.append_to(out)?;
+                write_string(out, &o.json_metadata)?;
+            }
+            Operation::AccountUpdate(o) => {
+                write_string(out, &o.account)?;
+                write_optional(out, o.owner.as_ref())?;
+                write_optional(out, o.active.as_ref())?;
+                write_optional(out, o.posting.as_ref())?;
+                o.memo_key.append_to(out)?;
+                write_string(out, &o.json_metadata)?;
+            }
+            Operation::WitnessUpdate(o) => {
+                write_string(out, &o.owner)?;
+                write_string(out, &o.url)?;
+                o.block_signing_key.append_to(out)?;
+                o.props.append_to(out)?;
+                o.fee.append_to(out)?;
+            }
+            Operation::WitnessBlockApprove(o) => {
+                write_string(out, &o.witness)?;
+                o.block_id.append_to(out)?;
+            }
+            Operation::RequestAccountRecovery(o) => {
+                write_string(out, &o.recovery_account)?;
+                write_string(out, &o.account_to_recover)?;
+                o.new_owner_authority.append_to(out)?;
+                o.extensions.append_to(out)?;
+            }
+            Operation::RecoverAccount(o) => {
+                write_string(out, &o.account_to_recover)?;
+                o.new_owner_authority.append_to(out)?;
+                o.recent_owner_authority.append_to(out)?;
+                o.extensions.append_to(out)?;
+            }
+            Operation::EscrowTransfer(o) => {
+                write_string(out, &o.from)?;
+                write_string(out, &o.to)?;
+                write_string(out, &o.agent)?;
+                write_u32(out, o.escrow_id);
+                o.hbd_amount.append_to(out)?;
+                o.hive_amount.append_to(out)?;
+                o.fee.append_to(out)?;
+                o.ratification_deadline.append_to(out)?;
+                o.escrow_expiration.append_to(out)?;
+                write_string(out, &o.json_meta)?;
+            }
+            Operation::EscrowDispute(o) => {
+                write_string(out, &o.from)?;
+                write_string(out, &o.to)?;
+                write_string(out, &o.agent)?;
+                write_string(out, &o.who)?;
+                write_u32(out, o.escrow_id);
+            }
+            Operation::EscrowRelease(o) => {
+                write_string(out, &o.from)?;
+                write_string(out, &o.to)?;
+                write_string(out, &o.agent)?;
+                write_string(out, &o.who)?;
+                write_string(out, &o.receiver)?;
+                write_u32(out, o.escrow_id);
+                o.hbd_amount.append_to(out)?;
+                o.hive_amount.append_to(out)?;
+            }
+            Operation::EscrowApprove(o) => {
+                write_string(out, &o.from)?;
+                write_string(out, &o.to)?;
+                write_string(out, &o.agent)?;
+                write_string(out, &o.who)?;
+                write_u32(out, o.escrow_id);
+                write_bool(out, o.approve);
+            }
+            Operation::CustomBinary(o) => {
+                if o.id.len() > MAX_CUSTOM_ID_LEN {
+                    return Err(Error::field(format!(
+                        "custom_binary id is {} bytes; hived allows at most {MAX_CUSTOM_ID_LEN}",
+                        o.id.len()
+                    )));
+                }
+                write_sorted_account_set(out, &o.required_owner_auths, "required_owner_auths")?;
+                write_sorted_account_set(out, &o.required_active_auths, "required_active_auths")?;
+                write_sorted_account_set(out, &o.required_posting_auths, "required_posting_auths")?;
+                // `required_auths` is a plain vector<authority>, not a flat_set, so it
+                // keeps the caller's order.
+                write_array(out, &o.required_auths)?;
+                write_string(out, &o.id)?;
+                crate::types::write_bytes(out, &o.data)?;
+            }
+            Operation::ResetAccount(o) => {
+                write_string(out, &o.reset_account)?;
+                write_string(out, &o.account_to_reset)?;
+                o.new_owner_authority.append_to(out)?;
+            }
+            Operation::SetResetAccount(o) => {
+                write_string(out, &o.account)?;
+                write_string(out, &o.current_reset_account)?;
+                write_string(out, &o.reset_account)?;
+            }
+            Operation::AccountCreateWithDelegation(o) => {
+                o.fee.append_to(out)?;
+                o.delegation.append_to(out)?;
+                write_string(out, &o.creator)?;
+                write_string(out, &o.new_account_name)?;
+                o.owner.append_to(out)?;
+                o.active.append_to(out)?;
+                o.posting.append_to(out)?;
+                o.memo_key.append_to(out)?;
+                write_string(out, &o.json_metadata)?;
+                o.extensions.append_to(out)?;
+            }
+            Operation::WitnessSetProperties(o) => {
+                write_string(out, &o.owner)?;
+                // `props` is a flat_map: sorted by key, unique.
+                let mut props = o.props.clone();
+                props.sort_by(|a, b| a.key.cmp(&b.key));
+                if props.windows(2).any(|w| w[0].key == w[1].key) {
+                    return Err(Error::field(
+                        "witness_set_properties lists the same key twice",
+                    ));
+                }
+                write_array(out, &props)?;
+                o.extensions.append_to(out)?;
             }
             Operation::Transfer(o) => {
                 write_string(out, &o.from)?;
@@ -892,6 +1390,21 @@ impl serde::Serialize for Operation {
         delegate!(
             Vote,
             Comment,
+            AccountCreate,
+            AccountUpdate,
+            WitnessUpdate,
+            WitnessBlockApprove,
+            RequestAccountRecovery,
+            RecoverAccount,
+            EscrowTransfer,
+            EscrowDispute,
+            EscrowRelease,
+            EscrowApprove,
+            CustomBinary,
+            ResetAccount,
+            SetResetAccount,
+            AccountCreateWithDelegation,
+            WitnessSetProperties,
             Transfer,
             TransferToVesting,
             WithdrawVesting,
@@ -1165,6 +1678,146 @@ mod tests {
         }
     }
 
+    #[test]
+    fn escrow_release_carries_agent_and_receiver() {
+        // beem omits both, serializing six of eight fields — including the one that
+        // says who the funds go to. See SECURITY_FINDINGS.md finding 22.
+        let op = Operation::EscrowRelease(EscrowRelease {
+            from: "alice".into(),
+            to: "bob".into(),
+            agent: "carol".into(),
+            who: "alice".into(),
+            receiver: "bob".into(),
+            escrow_id: 1,
+            hbd_amount: hive("1.000 HBD"),
+            hive_amount: hive("2.000 HIVE"),
+        });
+        let wire = op.to_wire().unwrap();
+        assert_eq!(wire[0], 29);
+        // Five length-prefixed names, then a u32 id, then two 16-byte assets.
+        let names_len: usize = ["alice", "bob", "carol", "alice", "bob"]
+            .iter()
+            .map(|n| 1 + n.len())
+            .sum();
+        assert_eq!(wire.len(), 1 + names_len + 4 + 16 + 16);
+        // "carol" must actually be present.
+        assert!(wire.windows(5).any(|w| w == b"carol"));
+    }
+
+    #[test]
+    fn escrow_dispute_carries_agent() {
+        let op = Operation::EscrowDispute(EscrowDispute {
+            from: "alice".into(),
+            to: "bob".into(),
+            agent: "carol".into(),
+            who: "alice".into(),
+            escrow_id: 7,
+        });
+        let wire = op.to_wire().unwrap();
+        assert_eq!(wire[0], 28);
+        assert!(wire.windows(5).any(|w| w == b"carol"));
+        assert_eq!(&wire[wire.len() - 4..], &7u32.to_le_bytes());
+    }
+
+    #[test]
+    fn custom_binary_has_all_six_fields() {
+        // beem serializes only `id` and `data`, and types `id` as a Uint16.
+        let op = Operation::CustomBinary(CustomBinary {
+            required_owner_auths: vec![],
+            required_active_auths: vec!["alice".into()],
+            required_posting_auths: vec![],
+            required_auths: vec![],
+            id: "app".into(),
+            data: vec![0xde, 0xad],
+        });
+        let wire = op.to_wire().unwrap();
+        assert_eq!(wire[0], 35);
+        // op id, then four empty-or-one-element containers before the id string.
+        assert_eq!(wire[1], 0, "no owner auths");
+        assert_eq!(wire[2], 1, "one active auth");
+        assert_eq!(&wire[3..9], b"\x05alice");
+        assert_eq!(wire[9], 0, "no posting auths");
+        assert_eq!(wire[10], 0, "no authority objects");
+        assert_eq!(
+            &wire[11..15],
+            b"\x03app",
+            "id is a length-prefixed string, not a u16"
+        );
+    }
+
+    #[test]
+    fn witness_set_properties_sorts_its_flat_map() {
+        let a = Operation::WitnessSetProperties(WitnessSetProperties {
+            owner: "w".into(),
+            props: vec![
+                WitnessProperty::uint32("maximum_block_size", 65536),
+                WitnessProperty::uint16("hbd_interest_rate", 1000),
+            ],
+            extensions: NoExtensions,
+        });
+        let b = Operation::WitnessSetProperties(WitnessSetProperties {
+            owner: "w".into(),
+            props: vec![
+                WitnessProperty::uint16("hbd_interest_rate", 1000),
+                WitnessProperty::uint32("maximum_block_size", 65536),
+            ],
+            extensions: NoExtensions,
+        });
+        assert_eq!(a.to_wire().unwrap(), b.to_wire().unwrap());
+
+        let dup = Operation::WitnessSetProperties(WitnessSetProperties {
+            owner: "w".into(),
+            props: vec![
+                WitnessProperty::uint32("maximum_block_size", 1),
+                WitnessProperty::uint32("maximum_block_size", 2),
+            ],
+            extensions: NoExtensions,
+        });
+        assert!(dup.to_wire().is_err());
+    }
+
+    #[test]
+    fn account_update_memo_key_is_not_optional() {
+        // account_update carries a bare public_key_type; only account_update2 makes it
+        // an optional. Getting these two the wrong way round shifts every later field.
+        let key = crate::keys::PrivateKey::generate().public_key();
+        let update = Operation::AccountUpdate(AccountUpdate {
+            account: "a".into(),
+            owner: None,
+            active: None,
+            posting: None,
+            memo_key: key,
+            json_metadata: String::new(),
+        });
+        let wire = update.to_wire().unwrap();
+        // op id + varint(1) + "a" + three absent optionals, then 33 raw key bytes.
+        assert_eq!(&wire[3..6], &[0, 0, 0]);
+        assert_eq!(&wire[6..39], &key.to_bytes());
+    }
+
+    #[test]
+    fn every_non_virtual_operation_except_mining_is_constructible() {
+        use std::collections::HashSet;
+        let built: HashSet<u32> = sample_of_every_variant()
+            .iter()
+            .map(|op| op.id().as_u32())
+            .collect();
+        // pow (14) and pow2 (30) are the obsolete mining operations; hived has
+        // rejected them since HF17 and beem never implemented them either.
+        let obsolete_mining: HashSet<u32> = [14, 30].into_iter().collect();
+        let missing: Vec<u32> = (0..FIRST_VIRTUAL_OP)
+            .filter(|id| !built.contains(id) && !obsolete_mining.contains(id))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "operations not constructible: {missing:?}"
+        );
+        assert_eq!(
+            built.len(),
+            (FIRST_VIRTUAL_OP as usize) - obsolete_mining.len()
+        );
+    }
+
     /// One value of every `Operation` variant, so the tests above cover all of them.
     fn sample_of_every_variant() -> Vec<Operation> {
         let key = crate::keys::PrivateKey::generate().public_key();
@@ -1175,6 +1828,126 @@ mod tests {
             quote: hive("1.000 HBD"),
         };
         vec![
+            Operation::AccountCreate(AccountCreate {
+                fee: hive("3.000 HIVE"),
+                creator: "a".into(),
+                new_account_name: "b".into(),
+                owner: auth.clone(),
+                active: auth.clone(),
+                posting: auth.clone(),
+                memo_key: key,
+                json_metadata: "{}".into(),
+            }),
+            Operation::AccountUpdate(AccountUpdate {
+                account: "a".into(),
+                owner: None,
+                active: Some(auth.clone()),
+                posting: None,
+                memo_key: key,
+                json_metadata: "{}".into(),
+            }),
+            Operation::WitnessUpdate(WitnessUpdate {
+                owner: "a".into(),
+                url: "https://example.org".into(),
+                block_signing_key: key,
+                props: ChainProperties {
+                    account_creation_fee: hive("3.000 HIVE"),
+                    maximum_block_size: 65536,
+                    hbd_interest_rate: 1000,
+                },
+                fee: hive("0.000 HIVE"),
+            }),
+            Operation::WitnessBlockApprove(WitnessBlockApprove {
+                witness: "a".into(),
+                block_id: BlockId([7u8; 20]),
+            }),
+            Operation::RequestAccountRecovery(RequestAccountRecovery {
+                recovery_account: "a".into(),
+                account_to_recover: "b".into(),
+                new_owner_authority: auth.clone(),
+                extensions: NoExtensions,
+            }),
+            Operation::RecoverAccount(RecoverAccount {
+                account_to_recover: "a".into(),
+                new_owner_authority: auth.clone(),
+                recent_owner_authority: auth.clone(),
+                extensions: NoExtensions,
+            }),
+            Operation::EscrowTransfer(EscrowTransfer {
+                from: "a".into(),
+                to: "b".into(),
+                agent: "c".into(),
+                escrow_id: 1,
+                hbd_amount: hive("1.000 HBD"),
+                hive_amount: hive("1.000 HIVE"),
+                fee: hive("0.100 HIVE"),
+                ratification_deadline: t,
+                escrow_expiration: t,
+                json_meta: "{}".into(),
+            }),
+            Operation::EscrowDispute(EscrowDispute {
+                from: "a".into(),
+                to: "b".into(),
+                agent: "c".into(),
+                who: "a".into(),
+                escrow_id: 1,
+            }),
+            Operation::EscrowRelease(EscrowRelease {
+                from: "a".into(),
+                to: "b".into(),
+                agent: "c".into(),
+                who: "a".into(),
+                receiver: "b".into(),
+                escrow_id: 1,
+                hbd_amount: hive("1.000 HBD"),
+                hive_amount: hive("1.000 HIVE"),
+            }),
+            Operation::EscrowApprove(EscrowApprove {
+                from: "a".into(),
+                to: "b".into(),
+                agent: "c".into(),
+                who: "c".into(),
+                escrow_id: 1,
+                approve: true,
+            }),
+            Operation::CustomBinary(CustomBinary {
+                required_owner_auths: vec![],
+                required_active_auths: vec!["a".into()],
+                required_posting_auths: vec![],
+                required_auths: vec![],
+                id: "x".into(),
+                data: vec![1, 2, 3],
+            }),
+            Operation::ResetAccount(ResetAccount {
+                reset_account: "a".into(),
+                account_to_reset: "b".into(),
+                new_owner_authority: auth.clone(),
+            }),
+            Operation::SetResetAccount(SetResetAccount {
+                account: "a".into(),
+                current_reset_account: "b".into(),
+                reset_account: "c".into(),
+            }),
+            Operation::AccountCreateWithDelegation(AccountCreateWithDelegation {
+                fee: hive("3.000 HIVE"),
+                delegation: hive("0.000000 VESTS"),
+                creator: "a".into(),
+                new_account_name: "b".into(),
+                owner: auth.clone(),
+                active: auth.clone(),
+                posting: auth.clone(),
+                memo_key: key,
+                json_metadata: "{}".into(),
+                extensions: NoExtensions,
+            }),
+            Operation::WitnessSetProperties(WitnessSetProperties {
+                owner: "a".into(),
+                props: vec![
+                    WitnessProperty::uint32("maximum_block_size", 65536),
+                    WitnessProperty::asset("account_creation_fee", &hive("3.000 HIVE")).unwrap(),
+                ],
+                extensions: NoExtensions,
+            }),
             Operation::Vote(Vote {
                 voter: "a".into(),
                 author: "b".into(),
