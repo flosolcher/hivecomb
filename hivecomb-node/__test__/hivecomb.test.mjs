@@ -126,7 +126,11 @@ test('builds the operations beem cannot', () => {
   const name = tx.operations[0][0]
   const fields = tx.operations[0][1]
   assert.equal(name, 'recurrent_transfer')
-  assert.deepEqual(fields.extensions, [[1, { pair_id: 3 }]])
+  // Object form, not [[1, {...}]]: hived rejects the array form for this
+  // extension, so a transaction carrying it cannot be broadcast at all.
+  assert.deepEqual(fields.extensions, [
+    { type: 'recurrent_transfer_pair_id', value: { pair_id: 3 } },
+  ])
 
   const conv = signTransaction(
     [['collateralized_convert', { owner: 'alice', requestid: 1, amount: '1.000 HIVE' }]],

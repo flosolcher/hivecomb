@@ -36,12 +36,12 @@ are true at once, and neither cancels the other.
 | | hive-xylem | hivecomb |
 |---|---|---|
 | Rust source | 4,556 lines | 15,619 lines |
-| Tests | 48 | 300 |
+| Tests | 48 | 305 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |
 | Wire deserialization | partial (strings, varints, ops) | full, with round-trip tests over every operation |
-| Differential testing | none | against beem, 134-case digest corpus |
+| Differential testing | none | against beem (150 cases) **and against hived itself** (57) |
 | Live-node fixture tests | none | 10 |
 | Key derivation | WIF only | WIF, BIP-32, BIP-38, BIP-39, brain keys, password keys |
 | Encrypted key store | none | scrypt + AES-256-GCM |

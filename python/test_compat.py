@@ -322,7 +322,13 @@ def _():
     tx = hive.recurrent_transfer("bob", "1.000", "HIVE", 24, 12, account="alice", pair_id=3)
     name, fields = tx["operations"][0]
     assert name == "recurrent_transfer"
-    assert fields["extensions"] == [[1, {"pair_id": 3}]]
+    # The object form, not [[1, {"pair_id": 3}]]. hived rejects the array form for this
+    # extension outright ("Bad Cast: ... got array_type"), so a transaction carrying it
+    # cannot be broadcast. The binary encoding is the same either way, which is why the
+    # array form survived until a node was asked. See BROADCAST.md.
+    assert fields["extensions"] == [
+        {"type": "recurrent_transfer_pair_id", "value": {"pair_id": 3}}
+    ]
 
     tx = hive.collateralized_convert("1.000", requestid=1, account="alice")
     assert tx["operations"][0][0] == "collateralized_convert"

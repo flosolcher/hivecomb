@@ -42,11 +42,15 @@ chain id ([5](#5) — properly, by making `known_chains["HIVE"]` the real post-H
 and deleting the `HIVE2` trap), the discarded verification result ([6](#6)), the
 timezone handling ([17](#17)) and the triplicated `init_aes` ([19](#19)).
 
-Fourteen findings do carry forward, including the one with the widest blast radius:
-`unicodify` ([8](#8)) still mangles control characters into literal text, and it still
-does so on the bytes that get **signed**. Also present: [9](#9), [10](#10), [11](#11),
-[12](#12), [14](#14), [15](#15), [16](#16), [18](#18), [21](#21), [22](#22), [23](#23),
-[24](#24) and [25](#25).
+Thirteen findings do carry forward: [9](#9), [10](#10), [11](#11), [12](#12),
+[14](#14), [15](#15), [16](#16), [18](#18), [21](#21), [22](#22), [23](#23), [24](#24)
+and [25](#25). Of those, [22](#22) and [23](#23) are the ones that change **signed**
+bytes, and [25](#25) is the wallet KDF.
+
+This paragraph previously led with `unicodify` ([8](#8)) as the widest-blast-radius
+finding carried into nectar. That finding has been **retracted** — beem and nectar are
+both right and this crate was wrong. It was never reported to nectar; the retraction
+happened first.
 
 So this document is not only an autopsy. Where a finding survives into nectar it is
 actionable, and it should be reported there rather than merely published here. That is
@@ -79,7 +83,7 @@ adversarial, and corrections are welcome.
 | [5](#5) | High | chain id | Bare `except:` falls back to the pre-HF24 all-zero chain id |
 | [6](#6) | Medium | verify | `verify_message` cannot verify, and its discarded result hides that |
 | [7](#7) | High | verify | `Signed_Transaction.verify()` collects all four recovery candidates |
-| [8](#8) | High | serialization | `String` mangles control characters into literal text |
+| [8](#8) | ~~High~~ **retracted** | serialization | `unicodify` is correct; it models hived's JSON parser |
 | [9](#9) | High | key hygiene | `repr()`/`str()` of a private key return the secret |
 | [10](#10) | Medium | base58 | Invalid characters decode to wrong bytes instead of erroring |
 | [11](#11) | Medium | base58 | WIF version byte discarded unchecked |
@@ -331,7 +335,14 @@ recovery id comes from the signature's own header byte, which is range-checked.
 ---
 
 <a id="8"></a>
-## 8. `String` serialization mangles control characters — High
+## 8. ~~`String` serialization mangles control characters~~ — **RETRACTED**
+
+**This finding was wrong. beem is correct here, and `hivecomb` had the bug.**
+
+It is left in place, rather than deleted, because it was published as a High-severity
+defect in someone else's library and because the way it was wrong is instructive.
+
+### What was claimed
 
 **`beemgraphenebase/types.py:170-186`**
 
@@ -344,20 +355,59 @@ elif o == 12:
     r.append("f")             # line 183 — no backslash
 ```
 
-These branches are missing their escape backslash. A `0x01` byte is serialized as the
-four *literal characters* `u0001`, and a backspace as the letter `b`. The varint length
-prefix then counts the expanded bytes.
+The missing backslashes were read as a Python-2-era escaping hack that had lost them,
+and the conclusion drawn was that beem signs bytes the chain does not expect.
 
-hived does no such thing. A Graphene string is a varint byte length followed by the raw
-UTF-8 bytes. So **any `custom_json` payload, memo, comment body or JSON metadata
-containing a control character serializes to different bytes in beem than the chain
-expects** — the transaction is signed over content that is not what was submitted.
+### Why that was wrong
 
-This looks like a Python-2-era escaping hack that lost its backslashes and was never
-exercised, because control characters are rare in practice.
+Hive is reached over JSON-RPC, and hived parses that JSON with `fc`, whose string
+unescaper **does not implement `\uXXXX`, `\b` or `\f`**. It strips the backslash and
+keeps the remainder as literal text. So a `U+0001` transmitted as the correct JSON
+escape arrives at the node as the five characters `u0001`, and hived serializes,
+digests and stores *that*.
 
-**In `hivecomb`:** `types::write_string` writes a varint length and the raw UTF-8 bytes,
-with regression tests pinning `\u{1}`, `\u{8}` and `\u{c}` to one byte each.
+`unicodify` is therefore not a mangling — it is a model of the transport, and an exact
+one. Asked directly, a live node mangles precisely the set beem lists:
+
+```
+0x00-0x07  ->  u0000 .. u0007        0x09 \t  unchanged
+0x08       ->  b                     0x0a \n  unchanged
+0x0b       ->  u000b                 0x0d \r  unchanged
+0x0c       ->  f                     0x22 "   unchanged
+0x0e-0x1f  ->  u000e .. u001f        0x5c \   unchanged
+```
+
+Measured with `condenser_api.get_transaction_hex` against `api.hive.blog`; the set is
+identical to beem's, special cases and exclusions included.
+
+### The consequence for this crate
+
+`hivecomb` wrote raw UTF-8, on the strength of this finding, and so produced a digest
+hived does not compute — **a signature the chain rejects** for any operation carrying a
+control character. The regression test that was supposed to prove the fix
+(`control_characters_are_written_verbatim`) asserted the wrong bytes and passed, because
+it was written from the same mistaken belief. So did every round-trip test, since
+`hivecomb` read back what `hivecomb` had written.
+
+### How it was caught
+
+By asking hived to serialize the transaction and comparing digests
+(`tests/hived_serialization_oracle.py`).
+
+Nothing else could have. The unit test asserted the belief rather than the behaviour.
+The round-trip tests read back what `hivecomb` itself had written, so a shared mistake
+is invisible to them. And the differential oracle against beem — which *would* have
+flagged this immediately, because beem had it right — never ran a case with a control
+character in a serialized string field. The corpus had 134 cases and not one of them
+exercised the code path the finding was about.
+
+Two lessons worth keeping. A test written from a belief tests the belief. And a
+differential oracle only covers what its corpus actually contains — the absence of a
+reported divergence is not evidence of agreement. A control-character case has since
+been added to the beem corpus, where the two now agree.
+
+**In `hivecomb`:** `types::hived_transport_form` now applies the same transform, and
+`types::write_string` calls it. The test pins the measured bytes.
 
 ---
 
@@ -951,8 +1001,8 @@ Migrate with `beempy listkeys` / `beempy getkey` and `Wallet::add_key`.
 compares `sha256(chain_id || serialized_tx)` byte for byte. Current result:
 
 ```
-digest corpus     : 134 cases
-  identical       : 108
+digest corpus     : 150 cases
+  identical       : 124
   known divergence: 26  (hivecomb is deliberately correct here)
   UNEXPECTED      : 0
 public key        : match
@@ -962,6 +1012,21 @@ cross-verification: ok
 The 26 divergences are findings [16](#16) and [21](#21) — the cases where beem produces
 bytes hived will not accept. Everything else is byte-identical, which is the evidence
 that the port did not introduce serialization drift of its own.
+
+### And a warning about this section
+
+A green result here is weaker evidence than it looks, and this document is the wrong
+place to pretend otherwise.
+
+beem is a *reference*, not an *authority*. Where the corpus does not reach, the oracle
+says nothing at all — [finding 8](#8) was published as a High-severity defect in beem,
+implemented backwards in `hivecomb`, and shipped green through this gate, because no
+corpus case had ever put a control character in a serialized string field. And where
+beem and `hivecomb` are wrong in the same way, the oracle agrees with itself.
+
+The authority on what hived accepts is hived. `tests/hived_serialization_oracle.py`
+asks it directly, for free, and found four defects in `hivecomb` that this oracle and
+295 unit tests had all missed. Run that one first.
 
 Signature **byte**-equality is deliberately not the gate: any canonical signature is
 valid, the chain does not care which one it gets, and beem's several backends need not

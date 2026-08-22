@@ -7,9 +7,12 @@
 //!
 //! # Fixes relative to beem
 //!
-//! ### `String` no longer mangles control characters
+//! ### `String` matches what hived's JSON parser produces — beem was right
 //!
-//! beem's `String.__bytes__` ran the payload through `unicodify()`:
+//! This section previously claimed the opposite, and the crate's published findings
+//! said so too. It was wrong, and the correction is worth keeping visible.
+//!
+//! beem's `String.__bytes__` runs the payload through `unicodify()`:
 //!
 //! ```python
 //! if (o <= 7) or (o == 11) or (o > 13 and o < 32):
@@ -18,11 +21,21 @@
 //! elif o == 12: r.append("f")    # note: no backslash
 //! ```
 //!
-//! Those branches are missing their backslash, so a `0x01` byte was serialized as the
-//! four *literal* characters `u0001`, and a backspace as the letter `b`. hived does no
-//! such thing: a Graphene string is a varint length followed by the raw UTF-8 bytes.
-//! Any `custom_json` payload or memo containing a control character therefore
-//! serialized to different bytes in beem than on chain. We write the raw bytes.
+//! The missing backslashes read as an obvious defect. They are not. Hive is reached
+//! over JSON-RPC, and hived parses that JSON with `fc`, which does not implement the
+//! `\uXXXX`, `\b` or `\f` escapes -- it strips the backslash and keeps the rest
+//! literally. Asked to serialize a comment whose body is the three characters
+//! `x`, `U+0001`, `y`, a live node returns the bytes for the seven characters
+//! `xu0001y`.
+//!
+//! So `unicodify` is a model of the transport, and it is an exact one: measured
+//! against a node, hived mangles precisely the set beem lists -- everything under
+//! `0x20` except `\t`, `\n` and `\r`, with `0x08` and `0x0c` collapsing to `b`
+//! and `f`.
+//!
+//! Writing raw UTF-8, which this crate did until the node was asked, yields a digest
+//! hived does not compute and a signature it rejects. [`write_string`] now applies
+//! the same transform.
 //!
 //! ### Length prefixes count bytes, and are bounded
 //!
@@ -139,11 +152,56 @@ pub fn write_u64(out: &mut Vec<u8>, v: u64) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
-/// Write a Graphene string: varint byte length, then the raw UTF-8 bytes.
+/// Rewrite a string the way hived's JSON-RPC layer will receive it.
 ///
-/// No escaping, no transformation. See the module docs for what beem did instead.
+/// Hive is reached over JSON-RPC, and hived parses that JSON with `fc`, whose string
+/// unescaper does not implement `\uXXXX`, `\b` or `\f`: it drops the backslash and
+/// keeps the rest as literal text. A `U+0001` sent as the correct JSON escape
+/// `""` therefore arrives at the node as the five characters `u0001`, and it is
+/// *that* string hived serializes, digests and stores.
+///
+/// So the bytes a signature must cover are not the bytes the caller supplied. Writing
+/// the raw UTF-8 would produce a digest the node does not share and a signature it
+/// rejects — the transaction simply fails to broadcast.
+///
+/// The affected set was measured against a live node, not inferred: every code point
+/// below `0x20` except `\t` (`0x09`), `\n` (`0x0a`) and `\r` (`0x0d`), which `fc` does
+/// handle. `"`, `\`, DEL and everything non-ASCII survive unchanged. See
+/// `tests/hived_serialization_oracle.py`, which pins this against hived itself.
+///
+/// Returns a borrowed string when nothing needs rewriting, which is the usual case.
+fn hived_transport_form(s: &str) -> std::borrow::Cow<'_, str> {
+    fn affected(c: char) -> bool {
+        matches!(c, '\u{00}'..='\u{08}' | '\u{0b}' | '\u{0c}' | '\u{0e}'..='\u{1f}')
+    }
+    if !s.contains(affected) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut rewritten = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\u{08}' => rewritten.push('b'),
+            '\u{0c}' => rewritten.push('f'),
+            _ if affected(c) => {
+                use std::fmt::Write as _;
+                let _ = write!(rewritten, "u{:04x}", c as u32);
+            }
+            _ => rewritten.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(rewritten)
+}
+
+/// Write a Graphene string: varint byte length, then the UTF-8 bytes.
+///
+/// The payload is first put through [`hived_transport_form`], because the string that
+/// reaches hived is not always the string that left here — see that function. beem
+/// does the same thing in `String.__bytes__`, via a `unicodify()` helper whose missing
+/// backslashes look like a bug and are in fact the point; this crate documented it as a
+/// defect until a live node was asked directly.
 pub fn write_string(out: &mut Vec<u8>, s: &str) -> Result<()> {
-    let bytes = s.as_bytes();
+    let transported = hived_transport_form(s);
+    let bytes = transported.as_bytes();
     write_len(out, bytes.len(), "string")?;
     out.extend_from_slice(bytes);
     Ok(())
@@ -372,21 +430,58 @@ mod tests {
     }
 
     #[test]
-    fn control_characters_are_written_verbatim() {
-        // The regression test for beem's `unicodify`. A 0x01 byte must occupy exactly
-        // one byte on the wire; beem expanded it to the five bytes `u0001` and then
-        // length-prefixed *that*.
-        let mut out = Vec::new();
-        write_string(&mut out, "\u{1}").unwrap();
-        assert_eq!(out, vec![0x01, 0x01]);
+    fn control_characters_take_the_form_hived_will_receive() {
+        // Not a style choice. hived parses JSON-RPC with `fc`, which strips the
+        // backslash from \uXXXX, \b and \f rather than decoding them, so the string
+        // the node serializes and digests is the expanded text. Signing the raw byte
+        // instead yields a signature the chain rejects.
+        //
+        // Every expectation below was read off a live node via
+        // condenser_api.get_transaction_hex; see tests/hived_serialization_oracle.py.
+        let encode = |s: &str| {
+            let mut out = Vec::new();
+            write_string(&mut out, s).unwrap();
+            out
+        };
 
-        let mut out = Vec::new();
-        write_string(&mut out, "\u{8}").unwrap(); // backspace; beem wrote the letter 'b'
-        assert_eq!(out, vec![0x01, 0x08]);
+        // 0x01 becomes the five characters `u0001`.
+        assert_eq!(encode("\u{1}"), b"\x05u0001".to_vec());
+        // Backspace and form feed collapse to single letters.
+        assert_eq!(encode("\u{8}"), b"\x01b".to_vec());
+        assert_eq!(encode("\u{c}"), b"\x01f".to_vec());
+        // Tab, newline and carriage return are the three `fc` does handle.
+        assert_eq!(encode("\t"), b"\x01\t".to_vec());
+        assert_eq!(encode("\n"), b"\x01\n".to_vec());
+        assert_eq!(encode("\r"), b"\x01\r".to_vec());
+        // Quote, backslash, DEL and non-ASCII are untouched.
+        assert_eq!(encode("\""), b"\x01\"".to_vec());
+        assert_eq!(encode("\\"), b"\x01\\".to_vec());
+        assert_eq!(encode("\u{7f}"), b"\x01\x7f".to_vec());
+        assert_eq!(encode("é"), b"\x02\xc3\xa9".to_vec());
 
-        let mut out = Vec::new();
-        write_string(&mut out, "\u{c}").unwrap(); // form feed; beem wrote the letter 'f'
-        assert_eq!(out, vec![0x01, 0x0c]);
+        // The exact sequence pinned against api.hive.blog: title "\x01\x08\x0c"
+        // serializes as the seven characters `u0001bf`, length-prefixed with 7.
+        assert_eq!(encode("\u{1}\u{8}\u{c}"), b"\x07u0001bf".to_vec());
+        // ...and a body of x, 0x01, y as the seven characters `xu0001y`.
+        assert_eq!(encode("x\u{1}y"), b"\x07xu0001y".to_vec());
+
+        // The length prefix counts the expanded bytes, not the input's.
+        assert_eq!(encode("\u{1}")[0], 5);
+    }
+
+    #[test]
+    fn strings_without_control_characters_are_untouched() {
+        // The transform must be a no-op for ordinary payloads, and must not allocate
+        // for them either -- this is on the path of every operation hivecomb signs.
+        for sample in ["", "alice", "{\"a\":1}", "a\nb\tc\r", "unicode é 中文 🐝"] {
+            assert!(
+                matches!(hived_transport_form(sample), std::borrow::Cow::Borrowed(_)),
+                "{sample:?} should pass through borrowed"
+            );
+            let mut out = Vec::new();
+            write_string(&mut out, sample).unwrap();
+            assert_eq!(&out[out.len() - sample.len()..], sample.as_bytes());
+        }
     }
 
     #[test]

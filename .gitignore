@@ -14,3 +14,11 @@ node_modules/
 hivecomb-node/index.js
 hivecomb-node/index.d.ts
 package-lock.json
+
+# Secrets. Nothing holding a private key may ever be committed — this repo is
+# about to be public, and git history keeps what you delete.
+.env
+.env.*
+!.env.example
+*.wif
+wallet.json

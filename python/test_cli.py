@@ -243,7 +243,10 @@ def _():
     name, fields = payload["operations"][0]
     assert name == "recurrent_transfer"
     assert fields["recurrence"] == 24 and fields["executions"] == 12
-    assert fields["extensions"] == [[1, {"pair_id": 3}]]
+    # Object form: hived rejects the [tag, value] array for this extension.
+    assert fields["extensions"] == [
+        {"type": "recurrent_transfer_pair_id", "value": {"pair_id": 3}}
+    ]
 
 
 @check("recurrent_transfer enforces hived's own minimums before signing")

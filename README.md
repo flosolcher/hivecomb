@@ -65,9 +65,13 @@ the retry tuning *is* the workaround.
 [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md) with file, line, and consequence. The ones
 that matter most are not crashes — they are the paths that produce a *valid-looking
 signature over the wrong bytes*: a bare `except:` that falls back to the pre-hardfork-24
-all-zero chain id, a `String` encoder that mangles control characters, monetary amounts
-that round-trip through binary `float`, `flat_set` fields serialized in the caller's
-order rather than sorted.
+all-zero chain id, monetary amounts that round-trip through binary `float`, `flat_set`
+fields serialized in the caller's order rather than sorted, `escrow_release` missing the
+field that names who receives the funds.
+
+One entry in that catalogue is a **retraction**: beem's control-character handling was
+listed as a defect and is in fact correct, which `hivecomb` discovered by getting it
+wrong. It is left in place, marked, rather than quietly removed.
 
 **3. beem stopped tracking Hive.** Its classifiers stop at Python 3.9 and its operation
 table predates HF25, so it **cannot construct `recurrent_transfer` or
@@ -120,6 +124,7 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | beem object wrappers (Account, Market, …) | done |
 | `beempy` CLI | done — every beem command, plus 9 new |
 | Differential oracle vs beem | done, green |
+| Serialization oracle vs **hived itself** | done, green — all 48 operations |
 | Live-node fixture tests | done |
 | Authority satisfaction checking | done |
 | Block streaming, `get_ops_in_block` | done |
@@ -137,9 +142,12 @@ are inert and the client is explicit.
 ```
 hivecomb/          the library          — publishable to crates.io
 hivecomb-py/       PyO3 bindings        — publishable to PyPI as `hivecomb`
-tests/         differential_beem.py — the oracle against beem
-SECURITY_FINDINGS.md                — 21 findings, with file:line
-CREDITS.md                          — upstream authorship
+tests/  differential_beem.py         — the oracle against beem
+        hived_serialization_oracle.py — the oracle against hived itself
+        hived_broadcast_check.py      — the one thing that needs a real account
+SECURITY_FINDINGS.md                  — findings in beem, with file:line
+BROADCAST.md                          — what is proven, and what needs the chain
+CREDITS.md                            — upstream authorship
 ```
 
 ## Building
@@ -185,14 +193,43 @@ maturin build --release  # abi3 wheel, CPython 3.8+
 
 ## Verification
 
-The correctness gate is a **differential digest oracle** against beem. The digest
-`sha256(chain_id || serialized_tx)` is fully deterministic and backend-independent, so
-every serialization bug lives there.
+There are two digest oracles, and the second one matters more.
+
+### Against hived itself
+
+`condenser_api.get_transaction_hex` makes a node serialize a transaction and return the
+bytes, so hived can be asked directly whether `hivecomb`'s wire format is its own. It
+costs nothing, needs no account and writes nothing to the chain.
+
+```
+$ python tests/hived_serialization_oracle.py
+57 cases: 57 identical, 0 differ, 0 errored
+```
+
+This is the authority. It found four defects that the beem oracle and 295 unit tests had
+all missed — three field-order or width errors (`escrow_transfer`, `limit_order_create2`,
+the HF28 `pair_id`, which hived declares `uint8_t`), and one JSON shape hived rejects
+outright. Every one of them would have produced a transaction the chain refuses.
+
+It also **overturned a published finding**: [8](SECURITY_FINDINGS.md#8) claimed beem's
+`unicodify` corrupts signed bytes, and the truth is the reverse — it models hived's JSON
+parser exactly, and `hivecomb` was the one that had it wrong. That finding is retracted
+in place rather than deleted.
+
+The lesson is worth stating plainly, because the failure was structural: round-trip
+tests cannot catch a format that is wrong in both directions, and a unit test written
+from a belief tests the belief. Only an external authority helps.
+
+### Against beem
+
+The digest `sha256(chain_id || serialized_tx)` is deterministic and backend-independent,
+so every serialization bug lives there. beem remains useful as a second opinion on the
+operations it supports.
 
 ```
 $ python tests/differential_beem.py
-digest corpus     : 134 cases
-  identical       : 108
+digest corpus     : 150 cases
+  identical       : 124
   known divergence: 26  (hivecomb is deliberately correct here)
   UNEXPECTED      : 0
 public key        : match
@@ -216,15 +253,18 @@ sides of the `2**53` threshold. **It is a floor. Extend it rather than trusting 
 
 ## Before you trust it
 
-This has not yet signed a transaction that a Hive node accepted. Before putting it in
-front of anything valuable:
+Serialization is proven against hived. A **signature** accepted by a Hive node is not:
+that is the one thing no offline test can establish, and it has not happened yet.
+[BROADCAST.md](BROADCAST.md) explains what each stage proves and how to close the gap
+with one posting-authority transaction on an unfunded throwaway account.
 
-1. **Broadcast one transaction on a throwaway account.** Serialization can be perfect
-   and a transaction still rejected for a reason no offline test models.
+Before putting this in front of anything valuable:
+
+1. **Broadcast one transaction.** `tests/hived_broadcast_check.py`, posting key only.
+   Its `--dry-run` has a node verify the signature without writing to the chain.
 2. **Run it alongside your existing signer** and compare, for a period, before letting
    it sign alone.
-3. **Extend the corpus** in `tests/differential_beem.py` to cover the operations *you*
-   actually send.
+3. **Extend both corpora** to cover the operations *you* actually send.
 
 The chain id is hardcoded, which is correct today and is exactly the kind of constant
 that moves at a hardfork. It lives in one place — `hivecomb/src/chains.rs` — with a comment

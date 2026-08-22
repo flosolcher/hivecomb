@@ -87,7 +87,7 @@ detail, with file and line, is in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md).
 | [5](SECURITY_FINDINGS.md#5) | High | Bare `except:` falls back to the pre-HF24 all-zero chain id | `chains.rs`, `transaction.rs` — constant, no fallback, zero id refused | unit test |
 | [6](SECURITY_FINDINGS.md#6) | Medium | `verify_message` cannot verify; a discarded result hides that | `sign.rs` — `recover` and `verify` separated and honestly named | unit test |
 | [7](SECURITY_FINDINGS.md#7) | High | `Signed_Transaction.verify()` collects all four recovery candidates | `transaction.rs` — one key per signature, verified | unit test |
-| [8](SECURITY_FINDINGS.md#8) | High | `String` mangles control characters into literal text | `types.rs` — raw UTF-8, length in bytes | unit test + oracle |
+| [8](SECURITY_FINDINGS.md#8) | ~~High~~ **retracted** | beem is correct: `unicodify` models hived's JSON parser | `types.rs` — `hived_transport_form` applies the same transform | pinned against a live node |
 | [9](SECURITY_FINDINGS.md#9) | High | `repr()`/`str()` of a private key return the secret | `keys/private.rs` — redacted; export is explicit | unit test |
 | [10](SECURITY_FINDINGS.md#10) | Medium | Invalid base58 decodes to wrong bytes instead of erroring | `base58.rs` — strict alphabet | unit test |
 | [11](SECURITY_FINDINGS.md#11) | Medium | WIF version byte discarded unchecked | `base58.rs` — version required | unit test |

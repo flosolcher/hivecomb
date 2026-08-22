@@ -138,7 +138,12 @@ pub enum RecurrentTransferExtension {
     /// `recurrent_transfer_pair_id`, added in HF28 so an account can run several
     /// concurrent recurrent transfers to the same recipient. beem predates this
     /// entirely.
-    PairId(u16),
+    ///
+    /// One byte, not two. hived declares this `uint8_t`, and it *truncates* rather
+    /// than rejecting: asked to serialize `pair_id: 258` it writes `0x02`, and
+    /// `65535` writes `0xff`. Holding it as a `u8` here makes that unrepresentable
+    /// instead of silently wrong.
+    PairId(u8),
 }
 
 impl GrapheneSerialize for RecurrentTransferExtension {
@@ -146,46 +151,84 @@ impl GrapheneSerialize for RecurrentTransferExtension {
         match self {
             RecurrentTransferExtension::PairId(id) => {
                 write_varint32(out, 1);
-                write_u16(out, *id);
+                out.push(*id);
                 Ok(())
             }
         }
     }
 }
 
-/// Renders as `[1, {"pair_id": n}]`.
+/// Renders as `{"type": "recurrent_transfer_pair_id", "value": {"pair_id": n}}`.
+///
+/// Not as `[1, {"pair_id": n}]`. Most Graphene static variants accept the `[tag, value]`
+/// pair in JSON, and this one does not: hived answers a `recurrent_transfer` carrying an
+/// array-form extension with `Bad Cast: Input data have to treated as object, but got
+/// array_type`, so the transaction cannot be broadcast at all. The binary encoding is
+/// unaffected -- it is the varint tag followed by the `u16`, either way -- which is what
+/// makes the array form easy to ship untested: everything round-trips locally and only
+/// the node objects.
+///
+/// Verified against `condenser_api.get_transaction_hex` on a live node.
 impl serde::Serialize for RecurrentTransferExtension {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        use serde::ser::SerializeTuple;
+        use serde::ser::SerializeStruct;
         match self {
             RecurrentTransferExtension::PairId(id) => {
-                let mut t = s.serialize_tuple(2)?;
-                t.serialize_element(&1u8)?;
-                t.serialize_element(&serde_json::json!({ "pair_id": id }))?;
+                let mut t = s.serialize_struct("extension", 2)?;
+                t.serialize_field("type", "recurrent_transfer_pair_id")?;
+                t.serialize_field("value", &serde_json::json!({ "pair_id": id }))?;
                 t.end()
             }
         }
     }
 }
 
-/// Parsed from `[1, {"pair_id": n}]`.
+/// Accepts the `{"type", "value"}` form hived emits, and the `[tag, value]` form that
+/// older tooling writes, so a transaction built elsewhere still parses.
 impl<'de> serde::Deserialize<'de> for RecurrentTransferExtension {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         use serde::de::Error as _;
         #[derive(serde::Deserialize)]
         struct PairId {
-            pair_id: u16,
+            pair_id: u8,
         }
-        let (tag, value) = <(u32, serde_json::Value)>::deserialize(d)?;
-        match tag {
-            1 => {
-                let p: PairId = serde_json::from_value(value).map_err(D::Error::custom)?;
-                Ok(RecurrentTransferExtension::PairId(p.pair_id))
+
+        let raw = serde_json::Value::deserialize(d)?;
+        let value = match &raw {
+            serde_json::Value::Object(map) => {
+                let tag = map
+                    .get("type")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| D::Error::custom("extension object has no `type`"))?;
+                if tag != "recurrent_transfer_pair_id" {
+                    return Err(D::Error::custom(format!(
+                        "unknown recurrent_transfer extension `{tag}`"
+                    )));
+                }
+                map.get("value")
+                    .ok_or_else(|| D::Error::custom("extension object has no `value`"))?
+                    .clone()
             }
-            other => Err(D::Error::custom(format!(
-                "unknown recurrent_transfer extension variant {other}"
-            ))),
-        }
+            serde_json::Value::Array(items) if items.len() == 2 => {
+                let tag = items[0].as_u64().ok_or_else(|| {
+                    D::Error::custom("extension tag is not an integer")
+                })?;
+                if tag != 1 {
+                    return Err(D::Error::custom(format!(
+                        "unknown recurrent_transfer extension variant {tag}"
+                    )));
+                }
+                items[1].clone()
+            }
+            _ => {
+                return Err(D::Error::custom(
+                    "recurrent_transfer extension must be an object or a [tag, value] pair",
+                ))
+            }
+        };
+
+        let p: PairId = serde_json::from_value(value).map_err(D::Error::custom)?;
+        Ok(RecurrentTransferExtension::PairId(p.pair_id))
     }
 }
 
@@ -470,12 +513,15 @@ op_struct! {
 
 op_struct! {
     /// `limit_order_create2_operation` (id 21).
+    /// `exchange_rate` precedes `fill_or_kill`, which is the opposite of
+    /// `limit_order_create`'s shape and was verified against hived's own
+    /// serialization rather than inferred from the sibling operation.
     LimitOrderCreate2 {
         owner: String,
         orderid: u32,
         amount_to_sell: Amount,
-        fill_or_kill: bool,
         exchange_rate: Price,
+        fill_or_kill: bool,
         expiration: PointInTime,
     }
 }
@@ -888,17 +934,24 @@ op_struct! {
 
 op_struct! {
     /// `escrow_transfer_operation` (id 27).
+    ///
+    /// The field order here is hived's, which is not the order the JSON form
+    /// suggests: the two amounts precede `escrow_id` and `agent`, and `json_meta`
+    /// sits *between* `fee` and the two deadlines rather than at the end. Verified
+    /// byte for byte against `condenser_api.get_transaction_hex`; an earlier
+    /// arrangement that read more naturally produced a digest hived did not agree
+    /// with, and therefore a signature it would have rejected.
     EscrowTransfer {
         from: String,
         to: String,
-        agent: String,
-        escrow_id: u32,
         hbd_amount: Amount,
         hive_amount: Amount,
+        escrow_id: u32,
+        agent: String,
         fee: Amount,
+        json_meta: String,
         ratification_deadline: PointInTime,
         escrow_expiration: PointInTime,
-        json_meta: String,
     }
 }
 
@@ -1193,16 +1246,18 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::EscrowTransfer(o) => {
+                // hived's order, verified byte for byte against a node: the amounts
+                // come before escrow_id and agent, and json_meta before the deadlines.
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
-                write_string(out, &o.agent)?;
-                write_u32(out, o.escrow_id);
                 o.hbd_amount.append_to(out)?;
                 o.hive_amount.append_to(out)?;
+                write_u32(out, o.escrow_id);
+                write_string(out, &o.agent)?;
                 o.fee.append_to(out)?;
+                write_string(out, &o.json_meta)?;
                 o.ratification_deadline.append_to(out)?;
                 o.escrow_expiration.append_to(out)?;
-                write_string(out, &o.json_meta)?;
             }
             Operation::EscrowDispute(o) => {
                 write_string(out, &o.from)?;
@@ -1367,11 +1422,12 @@ impl Operation {
                 write_bool(out, o.auto_vest);
             }
             Operation::LimitOrderCreate2(o) => {
+                // exchange_rate precedes fill_or_kill here, unlike limit_order_create.
                 write_string(out, &o.owner)?;
                 write_u32(out, o.orderid);
                 o.amount_to_sell.append_to(out)?;
-                write_bool(out, o.fill_or_kill);
                 o.exchange_rate.append_to(out)?;
+                write_bool(out, o.fill_or_kill);
                 o.expiration.append_to(out)?;
             }
             Operation::ClaimAccount(o) => {
@@ -1661,7 +1717,7 @@ impl GrapheneDeserialize for CommentOptionsExtension {
 impl GrapheneDeserialize for RecurrentTransferExtension {
     fn read_from(r: &mut Reader<'_>) -> Result<Self> {
         match r.varint32()? {
-            1 => Ok(RecurrentTransferExtension::PairId(r.u16()?)),
+            1 => Ok(RecurrentTransferExtension::PairId(r.u8()?)),
             tag => Err(Error::ser(format!(
                 "unknown recurrent_transfer extension variant {tag}"
             ))),
@@ -1747,14 +1803,14 @@ impl GrapheneDeserialize for Operation {
             OperationId::EscrowTransfer => Operation::EscrowTransfer(EscrowTransfer {
                 from: r.string()?,
                 to: r.string()?,
-                agent: r.string()?,
-                escrow_id: r.u32()?,
                 hbd_amount: Amount::read_from(r)?,
                 hive_amount: Amount::read_from(r)?,
+                escrow_id: r.u32()?,
+                agent: r.string()?,
                 fee: Amount::read_from(r)?,
+                json_meta: r.string()?,
                 ratification_deadline: r.point_in_time()?,
                 escrow_expiration: r.point_in_time()?,
-                json_meta: r.string()?,
             }),
             OperationId::EscrowDispute => Operation::EscrowDispute(EscrowDispute {
                 from: r.string()?,
@@ -1903,8 +1959,8 @@ impl GrapheneDeserialize for Operation {
                 owner: r.string()?,
                 orderid: r.u32()?,
                 amount_to_sell: Amount::read_from(r)?,
-                fill_or_kill: r.bool()?,
                 exchange_rate: Price::read_from(r)?,
+                fill_or_kill: r.bool()?,
                 expiration: r.point_in_time()?,
             }),
             OperationId::ClaimAccount => Operation::ClaimAccount(ClaimAccount {
@@ -2423,8 +2479,91 @@ mod tests {
             extensions: vec![RecurrentTransferExtension::PairId(7)],
         });
         let wire = op.to_wire().unwrap();
-        // one extension, variant tag 1, then the u16 pair id
-        assert_eq!(&wire[wire.len() - 4..], &[1, 1, 7, 0]);
+        // one extension, variant tag 1, then the single-byte pair id
+        assert_eq!(&wire[wire.len() - 3..], &[1, 1, 7]);
+    }
+
+    /// Field orders that were wrong until a node was asked.
+    ///
+    /// Both of these round-tripped perfectly through `hivecomb`'s own serializer and
+    /// deserializer, and both would have been rejected by the chain. A round-trip test
+    /// cannot catch a field order that is wrong in both directions; only an external
+    /// authority can. The bytes below are what `condenser_api.get_transaction_hex`
+    /// returned for these exact operations, so this test is that authority, frozen.
+    ///
+    /// See `tests/hived_serialization_oracle.py` to re-measure them.
+    #[test]
+    fn escrow_transfer_matches_hiveds_own_bytes() {
+        let op = Operation::EscrowTransfer(EscrowTransfer {
+            from: "aaa".into(),
+            to: "bbb".into(),
+            hbd_amount: hive("1.000 HBD"),
+            hive_amount: hive("2.000 HIVE"),
+            escrow_id: 0x1122_3344,
+            agent: "ccc".into(),
+            fee: hive("0.100 HIVE"),
+            json_meta: "JM".into(),
+            ratification_deadline: PointInTime::from_unix(1_893_456_000).unwrap(), // 2030-01-01T00:00:00Z
+            escrow_expiration: PointInTime::from_unix(1_927_756_800).unwrap(), // 2031-02-02T00:00:00Z
+        });
+        // op id 27, then: from, to, hbd, hive, escrow_id, agent, fee, json_meta,
+        // ratification_deadline, escrow_expiration. Note that json_meta sits between
+        // the fee and the deadlines, which is not where the JSON form suggests.
+        let expected = hex_to_bytes(
+            "1b0361616103626262e8030000000000000353424400000000d00700000000000003535445             454d00004433221103636363640000000000000003535445454d0000024a4d80d8db70003c             e772",
+        );
+        assert_eq!(op.to_wire().unwrap(), expected);
+    }
+
+    #[test]
+    fn limit_order_create2_matches_hiveds_own_bytes() {
+        let op = Operation::LimitOrderCreate2(LimitOrderCreate2 {
+            owner: "aaa".into(),
+            orderid: 0x1122_3344,
+            amount_to_sell: hive("7.000 HIVE"),
+            exchange_rate: Price {
+                base: hive("3.000 HIVE"),
+                quote: hive("5.000 HBD"),
+            },
+            fill_or_kill: true,
+            expiration: PointInTime::from_unix(1_893_456_000).unwrap(), // 2030-01-01T00:00:00Z
+        });
+        // op id 21, then: owner, orderid, amount_to_sell, exchange_rate, fill_or_kill,
+        // expiration. `exchange_rate` precedes `fill_or_kill` -- the reverse of the
+        // order `limit_order_create` would lead you to expect.
+        let expected = hex_to_bytes(
+            "150361616144332211581b00000000000003535445454d0000b80b0000000000000353544             5454d0000881300000000000003534244000000000180d8db70",
+        );
+        assert_eq!(op.to_wire().unwrap(), expected);
+    }
+
+    #[test]
+    fn recurrent_transfer_pair_id_uses_the_json_shape_hived_accepts() {
+        // hived rejects the `[tag, value]` array form for this extension with
+        // "Bad Cast: Input data have to treated as object, but got array_type", so a
+        // transaction carrying it cannot be broadcast at all. The binary is identical
+        // either way, which is what makes the wrong form easy to ship.
+        let ext = RecurrentTransferExtension::PairId(7);
+        let json = serde_json::to_string(&ext).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"recurrent_transfer_pair_id","value":{"pair_id":7}}"#
+        );
+
+        // Both forms still parse, so transactions built by other tooling load.
+        let from_object: RecurrentTransferExtension = serde_json::from_str(&json).unwrap();
+        let from_array: RecurrentTransferExtension =
+            serde_json::from_str(r#"[1, {"pair_id": 7}]"#).unwrap();
+        assert_eq!(from_object, ext);
+        assert_eq!(from_array, ext);
+    }
+
+    fn hex_to_bytes(s: &str) -> Vec<u8> {
+        let clean: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+        (0..clean.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&clean[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]

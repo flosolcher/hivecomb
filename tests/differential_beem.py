@@ -128,6 +128,34 @@ def corpus():
     for amount, memo in amounts:
         yield "transfer", {"from": "alice", "to": "bob", "amount": amount, "memo": memo}
 
+    # Control characters in a serialized string field. This corpus had 134 cases and
+    # none of them reached this path, which is how finding 8 -- the claim that beem's
+    # `unicodify` corrupts signed bytes -- went unchallenged long enough to be
+    # published and then implemented backwards here. beem is right: hived parses
+    # JSON-RPC with `fc`, which does not decode \uXXXX, \b or \f, so the node
+    # serializes the backslash-stripped literal text and `unicodify` models that
+    # exactly. These cases must now MATCH, not diverge.
+    control_payloads = [
+        "\x01",                    # -> u0001
+        "\x08",                    # -> b
+        "\x0c",                    # -> f
+        "\x01\x08\x0c",            # -> u0001bf
+        "x\x01y",                  # -> xu0001y
+        "\t\n\r",                  # the three `fc` does handle: unchanged
+        "line1\nline2\x1fend",     # mixed
+        '{"a":"\x02"}',            # inside a JSON payload
+    ]
+    for payload in control_payloads:
+        yield "custom_json", {
+            "required_auths": [],
+            "required_posting_auths": ["alice"],
+            "id": "ctrl",
+            "json": payload,
+        }
+        yield "transfer", {
+            "from": "alice", "to": "bob", "amount": "1.000 HIVE", "memo": payload,
+        }
+
 
 def is_known_divergence(op_type, fields):
     """Cases where hivecomb deliberately differs because beem is wrong."""
