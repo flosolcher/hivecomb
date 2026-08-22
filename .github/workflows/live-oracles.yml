@@ -44,6 +44,47 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Coverage-guided fuzzing of every parser that takes untrusted bytes. Runs on the
+  # schedule rather than per-commit because it is time-boxed exploration, not a gate:
+  # a fixed-corpus version of the same contract runs on every commit as
+  # hivecomb/tests/hostile_input.rs.
+  #
+  # Needs nightly, which is why the fuzz crate is outside the workspace -- the
+  # library stays pinned to stable with a measured MSRV.
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [reader, transaction, memo, keys]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: seed the corpus from the deterministic sweep
+        run: |
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          # A handful of shapes worth starting from, so the fuzzer does not spend its
+          # budget rediscovering that a varint exists.
+          printf '\x02\x05alice\x03bob' > fuzz/corpus/${{ matrix.target }}/seed-op
+          printf '\x00' > fuzz/corpus/${{ matrix.target }}/seed-zero
+          printf '\xff\xff\xff\xff' > fuzz/corpus/${{ matrix.target }}/seed-max
+      - name: fuzz
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=240 -timeout=10
+        working-directory: fuzz
+      - name: keep any crash that was found
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   oracles:
     name: hived oracles
     runs-on: ubuntu-latest

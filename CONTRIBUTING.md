@@ -54,6 +54,25 @@ CI runs all of the offline ones on Linux, macOS and Windows, at stable and at th
 MSRV. The live oracles run on a schedule instead, so a slow public node never fails a
 pull request.
 
+### Fuzzing
+
+Four coverage-guided targets cover every parser that takes untrusted bytes. They run on
+the daily schedule, not per commit — the per-commit version of the same contract is
+`hivecomb/tests/hostile_input.rs`, a fixed corpus.
+
+```sh
+cargo install cargo-fuzz          # needs a nightly toolchain
+cd fuzz && cargo fuzz run reader -- -max_total_time=60
+```
+
+Targets: `reader`, `transaction`, `memo`, `keys`. Two of them assert more than "did not
+panic": anything that parses must **re-serialize to exactly the bytes it came from**,
+because the digest is taken over those bytes and a lossy round trip changes what a
+signature covers.
+
+The fuzz crate is outside the workspace on purpose, so nightly never leaks into the
+library's stable, MSRV-pinned build.
+
 ## Conventions
 
 - **`#![forbid(unsafe_code)]`.** Not negotiable in the core.

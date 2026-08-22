@@ -26,3 +26,10 @@ package-lock.json
 !.env.example
 *.wif
 wallet.json
+
+# cargo-fuzz working state. The targets are committed; the corpus and the crashes
+# it finds are not — a crash artifact belongs in a bug report, not in git.
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/coverage/

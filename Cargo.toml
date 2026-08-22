@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["hivecomb", "hivecomb-py", "hivecomb-node"]
+# cargo-fuzz needs nightly; the library is pinned to stable with a measured MSRV.
+# Excluded so `--workspace` and the MSRV job never try to build it.
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

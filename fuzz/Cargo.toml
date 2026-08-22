@@ -1,0 +1,47 @@
+# Deliberately outside the workspace: cargo-fuzz needs a nightly toolchain, and the
+# library itself is pinned to stable with a measured MSRV. Keeping this separate means
+# `cargo build --workspace` and the MSRV job never see it.
+[package]
+name = "hivecomb-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.hivecomb]
+path = "../hivecomb"
+features = ["memo", "bip32", "bip38", "wallet"]
+default-features = false
+
+[[bin]]
+name = "reader"
+path = "fuzz_targets/reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "transaction"
+path = "fuzz_targets/transaction.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "memo"
+path = "fuzz_targets/memo.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "keys"
+path = "fuzz_targets/keys.rs"
+test = false
+doc = false
+bench = false
