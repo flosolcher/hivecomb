@@ -119,12 +119,63 @@ class Blockchain:
                 )
                 yield record
 
+    def get_ops_in_block(self, block_num, only_virtual=False):
+        """Every operation the chain recorded for a block.
+
+        This is the only way to reach **virtual** operations: they are emitted
+        by consensus, not carried in a transaction, so they do not appear in
+        `block_api.get_block` at all. Reading them out of a block's transactions
+        -- which is what a naive implementation does -- silently yields nothing.
+        """
+        entries = self.rpc.call(
+            "condenser_api.get_ops_in_block", [int(block_num), bool(only_virtual)]
+        )
+        out = []
+        for entry in entries or []:
+            name, value = entry["op"]
+            record = dict(value)
+            record.update(
+                {
+                    "type": name,
+                    "block_num": entry.get("block", block_num),
+                    "timestamp": entry.get("timestamp"),
+                    "trx_id": entry.get("trx_id"),
+                    "virtual_op": bool(entry.get("virtual_op")),
+                }
+            )
+            out.append(record)
+        return out
+
+    def virtual_ops(self, start=None, stop=None, opNames=None):
+        """Yield virtual operations, block by block.
+
+        beem could not filter these reliably: its operation table reports every
+        virtual id two lower than the chain's.
+        """
+        wanted = set(opNames or [])
+        current = start if start is not None else self.get_current_block_num()
+        while stop is None or current <= stop:
+            head = self.get_current_block_num()
+            if current > head:
+                if stop is not None:
+                    break
+                time.sleep(BLOCK_INTERVAL)
+                continue
+            last = min(head, stop if stop is not None else head)
+            for number in range(current, last + 1):
+                for operation in self.get_ops_in_block(number, only_virtual=True):
+                    if wanted and operation["type"] not in wanted:
+                        continue
+                    yield operation
+            current = last + 1
+
     def stream(self, opNames=None, raw_ops=False, start=None, stop=None, **kwargs):
         """Stream operations, optionally filtered by name.
 
-        ``opNames`` accepts virtual operation names too, which beem could not
-        name correctly: its table reports every virtual id two lower than the
-        chain's.
+        This yields **signed** operations only, because that is what a block's
+        transactions contain. Use :meth:`virtual_ops` for the ones the chain
+        emits; they are not in a block's transactions and cannot be filtered out
+        of them.
         """
         wanted = set(opNames or [])
         for operation in self.ops(start=start, stop=stop, **kwargs):

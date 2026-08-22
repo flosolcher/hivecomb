@@ -1850,14 +1850,15 @@ def cmd_virtualops(args):
     from .blockchain import Blockchain
 
     virtual = set(OP_NAMES[FIRST_VIRTUAL_OP:])
-    wanted = set(args.ops) & virtual if args.ops else virtual
-    if args.ops and not wanted:
-        die(f"none of {args.ops} are virtual operations; known: {sorted(virtual)}")
+    unknown = set(args.ops) - virtual
+    if unknown:
+        die(f"{sorted(unknown)} are not virtual operations; known: {sorted(virtual)}")
     chain = Blockchain(blockchain_instance=make_hive(args))
     try:
-        for operation in chain.stream(start=args.start, stop=args.stop):
-            if operation["type"] in wanted:
-                out(f"{operation['block_num']}  {operation['type']:<38}  {_summarise(operation)}")
+        for operation in chain.virtual_ops(
+            start=args.start, stop=args.stop, opNames=args.ops or None
+        ):
+            out(f"{operation['block_num']}  {operation['type']:<40}  {_summarise(operation)}")
     except KeyboardInterrupt:
         out("\nstopped")
 
