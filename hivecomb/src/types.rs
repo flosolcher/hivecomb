@@ -177,6 +177,22 @@ pub fn write_u64(out: &mut Vec<u8>, v: u64) {
 /// `tests/hived_serialization_oracle.py`, which pins this against hived itself.
 ///
 /// Returns a borrowed string when nothing needs rewriting, which is the usual case.
+///
+/// # This makes serialization non-invertible
+///
+/// Reading a string back off the wire yields the bytes that were there; writing it
+/// again puts them through this. So for a string carrying a raw byte below `0x20`,
+/// `parse` and `serialize` are **not** inverses — the second time round it is the five
+/// characters `u0000` rather than the one byte.
+///
+/// That is not a defect. hived's parser does the same thing, so those are the bytes a
+/// signature has to cover. But it means a transaction parsed from *foreign binary* and
+/// then re-signed does not sign the bytes it arrived as. Bytes that came from hived can
+/// never contain such a character in the first place, because anything hived stored
+/// went through that same parser.
+///
+/// What does hold is that it settles after one pass: `u0000` contains nothing that gets
+/// transformed again. The fuzz targets assert exactly that, and found this asymmetry.
 fn hived_transport_form(s: &str) -> std::borrow::Cow<'_, str> {
     fn affected(c: char) -> bool {
         matches!(c, '\u{00}'..='\u{08}' | '\u{0b}' | '\u{0c}' | '\u{0e}'..='\u{1f}')

@@ -2567,6 +2567,48 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_then_serialize_is_not_the_identity_for_control_bytes() {
+        // Found by cargo-fuzz on its first run, within four minutes.
+        //
+        // A string field holding a raw byte below 0x20 parses back as that byte, and
+        // re-serializing puts it through `hived_transport_form`, which writes the five
+        // characters `u0000` instead. So parse and serialize are NOT inverses.
+        //
+        // That is not a defect in the transform -- hived's JSON parser does the same
+        // thing, so those are the bytes any signature has to cover -- but it is a
+        // property callers need to know: a transaction parsed from foreign bytes and
+        // re-signed does not sign the bytes it arrived as. Wire bytes from hived can
+        // never contain such a character, because anything hived stored went through
+        // that same parser first; foreign binary can.
+        //
+        // What does hold, and what the fuzz targets assert, is that it settles after
+        // one pass.
+        use crate::operations::Operation;
+        use crate::{Chain, GrapheneDeserialize, GrapheneSerialize, Reader};
+
+        let wire = {
+            let mut out = vec![0u8]; // op id 0: vote
+            out.extend_from_slice(&[4, 0, 0, 0, 0]); // voter: four NUL bytes
+            out.extend_from_slice(&[0]); // author: ""
+            out.extend_from_slice(&[0]); // permlink: ""
+            out.extend_from_slice(&[1, 0]); // weight: 1
+            out
+        };
+
+        let mut reader = Reader::new(&wire, Chain::Hive);
+        let op = Operation::read_from(&mut reader).expect("parses");
+        let again = op.to_wire().expect("re-serializes");
+
+        assert_ne!(again, wire, "if these are equal the asymmetry is gone");
+
+        // But it is stable from the second pass on: the transform is idempotent,
+        // because `u0000` contains nothing that gets transformed again.
+        let mut reader2 = Reader::new(&again, Chain::Hive);
+        let op2 = Operation::read_from(&mut reader2).expect("parses");
+        assert_eq!(op2.to_wire().expect("re-serializes"), again);
+    }
+
+    #[test]
     fn collateralized_convert_is_constructible() {
         let op = Operation::CollateralizedConvert(CollateralizedConvert {
             owner: "alice".into(),

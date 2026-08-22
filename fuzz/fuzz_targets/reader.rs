@@ -17,16 +17,23 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     let mut reader = Reader::new(data, Chain::Hive);
     if let Ok(op) = Operation::read_from(&mut reader) {
-        // Anything that parsed must re-serialize, and must do so to the same bytes.
-        // A round trip that loses information means the wire format and the type
-        // disagree, which is how a transaction ends up signing something other than
-        // what it says.
-        let reencoded = op.to_wire().expect("a parsed operation must re-serialize");
-        let consumed = data.len() - reader.remaining();
-        assert_eq!(
-            &reencoded[..],
-            &data[..consumed],
-            "round trip changed the bytes for {op:?}"
-        );
+        let once = op.to_wire().expect("a parsed operation must re-serialize");
+
+        // NOT asserted: that `once == data`. It is not true, and the fuzzer found
+        // that within minutes of first running. A string field holding a raw byte
+        // below 0x20 parses back as that byte, and re-serializing puts it through
+        // `hived_transport_form`, which writes the five characters `u0000` instead.
+        // The transform is correct -- hived's JSON parser does the same thing, so
+        // those are the bytes a signature has to cover -- but it means parse and
+        // serialize are not inverses. See types.rs.
+        //
+        // What must hold is that it settles after one pass: serialize, parse,
+        // serialize again, and the bytes stop moving. If they did not, re-signing a
+        // transaction would keep changing what the signature covers.
+        let mut reader2 = Reader::new(&once, Chain::Hive);
+        let reparsed = Operation::read_from(&mut reader2)
+            .expect("our own output must parse");
+        let twice = reparsed.to_wire().expect("and re-serialize");
+        assert_eq!(once, twice, "serialization is not idempotent for {op:?}");
     }
 });

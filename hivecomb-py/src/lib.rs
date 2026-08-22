@@ -63,7 +63,7 @@ fn chain_from_name(name: Option<&str>) -> PyResult<RsChain> {
 // ---------------------------------------------------------------------------
 
 /// A Hive private key.
-#[pyclass(name = "PrivateKey", module = "hivecomb")]
+#[pyclass(name = "PrivateKey", module = "hivecomb", from_py_object)]
 #[derive(Clone)]
 pub struct PyPrivateKey {
     inner: RsPrivateKey,
@@ -200,7 +200,7 @@ impl PyPrivateKey {
 }
 
 /// A Hive public key.
-#[pyclass(name = "PublicKey", module = "hivecomb")]
+#[pyclass(name = "PublicKey", module = "hivecomb", from_py_object)]
 #[derive(Clone)]
 pub struct PyPublicKey {
     inner: RsPublicKey,
@@ -313,7 +313,7 @@ fn verify_message(
 // ---------------------------------------------------------------------------
 
 /// A reference to a recent block, binding a transaction to a fork.
-#[pyclass(name = "BlockRef", module = "hivecomb")]
+#[pyclass(name = "BlockRef", module = "hivecomb", from_py_object)]
 #[derive(Clone, Copy)]
 pub struct PyBlockRef {
     inner: RsBlockRef,
@@ -580,7 +580,7 @@ fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
     if let Ok(v) = value.extract::<String>() {
         return Ok(serde_json::Value::String(v));
     }
-    if let Ok(dict) = value.downcast::<PyDict>() {
+    if let Ok(dict) = value.cast::<PyDict>() {
         let mut map = serde_json::Map::with_capacity(dict.len());
         for (k, v) in dict.iter() {
             let key: String = k
@@ -590,10 +590,10 @@ fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
         }
         return Ok(serde_json::Value::Object(map));
     }
-    if let Ok(list) = value.downcast::<PyList>() {
+    if let Ok(list) = value.cast::<PyList>() {
         return list.iter().map(|item| py_to_json(&item)).collect();
     }
-    if let Ok(tuple) = value.downcast::<pyo3::types::PyTuple>() {
+    if let Ok(tuple) = value.cast::<pyo3::types::PyTuple>() {
         return tuple.iter().map(|item| py_to_json(&item)).collect();
     }
     Err(PyValueError::new_err(format!(
@@ -662,7 +662,7 @@ fn sign_transaction(
     wifs: Vec<String>,
     expiration_seconds: u32,
     chain: Option<&str>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let chain = chain_from_name(chain)?;
 
     let mut ops = Vec::with_capacity(operations.len());
@@ -686,9 +686,9 @@ fn sign_transaction(
     let json = signed.to_json().map_err(to_py_err)?;
 
     let out = json_to_py(py, &json)?;
-    let dict = out.downcast_bound::<PyDict>(py)?;
+    let dict = out.cast::<PyDict>()?;
     dict.set_item("trx_id", trx_id)?;
-    Ok(out)
+    Ok(out.unbind())
 }
 
 /// Compute the digest a transaction would be signed over, without signing it.
@@ -703,7 +703,7 @@ fn transaction_digest(
     block_ref: &PyBlockRef,
     expiration: &str,
     chain: Option<&str>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let chain = chain_from_name(chain)?;
     let mut ops = Vec::with_capacity(operations.len());
     for item in operations.iter() {
@@ -717,39 +717,40 @@ fn transaction_digest(
         operations: ops,
     };
     let digest = tx.digest(chain).map_err(to_py_err)?;
-    Ok(PyBytes::new_bound(py, &digest).into())
+    Ok(PyBytes::new(py, &digest).into())
 }
 
 /// Convert a `serde_json::Value` into Python objects.
-fn json_to_py(py: Python<'_>, value: &serde_json::Value) -> PyResult<PyObject> {
+fn json_to_py<'py>(py: Python<'py>, value: &serde_json::Value) -> PyResult<Bound<'py, PyAny>> {
     Ok(match value {
-        serde_json::Value::Null => py.None(),
-        serde_json::Value::Bool(b) => b.into_py(py),
+        serde_json::Value::Null => py.None().into_bound(py),
+        serde_json::Value::Bool(b) => b.into_pyobject(py)?.to_owned().into_any(),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                i.into_py(py)
+                i.into_pyobject(py)?.into_any()
             } else if let Some(u) = n.as_u64() {
-                u.into_py(py)
+                u.into_pyobject(py)?.into_any()
             } else {
                 n.as_f64()
                     .ok_or_else(|| PyValueError::new_err("unrepresentable number"))?
-                    .into_py(py)
+                    .into_pyobject(py)?
+                    .into_any()
             }
         }
-        serde_json::Value::String(s) => s.into_py(py),
+        serde_json::Value::String(s) => s.into_pyobject(py)?.into_any(),
         serde_json::Value::Array(a) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in a {
                 list.append(json_to_py(py, item)?)?;
             }
-            list.into()
+            list.into_any()
         }
         serde_json::Value::Object(o) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (k, v) in o {
                 dict.set_item(k, json_to_py(py, v)?)?;
             }
-            dict.into()
+            dict.into_any()
         }
     })
 }
@@ -836,7 +837,7 @@ fn check_authority(
     py: Python<'_>,
     authority: &Bound<'_, PyDict>,
     public_keys: Vec<String>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let raw = py_to_json(authority.as_any())?;
     let auth: hivecomb_core::authority::Authority =
         serde_json::from_value(raw).map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -846,7 +847,7 @@ fn check_authority(
         .collect::<PyResult<_>>()?;
 
     let check = auth.check(&keys);
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("satisfied", check.satisfied)?;
     out.set_item("conclusive", check.is_conclusive())?;
     out.set_item("weight", check.weight)?;

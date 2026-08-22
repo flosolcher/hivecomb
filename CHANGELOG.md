@@ -133,6 +133,16 @@ process-wide context instead, measured through the Python module:
 
 All three bindings share this core, so all three benefit.
 
+### Known behaviour worth stating
+
+**Serializing is not the inverse of parsing, for strings carrying control bytes.** A
+string field holding a raw byte below `0x20` reads back as that byte and writes out as
+the five characters `u0000`, because hived's JSON parser does the same and those are
+the bytes a signature must cover. It settles after one pass. A transaction parsed from
+*foreign binary* and re-signed therefore does not sign the bytes it arrived as; bytes
+that came from hived cannot contain such a character in the first place. Found by
+cargo-fuzz on its first run.
+
 ### Requirements
 
 Rust **1.88** or newer. That floor comes from dependencies rather than from this
