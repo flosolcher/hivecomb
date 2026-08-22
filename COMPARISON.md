@@ -352,10 +352,29 @@ separate types rather than one, and a caller who wants everything async gets an 
 
 If "the whole SDK is `async fn`" is what you want, xylem is still the closer fit.
 
-**HAF.** The Hive Application Framework is a Postgres-backed REST layer whose endpoints
-vary by deployed app. `hivecomb`'s `NodeClient::call` reaches anything hived exposes over
-JSON-RPC, but HAF is a different protocol and a moving target. xylem ships a minimal
-client (reputation lookups); `hivecomb` ships none rather than a half-one.
+**HAF.** The Hive Application Framework is a Postgres database that a hived node syncs
+blocks into, with applications running as schemas beside it. What a *remote* consumer
+can reach is not the database — it is whatever REST endpoints an operator chooses to
+expose in front of it, and those vary by deployed app. Both nectar's HAF client and
+xylem's are HTTP clients for exactly that: nectar's `utils/haf.py` is `httpx2` against
+`api.hive.blog` and `api.syncad.com`, with no SQL in it at all.
+
+This matters because the obvious next suggestion — that `hivecomb` should ship
+"high-throughput SQL/Postgres streaming connectors for indexing pipelines" — describes
+something a client library cannot offer. SQL access to HAF means **running your own HAF
+node**; there is no remote SQL endpoint to connect to. And someone who runs their own
+HAF node writes SQL against their own schema directly, with `sqlx` or `psycopg`, and
+does not want a transaction-signing library in that path.
+
+So `hivecomb` ships no HAF client rather than a half-one. `NodeClient::call` reaches
+anything hived exposes over JSON-RPC, and a REST endpoint is an HTTP request the caller
+can make with whatever client they already have.
+
+The thing that would change this is a use case, not an argument: if someone building on
+HAF finds they are re-deriving Hive types that this crate already models — `Account`,
+`Block`, the operation enum — then mapping those onto HAF's stable core tables is worth
+doing, behind a feature flag, for that person. Until then it is a dependency on Postgres
+in a library whose signing path deliberately has no network dependency at all.
 
 ---
 
