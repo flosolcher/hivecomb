@@ -8,7 +8,7 @@ cost someone their funds, so please report one privately and give it time to be 
 **Use GitHub's private vulnerability reporting**, from the Security tab of this
 repository. It creates a private thread visible only to the maintainers.
 
-If that is unavailable, email **fs@monacofriends.com**. Say "hivecomb security" in the
+If that is unavailable, email **alphalogic@gmail.com**. Say "hivecomb security" in the
 subject.
 
 Please do not open a public issue for anything that could be exploited before it is
