@@ -116,11 +116,11 @@ Working and tested. **Not yet run against mainnet with real value** — see
 | JSON-RPC client with node failover + typed accessors | done |
 | Python bindings (PyO3 / abi3) | done — keys, signing, memos, all 48 ops |
 | beem-compatible Python layer | done — drop-in, 25 checks |
+| beem object wrappers (Account, Market, …) | done |
+| `beempy` CLI | done — all 99 commands, plus 7 new |
 | Differential oracle vs beem | done, green |
 | Live-node fixture tests | done |
 | Wallet / encrypted key storage | done — scrypt + AES-GCM |
-| CLI (`beempy` equivalent) | not yet |
-| Comment / Market / Discussions wrappers | not yet |
 
 Chain state is modelled as plain data (`comb::chain`), read from the API rather than
 constructed. beem's equivalents subclass `dict` and can each reach the network on their
@@ -215,7 +215,9 @@ pip install comb comb-beem
 [MIGRATION.md](MIGRATION.md) is the complete record: every defect fixed and where it is
 fixed, every deliberate behavioural divergence, everything `comb` adds that beem cannot
 do, and exactly what is not implemented. `python/test_compat.py` runs 25 checks written
-against beem's API, unmodified.
+against beem's API unmodified, and `python/test_cli.py` runs 21 more over `beempy`.
+
+`beempy commands --new` lists the seven commands beem has no equivalent for.
 
 ## Licence
 

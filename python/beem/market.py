@@ -38,14 +38,12 @@ class Market(dict):
         if raw_data:
             return data
         return {
-            "latest": Price(float(data["latest"]), base=Amount(1, "HBD"), quote=Amount(1, "HIVE"))
-            if False
-            else float(data["latest"]),
+            "latest": float(data["latest"]),
             "lowest_ask": float(data["lowest_ask"]),
             "highest_bid": float(data["highest_bid"]),
             "percent_change": float(data["percent_change"]),
-            "hbd_volume": Amount(data.get("sbd_volume") or data.get("hbd_volume")),
-            "hive_volume": Amount(data.get("steem_volume") or data.get("hive_volume")),
+            "hbd_volume": Amount(data.get("hbd_volume") or data.get("sbd_volume")),
+            "hive_volume": Amount(data.get("hive_volume") or data.get("steem_volume")),
         }
 
     def volume24h(self, raw_data=False):
@@ -53,31 +51,23 @@ class Market(dict):
         if raw_data:
             return data
         return {
-            "HBD": Amount(data.get("sbd_volume") or data.get("hbd_volume")),
-            "HIVE": Amount(data.get("steem_volume") or data.get("hive_volume")),
+            "HBD": Amount(data.get("hbd_volume") or data.get("sbd_volume")),
+            "HIVE": Amount(data.get("hive_volume") or data.get("steem_volume")),
         }
 
     def orderbook(self, limit=25, raw_data=False):
+        """The order book.
+
+        ``hive``/``hbd`` are integer counts of the asset's smallest unit. The
+        node used to name them ``steem``/``sbd`` and some still do, so both
+        spellings are accepted rather than assuming one.
+        """
         data = self.rpc.call("condenser_api.get_order_book", [limit])
         if raw_data:
             return data
         return {
-            "bids": [
-                {
-                    "price": float(entry["real_price"]),
-                    "hive": Amount(entry["steem"] / 1000, "HIVE"),
-                    "hbd": Amount(entry["sbd"] / 1000, "HBD"),
-                }
-                for entry in data.get("bids", [])
-            ],
-            "asks": [
-                {
-                    "price": float(entry["real_price"]),
-                    "hive": Amount(entry["steem"] / 1000, "HIVE"),
-                    "hbd": Amount(entry["sbd"] / 1000, "HBD"),
-                }
-                for entry in data.get("asks", [])
-            ],
+            side: [_order_row(entry) for entry in data.get(side, [])]
+            for side in ("bids", "asks")
         }
 
     def recent_trades(self, limit=25, raw_data=False):
@@ -180,6 +170,24 @@ class Market(dict):
 
     def __repr__(self):
         return f"<Market {self.get_string()}>"
+
+
+def _order_row(entry):
+    """One side of an order book row, whichever asset spelling the node used."""
+    hive_units = entry.get("hive", entry.get("steem", 0))
+    hbd_units = entry.get("hbd", entry.get("sbd", 0))
+    return {
+        "price": float(entry["real_price"]),
+        # These are smallest-unit counts, so build the Amount from units rather
+        # than dividing -- dividing would go through float for no reason.
+        "hive": Amount(
+            {"amount": str(int(hive_units)), "precision": 3, "nai": "@@000000021"}
+        ),
+        "hbd": Amount(
+            {"amount": str(int(hbd_units)), "precision": 3, "nai": "@@000000013"}
+        ),
+        "created": entry.get("created"),
+    }
 
 
 def _iso(unixtime):

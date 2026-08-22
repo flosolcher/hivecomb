@@ -40,6 +40,8 @@ print(beem.__version__)          # comb-compat-0.1.0, not 0.24.26
 The version string is deliberately **not** `0.24.26`: anything that branches on the
 version should be able to tell it is talking to comb.
 
+The `beempy` console script is installed too, so existing invocations keep working.
+
 Nothing else changes. This keeps working verbatim:
 
 ```python
@@ -52,7 +54,8 @@ tx = hive.custom_json("my_app", {"hello": "hive"}, required_posting_auths=["alic
 ```
 
 `python/test_compat.py` runs 25 such checks — code written against beem's API, run
-through the layer without modification.
+through the layer without modification — and `python/test_cli.py` runs 21 more over
+`beempy`, offline.
 
 ### The one thing to check before you switch
 
@@ -206,10 +209,33 @@ beem's operation classes had `__bytes__` and produced Graphene binary in Python.
 they are constructors and validators; `bytes(op)` raises. Python-side wire encoding is
 exactly where findings 8, 22 and 23 lived.
 
-### 3.10 The RPC layer uses only the standard library
+### 3.10 `beempy` confirms before spending, and refuses to assume
 
-beem pulled in `requests` and `websocket-client`. The compatibility layer uses
-`urllib`, so it adds no dependencies beyond `comb` itself. WebSocket transport is not
+Commands that move value — `transfer`, `powerdown`, `convert`,
+`collateralizedconvert`, `recurrenttransfer`, `buy`, `sell`, `changerecovery` — ask
+before broadcasting. With no terminal they refuse rather than assuming yes; set
+`COMB_ASSUME_YES=1` to opt in for scripts.
+
+`--dry-run` builds and signs without broadcasting, and prints the transaction.
+
+### 3.11 `beempy` does not silently drop a flag
+
+`beempy --account alice transfer bob 1.000 HIVE` uses `alice`. argparse applies
+subparser defaults over the parent namespace, so the naive arrangement loses the value
+— which is the same class of bug as the rest of this document, in the CLI rather than
+the protocol.
+
+### 3.12 Filtered history reports when it stopped looking
+
+`beempy history --type transfer` pages until it has enough matches, bounded by
+`--scan` (default 10,000 entries, since each batch is a round trip). If it hits the
+bound it says so, rather than presenting a short list as though it were complete.
+
+### 3.13 The RPC layer uses only the standard library
+
+beem pulled in `requests` and `websocket-client`, and its CLI added Click, click-shell
+and prettytable. The compatibility layer uses `urllib` and `argparse` and formats its
+own tables, so it adds no dependencies beyond `comb` itself. WebSocket transport is not
 supported — every public Hive node serves HTTP JSON-RPC.
 
 ---
@@ -300,12 +326,26 @@ BIP-38 output matches beem byte for byte, so existing `6P...` keys are readable.
 `comb::wallet` uses scrypt and AES-256-GCM, so a tampered wallet file fails
 authentication rather than decrypting to something.
 
-### 4.10 Unknown fields survive
+### 4.10 `beempy` commands beem has no equivalent for
+
+`beempy commands --new` lists them:
+
+| command | what it does |
+|---|---|
+| `recurrenttransfer` | set up a recurrent transfer (HF25), with `--pair-id` (HF28) |
+| `collateralizedconvert` | convert HIVE to HBD immediately against collateral (HF25) |
+| `mnemonic` | generate a BIP-39 phrase and derive all four Hive role keys from it |
+| `bip38` | encrypt or decrypt a key under a passphrase |
+| `decodetx` | decode a transaction to JSON |
+| `virtualops` | stream virtual operations, which beem's table cannot name correctly |
+| `commands` | list every command, or just the new ones |
+
+### 4.11 Unknown fields survive
 
 Every chain type carries an `extra` map, so a hardfork that adds a field does not
 silently lose it.
 
-### 4.11 A differential oracle
+### 4.12 A differential oracle
 
 `tests/differential_beem.py` compares digests against beem byte for byte over a
 generated corpus. `comb/tests/live_fixtures.rs` parses real captured node responses.
@@ -324,7 +364,25 @@ generated corpus. `comb/tests/live_fixtures.rs` parses real captured node respon
 | `beembase.operations` | 30 operation builders, including the two beem cannot make |
 | `beembase.signedtransactions` | `Signed_Transaction`: digest, id, sign, verify |
 | `beemapi.noderpc` | `NodeRPC` with failover and attribute proxying |
-| `beem.Hive` | `custom_json`, `transfer`, `vote`, `finalizeOp`, `broadcast`, `recurrent_transfer`, `collateralized_convert`, chain-id checks, TaPoS |
+| `beem.Hive` | `custom_json`, `transfer`, `vote`, `post`, `reply`, `comment_options`, `delete_comment`, `claim_account`, `create_claimed_account`, `witness_feed_publish`, `decline_voting_rights`, `finalizeOp`, `broadcast`, `recurrent_transfer`, `collateralized_convert`, chain-id checks, TaPoS |
+| `beem.account` | `Account`, `Accounts` — balances, Hive Power, mana, RC, history, follows, delegations, broadcasts |
+| `beem.comment` | `Comment`, `RecentReplies`, `RecentByPath` |
+| `beem.witness` | `Witness`, `Witnesses`, `WitnessesVotedByAccount` |
+| `beem.block` | `Block`, `BlockHeader` |
+| `beem.blockchain` | `Blockchain` — block iteration, `ops`, `stream`, chain-wide lookups |
+| `beem.vote` | `Vote`, `ActiveVotes`, `AccountVotes` |
+| `beem.market` | `Market` — ticker, order book, trades, buy/sell/cancel |
+| `beem.price` | `Price`, `Order`, `FilledOrder` |
+| `beem.amount` | `Amount` — integer units, no float, no global decimal context |
+| `beem.memo` | `Memo` |
+| `beem.wallet` | `Wallet` — scrypt + AES-256-GCM |
+| `beem.rc` | `RC` |
+| `beem.community` | `Community`, `Communities` |
+| `beem.discussions` | the ranked and account-post listings |
+| `beem.nodelist` | `NodeList`, ranking by measured latency |
+| `beem.transactionbuilder` | `TransactionBuilder` |
+| `beem.exceptions` | the full hierarchy, names unchanged |
+| `beem.cli` (`beempy`) | all 99 beem commands registered, plus 7 new; see below |
 
 ### Raises `NotImplementedError`, naming an alternative
 
@@ -340,17 +398,30 @@ generated corpus. `comb/tests/live_fixtures.rs` parses real captured node respon
 | `beem.Steem` | see §3.7 | — |
 | `recover_public_key`, `recoverPubkeyParameter` | beem's multi-backend machinery | `verify_message` |
 
+### `beempy` commands that are registered but decline
+
+Each prints why and names an alternative. They are registered rather than missing, so a
+script that calls one gets an explanation instead of "unknown command".
+
+| command | why |
+|---|---|
+| `uploadimage` | it posted to a third-party image host, which is not this library's job |
+| `download` | it fetched post bodies for offline editing; the API does that directly |
+| `draw` | it drew ASCII charts; pipe `pricehistory` into a plotting tool |
+| `importaccount` | deriving a wallet's keys from a master password should be a deliberate act — use `passwordgen` then `addkey` |
+| `newaccount`, `changekeys`, `updatememokey`, `allow`, `disallow` | authority changes are owner-level and irreversible; build them explicitly so every field is visible |
+| `beneficiaries` | set them when posting, with `post --beneficiary` |
+| `witnessupdate`, `witnesscreate`, `witnessdisable`, `witnessenable` | `witness_set_properties` encodes each value as the binary form of its own type, which this layer does not build; use comb's `WitnessProperty` helpers |
+| `addtoken`, `deltoken`, `listtoken` | they served beem's HiveSigner integration, which this layer does not provide |
+
 ### Not ported
 
-`beem.Account`, `beem.Comment`, `beem.Market`, `beem.Discussions`, `beem.Community`,
-`beem.Blockchain`, `beem.Snapshot`, `beem.wallet.Wallet`, `beem.cli` (5,198 lines),
-`beemstorage`.
+`beem.Snapshot`, `beem.conveyor`, `beem.hivesigner`, `beem.imageuploader`,
+`beem.profile`, `beem.asciichart`, `beemstorage`.
 
-These are a convenience layer over the RPC API. The chain state they wrap is available
-as typed data in `comb::chain` (Rust) and through `NodeRPC` (Python), and the RPC
-surface is reachable through `rpc.call(method, params)` exactly as beem's
-`__getattr__` proxy made it. If you depend on one of these, open an issue — the
-question is which, not whether.
+The RPC surface is reachable through `rpc.call(method, params)` exactly as beem's
+`__getattr__` proxy made it, so anything hived exposes is still available untyped. If
+you depend on one of these, open an issue.
 
 ---
 

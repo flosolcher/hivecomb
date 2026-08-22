@@ -28,6 +28,14 @@ __all__ = ["Account", "Accounts", "AccountsObject"]
 VOTING_MANA_REGENERATION_SECONDS = 432_000
 
 
+#: How many history entries a filtered search reads before giving up.
+#:
+#: Each batch is one network round trip, so an unbounded search over a large
+#: account is minutes of waiting. Ten batches is a few seconds and finds recent
+#: activity; raise it explicitly when looking further back.
+DEFAULT_MAX_SCAN = 10_000
+
+
 def _now():
     return int(time.time())
 
@@ -365,38 +373,73 @@ class Account(dict):
     # -- history -----------------------------------------------------------
 
     def history(self, start=None, stop=None, limit=1000, only_ops=None, exclude_ops=None,
-                batch_size=1000, raw_output=False):
+                batch_size=1000, raw_output=False, max_scan=DEFAULT_MAX_SCAN):
         """Iterate operations oldest-first.
 
         Yields the ``op`` payload of each history entry, with ``index``,
         ``block``, ``timestamp`` and ``trx_id`` merged in, as beem did.
+
+        ``limit`` counts **matches**, so filtering by ``only_ops`` pages until it
+        has that many rather than filtering one page and stopping.
+
+        ``max_scan`` bounds how many entries are read looking for them, because
+        each batch is a network round trip and an unbounded search over a large
+        account takes minutes. Hitting the bound yields fewer results than asked
+        for; :attr:`last_scan_exhausted` says whether that happened, so a caller
+        can tell "no matches" from "stopped looking".
         """
         yield from self._history(reverse=False, limit=limit, only_ops=only_ops,
                                  exclude_ops=exclude_ops, batch_size=batch_size,
-                                 raw_output=raw_output)
+                                 raw_output=raw_output, max_scan=max_scan)
 
     def history_reverse(self, start=None, stop=None, limit=1000, only_ops=None,
-                        exclude_ops=None, batch_size=1000, raw_output=False):
-        """Iterate operations newest-first."""
+                        exclude_ops=None, batch_size=1000, raw_output=False,
+                        max_scan=DEFAULT_MAX_SCAN):
+        """Iterate operations newest-first. See :meth:`history`."""
         yield from self._history(reverse=True, limit=limit, only_ops=only_ops,
                                  exclude_ops=exclude_ops, batch_size=batch_size,
-                                 raw_output=raw_output)
+                                 raw_output=raw_output, max_scan=max_scan)
 
-    def _history(self, reverse, limit, only_ops, exclude_ops, batch_size, raw_output):
+    def _history(self, reverse, limit, only_ops, exclude_ops, batch_size, raw_output,
+                 max_scan=DEFAULT_MAX_SCAN):
+        """Page through `condenser_api.get_account_history`.
+
+        Two constraints of that endpoint drive this, and getting either wrong
+        produces an assert from the node rather than a short result:
+
+        * ``limit`` must be at least 1. Asking for 0 is refused, and the node
+          reports it as the *other* assert below, which is misleading.
+        * ``start >= limit - 1``, i.e. ``limit <= start + 1``. Near the
+          beginning of an account's history the batch has to shrink to fit.
+
+        ``start = -1`` means "the newest" and is exempt from the second rule.
+        The endpoint returns exactly ``limit`` entries, ending at ``start``,
+        oldest first.
+        """
         only_ops = set(only_ops or [])
         exclude_ops = set(exclude_ops or [])
         batch_size = max(1, min(int(batch_size), 1000))
         collected = []
         cursor = -1
-        remaining = limit
+        wanted = int(limit)
+        scanned = 0
+        self.last_scan_exhausted = False
 
-        while remaining > 0:
-            take = min(batch_size, remaining, 1000)
+        while len(collected) < wanted and scanned < max_scan:
+            # Ask for a full batch even when few matches are still wanted: with
+            # a filter, most of what comes back is discarded.
+            api_limit = max(1, min(batch_size, 1000))
+            if not only_ops and not exclude_ops:
+                api_limit = min(api_limit, max(1, wanted - len(collected)))
+            if cursor != -1:
+                # limit <= start + 1, and we already know cursor >= 0 here.
+                api_limit = min(api_limit, cursor + 1)
             entries = self.blockchain.rpc.call(
-                "condenser_api.get_account_history", [self.name, cursor, take - 1]
+                "condenser_api.get_account_history", [self.name, cursor, api_limit]
             )
             if not entries:
                 break
+
             for index, entry in entries:
                 op_type, op_value = entry["op"]
                 if only_ops and op_type not in only_ops:
@@ -417,16 +460,18 @@ class Account(dict):
                         }
                     )
                     collected.append(record)
-            oldest = entries[0][0]
-            remaining -= len(entries)
-            if oldest == 0:
-                break
-            cursor = max(0, oldest - 1)
-            if cursor == 0:
-                break
 
-        collected.sort(key=lambda r: r[0] if raw_output else r["index"])
-        if reverse:
+            scanned += len(entries)
+            oldest = entries[0][0]
+            if oldest <= 0:
+                break
+            cursor = oldest - 1
+
+        if len(collected) < wanted and scanned >= max_scan:
+            self.last_scan_exhausted = True
+        collected.sort(key=lambda r: r[0] if raw_output else r["index"], reverse=True)
+        collected = collected[:wanted]
+        if not reverse:
             collected.reverse()
         yield from collected
 
