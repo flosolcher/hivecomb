@@ -19,8 +19,26 @@ checks that the transaction id the chain filed it under is the one hivecomb
 computed locally. That last step is what makes this a proof rather than a
 smoke test — a matching trx_id means the node's bytes were hivecomb's bytes.
 
-    HIVE_ACCOUNT=someaccount HIVE_POSTING_WIF=5... \
-        PYTHONPATH=<dir with hivecomb.so> python3 tests/hived_broadcast_check.py
+The key is read from a file containing nothing but the WIF:
+
+    echo -n '5Kxxxx...' > ~/.hivecomb-posting-key
+    chmod 600 ~/.hivecomb-posting-key
+
+    HIVE_ACCOUNT=someaccount PYTHONPATH=<dir with hivecomb.so> \
+        python3 tests/hived_broadcast_check.py --key-file ~/.hivecomb-posting-key
+
+Keep that file **outside this repository**. `.gitignore` covers `.env` and
+`*.wif` here, but a path outside the working tree cannot be committed by
+mistake at all, and this file is worth that margin.
+
+`HIVE_POSTING_WIF` is still accepted for a throwaway shell, but a file is
+better: an environment variable is visible to every child process, is often
+captured by crash reporters and shell history, and tends to outlive the command
+it was meant for.
+
+The key is never printed, never logged and never written anywhere by this
+script. What it prints is the *public* key it derives, so you can confirm which
+key was used.
 
 Pass --dry-run to build and sign without broadcasting, and to have a node
 verify the signature via `database_api.verify_authority` — which checks the
@@ -71,14 +89,61 @@ def call(method, params, node=None):
     raise RuntimeError("no node answered: " + "; ".join(failures))
 
 
+def read_key(argv):
+    """Read the WIF from --key-file, else from HIVE_POSTING_WIF.
+
+    A file is preferred over the environment: an env var is inherited by every
+    child process and is routinely captured by crash reporters and shell
+    history, whereas a mode-600 file outside the repository is read once here
+    and goes nowhere else.
+
+    The file must contain the WIF and nothing else; surrounding whitespace and a
+    trailing newline are tolerated because `echo` adds one.
+    """
+    path = None
+    if "--key-file" in argv:
+        index = argv.index("--key-file")
+        if index + 1 >= len(argv):
+            sys.exit("--key-file needs a path")
+        path = argv[index + 1]
+
+    if path is None:
+        return os.environ.get("HIVE_POSTING_WIF")
+
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        sys.exit(f"no such key file: {path}")
+
+    mode = os.stat(path).st_mode
+    if mode & 0o077:
+        sys.exit(f"{path} is readable by other users (mode {mode & 0o777:o}).\n"
+                 f"Run: chmod 600 {path}")
+
+    with open(path, encoding="utf-8") as handle:
+        contents = handle.read()
+
+    lines = [line.strip() for line in contents.splitlines() if line.strip()]
+    if len(lines) != 1:
+        sys.exit(f"{path} should contain exactly one line: the WIF and nothing "
+                 f"else (found {len(lines)} non-empty lines)")
+
+    key = lines[0]
+    # Tolerate `NAME=value` in case the file was written as a .env after all,
+    # but do not require it.
+    if "=" in key:
+        key = key.split("=", 1)[1].strip().strip('"').strip("'")
+    return key
+
+
 def main():
     dry_run = "--dry-run" in sys.argv
 
     account = os.environ.get("HIVE_ACCOUNT")
-    wif = os.environ.get("HIVE_POSTING_WIF")
+    wif = read_key(sys.argv)
     if not account or not wif:
-        sys.exit("set HIVE_ACCOUNT and HIVE_POSTING_WIF in the environment "
-                 "(a POSTING key — never an active or owner key)")
+        sys.exit("set HIVE_ACCOUNT, and pass --key-file PATH (or set "
+                 "HIVE_POSTING_WIF). Use a POSTING key — never an active or "
+                 "owner key; this script refuses those.")
 
     # Refuse to run with a key that cannot be the posting key, so a
     # copy-pasted active key does not get used by accident.

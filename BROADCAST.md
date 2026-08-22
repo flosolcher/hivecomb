@@ -90,18 +90,45 @@ a plan — this repository is intended to be public, and git history keeps what 
 `tests/hived_broadcast_check.py` refuses to run if the key it is given turns out to be
 the account's active or owner key, so a mis-paste fails closed rather than broadcasting.
 
+### Where the key goes
+
+In a file containing nothing but the WIF, mode 600, **outside this repository**.
+
+```bash
+( umask 077; read -rs KEY && printf '%s' "$KEY" > ~/.hivecomb-posting-key )
+```
+
+That prompts on a blank line: paste the key and press Enter. `read -rs` does not
+echo it, so it never reaches the terminal, the scrollback or shell history, and
+`umask 077` creates the file mode 600. The script refuses to read a key file that
+any other user can read.
+
+Outside the repository rather than in it, because `.gitignore` is a backstop and a
+path that is not in the working tree cannot be committed by a typo at all.
+
+Prefer this to an environment variable. `HIVE_POSTING_WIF` still works for a
+throwaway shell, but an env var is inherited by every child process, is routinely
+captured by crash reporters, and outlives the command it was meant for.
+
+Never paste a key into a chat, an issue, a commit message or a terminal command
+that will be recorded. Use `read -rs`, or an editor, and nothing else.
+
 ### Running it
 
 ```bash
 export HIVE_ACCOUNT=yourthrowaway
-export HIVE_POSTING_WIF=5...              # posting key only
 
 # The node verifies the signature without anything being broadcast.
-PYTHONPATH=<dir> python3 tests/hived_broadcast_check.py --dry-run
+PYTHONPATH=<dir> python3 tests/hived_broadcast_check.py \
+    --key-file ~/.hivecomb-posting-key --dry-run
 
 # The real thing: broadcast, wait for inclusion, compare transaction ids.
-PYTHONPATH=<dir> python3 tests/hived_broadcast_check.py
+PYTHONPATH=<dir> python3 tests/hived_broadcast_check.py \
+    --key-file ~/.hivecomb-posting-key
 ```
+
+The script prints the *public* key it derives, so you can confirm which key was
+used. It never prints, logs or copies the private one.
 
 `--dry-run` calls `database_api.verify_authority`, which has the node check the signature
 against the account's declared authority and return a verdict — without writing to the
