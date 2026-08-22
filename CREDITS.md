@@ -114,6 +114,23 @@ legacy, and it is the reason `hivecomb-beem` exists as a separate thing rather t
 being redundant. See [COMPARISON.md](COMPARISON.md), which
 compares the two honestly, including where nectar leads.
 
+## Honourable mention — nectarengine
+
+**[nectarengine](https://github.com/srbde/nectarengine)** — by **SRBDE**. MIT.
+
+A Hive-Engine client: tokens, the market, market pools, NFTs and the NFT market, across
+41 write operations and six contracts.
+
+`hivecomb` takes no code from it and ships no Hive-Engine client — that is a separate
+chain on its own schedule, and this crate's Hive-Engine story is "it is a `custom_json`,
+which we sign correctly". But reading it produced the one thing worth knowing on that
+subject, and `hivecomb-py`'s README now says it: the authority a Hive-Engine action
+requires **varies by contract action**, Hive validates whichever one you declare, and
+the sidechain decides which list it reads. Declare the wrong one and the transaction is
+accepted by Hive and silently does nothing. Its split between active and posting is the
+best available answer to which is which, because it is maintained against a schema that
+moves.
+
 ## Honourable mention — other Rust work on Hive
 
 `hivecomb` is not the first Rust library for Hive, and it is better for the ones that came

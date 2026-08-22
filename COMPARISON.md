@@ -352,6 +352,20 @@ separate types rather than one, and a caller who wants everything async gets an 
 
 If "the whole SDK is `async fn`" is what you want, xylem is still the closer fit.
 
+**Hive-Engine, and sidechains generally.** A Hive-Engine operation is a `custom_json`
+with the id `ssc-mainnet-hive`, so signing one needs nothing this crate lacks — and
+`hivecomb-py`'s README carries the recipe with the two traps spelled out. What it does
+not ship is a client: 41 write operations across six contracts, a second RPC network,
+and a token-precision lookup that cannot happen in an offline signing path anyway.
+[nectarengine](https://github.com/srbde/nectarengine) by SRBDE covers that ground, and
+covers it for a schema that moves independently of Hive's.
+
+One thing from reading it is worth repeating because it is a silent failure: Hive
+validates whichever authority a `custom_json` declares, and the sidechain decides which
+list it actually reads. Declare `required_posting_auths` where the contract wants
+`required_auths` and the transaction is accepted by Hive and does nothing on
+Hive-Engine. Most actions want active; several NFT actions want posting.
+
 **HAF.** The Hive Application Framework is a Postgres database that a hived node syncs
 blocks into, with applications running as schemas beside it. What a *remote* consumer
 can reach is not the database — it is whatever REST endpoints an operator chooses to

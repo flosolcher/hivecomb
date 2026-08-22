@@ -129,6 +129,53 @@ w.add_key(wif); w.get_key(str(pubkey))
 scrypt for the key derivation, AES-256-GCM for the contents — authenticated, so a
 tampered file fails to open rather than decrypting to garbage.
 
+### Hive-Engine and other sidechains
+
+A Hive-Engine operation is a `custom_json`, so signing one needs nothing this library
+does not already do:
+
+```python
+tx = hivecomb.sign_transaction(
+    [("custom_json", {
+        "required_auths": ["alice"],        # see the note below
+        "required_posting_auths": [],
+        "id": "ssc-mainnet-hive",
+        "json": {
+            "contractName": "tokens",
+            "contractAction": "transfer",
+            "contractPayload": {
+                "symbol": "BEE",
+                "to": "bob",
+                "quantity": "1.234",        # a decimal string, never a float
+                "memo": "",
+            },
+        },
+    })],
+    ref, [active_wif],
+)
+```
+
+Two things are easy to get wrong, and neither is something Hive will tell you about.
+
+**The authority depends on the contract action, and Hive does not check it.** hived sees
+a `custom_json` and validates whatever authority you declared; the *sidechain* then
+decides which list it reads. Declare the wrong one and the transaction is accepted by
+Hive and quietly does nothing on Hive-Engine — no error, no rejection, just a no-op you
+paid resource credits for. Most actions (tokens, market, marketpools) want
+`required_auths`; several NFT actions want `required_posting_auths`. Take the split from
+a library that tracks the sidechain — [nectarengine](https://github.com/srbde/nectarengine)
+is the current one — rather than guessing.
+
+**Quantities are decimal strings at the token's precision.** Not floats. `1.1` as a
+double is `1.100000000000000088…`, and rounding that down to a token's precision can
+land one unit low. The token's precision comes from a Hive-Engine API call, which this
+library does not make.
+
+`hivecomb` deliberately ships no Hive-Engine client. It is a separate chain with its own
+nodes and its own contract schema, on its own release schedule — the same reason there
+is no HAF client. What it does is sign the `custom_json` correctly, which is the part
+where a mistake costs you money.
+
 ## Things worth knowing
 
 - **Amounts are exact.** `"50000000000.123456 VESTS"` is parsed as a decimal, never
