@@ -352,6 +352,29 @@ separate types rather than one, and a caller who wants everything async gets an 
 
 If "the whole SDK is `async fn`" is what you want, xylem is still the closer fit.
 
+**A standalone CLI binary, and an npm one.** `beempy` already covers the command-line
+surface, and it is not a duplicate of anything: `cli.py` is 2,000 lines of argument
+parsing, output formatting and config UX with **no** cryptography or serialization in
+it — all of that is delegated to the Rust core through the extension module. The sharing
+that matters already happens at the right layer.
+
+A native Rust CLI would therefore not remove duplication; it would add a third
+argument-parsing surface. What it *would* add is a single static binary: the
+`sign_offline` example builds to **1.7 MB with no network dependency at all**, against
+roughly a gigabyte of Python runtime for the `beempy` path. For signing on an air-gapped
+machine with no interpreter, that is a real difference and it is the purest expression
+of what this crate is for.
+
+It is still not built, for the same reason HAF is not: nobody has asked. The recipe is
+two commands (below), the library already exposes everything a CLI would call, and a
+third release artifact across five platforms is a standing cost. The thing that would
+change it is someone signing on a machine where Python is genuinely unavailable or
+unwanted — a use case, not an argument.
+
+An **npm** CLI is a clearer no. The Node addon deliberately ships no HTTP client, so a
+CLI over it would need one added for the sole purpose of the CLI, and Node is a heavier
+runtime than the static binary it would be competing with.
+
 **Hive-Engine, and sidechains generally.** A Hive-Engine operation is a `custom_json`
 with the id `ssc-mainnet-hive`, so signing one needs nothing this crate lacks — and
 `hivecomb-py`'s README carries the recipe with the two traps spelled out. What it does

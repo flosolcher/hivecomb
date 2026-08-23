@@ -212,6 +212,17 @@ That example builds and signs with no HTTP client and no async runtime compiled 
 all — if it ever stops doing so, something has pulled a network dependency into the
 signing path.
 
+It is also the recipe for an offline signer on a machine with no Python:
+
+```bash
+cargo build --release --example sign_offline --no-default-features
+# target/release/examples/sign_offline — 1.7 MB, no network dependency
+```
+
+There is no `hivecomb` CLI binary published, deliberately — `beempy` covers the command
+line for anyone who has Python, and 1.7 MB of statically linked signing is a hundred
+lines of `clap` away for anyone who does not. See [COMPARISON.md](COMPARISON.md).
+
 Feature flags keep the core small. `--no-default-features` builds keys, serialization
 and signing alone — no HTTP client, no executor. `memo`, `bip38`, `bip32`, `wallet`,
 `rpc`, `ureq-transport`, `async` and `reqwest-transport` are additive, and every
