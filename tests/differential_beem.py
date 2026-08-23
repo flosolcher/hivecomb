@@ -62,6 +62,15 @@ HIVE_CHAIN = {
     ],
 }
 
+# A standing guard, suggested by an integrator who adopted this dict in their own
+# harness. Without it, a future drift between the two chain ids would show up as a
+# mismatch on every single case -- which reads like a serialization bug and is not one.
+assert HIVE_CHAIN["chain_id"] == hivecomb.chain_id(), (
+    f"chain id drift: this file says {HIVE_CHAIN['chain_id']}, "
+    f"hivecomb says {hivecomb.chain_id()}"
+)
+assert HIVE_CHAIN["chain_id"] != "0" * 64, "that is beem's pre-HF24 value, not Hive's"
+
 BLOCK_REF = hivecomb.BlockRef.from_block_id(BLOCK_ID)
 
 

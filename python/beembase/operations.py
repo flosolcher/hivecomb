@@ -135,14 +135,21 @@ class Operation:
 
 
 def _json_string(value):
-    """Render a JSON payload the way the chain expects.
+    """Render a JSON payload as the string that will be signed.
 
-    A string passes through untouched; anything else is dumped with compact
-    separators, matching beem and every other client.
+    A string passes through untouched. Anything else is dumped with compact
+    separators and **`ensure_ascii=False`** — raw UTF-8 rather than beem's
+    `\\uXXXX` escapes.
+
+    That is a deliberate divergence: the string is stored on chain verbatim and
+    resource credits are charged by the byte, so escaping costs about 50% more for
+    a payload with non-ASCII and buys nothing. It also matches `JSON.stringify`,
+    and therefore hive-js and dhive. See `beem.Hive._json_field` for the full note,
+    and MIGRATION.md for the divergence.
     """
     if isinstance(value, str):
         return value
-    return json.dumps(value, separators=(",", ":"))
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
 class Vote(Operation):

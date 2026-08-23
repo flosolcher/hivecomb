@@ -493,6 +493,41 @@ Verified interoperable with [hive-nectar](https://github.com/srbde/hive-nectar) 
 both directions: nectar verifies a signature produced here, and this recovers the signer
 of one produced there.
 
+### JSON payloads are raw UTF-8, not `\uXXXX` escapes
+
+**This changes the bytes that get signed**, so it is the divergence most worth knowing
+about if you diff the two implementations.
+
+`json.dumps` defaults to `ensure_ascii=True`, so beem escaped every non-ASCII character
+in a `custom_json` payload or `json_metadata`. This layer passes `ensure_ascii=False`.
+
+```python
+{"msg": "héllo 中文 🐝"}
+
+beem      {"msg":"h\u00e9llo \u4e2d\u6587 \ud83d\udc1d"}     52 bytes
+hivecomb  {"msg":"héllo 中文 🐝"}                            34 bytes
+```
+
+Both are valid JSON and parse to the same object. But the string is stored on chain
+verbatim and resource credits are charged by the byte, so beem's escaping costs about
+50% more for nothing — and raw UTF-8 is what `JSON.stringify` produces, so it is what
+hive-js, dhive and Hive Keychain write. beem is the outlier.
+
+The consequence: **a dict payload containing non-ASCII produces a different transaction
+id here than it did under beem.** If you need beem's exact bytes — to reproduce a stored
+transaction, or to compare the two implementations — hand over a pre-serialized string,
+which is passed through untouched:
+
+```python
+hive.custom_json("my_app", json.dumps(payload, separators=(",", ":")),
+                 required_posting_auths=["alice"])
+```
+
+Found by an integrator diffing hivecomb against beem, who reasonably read the mismatch
+as a serialization bug. It was worth fixing for a second reason as well:
+`beembase.operations` framed this one way and `Hive` another, so the same library
+produced different bytes depending on which entry point you used. Both now agree.
+
 ### Raises `NotImplementedError`, naming an alternative
 
 | What | Why | Instead |
