@@ -73,6 +73,37 @@ signature covers.
 The fuzz crate is outside the workspace on purpose, so nightly never leaks into the
 library's stable, MSRV-pinned build.
 
+## A check that cannot fail is worse than no check
+
+Three of these turned up in a single day, two of them mine, and they are the same
+shape: **the check was structurally incapable of reporting failure, so passing was the
+only outcome it could produce.**
+
+* The type stubs shipped at a path outside the importable package. A type checker would
+  never look there, so it would have reported success on a module it never read.
+* The test guarding those stubs compared against the *development* layout — a bare
+  `.so` on `PYTHONPATH` — not the package anyone installs. It would have passed while
+  the shipped artifact disagreed.
+* Every fuzz target's assertions sit behind `if let Ok(..)`, and the `transaction`
+  target was seeded with three hand-written byte strings. **None of them parsed.** It
+  had been reporting success without once executing its round-trip check. Measured: old
+  seeds 0 of 3 parsed, generated seeds 9 of 9.
+
+The third came from an integrator who found the same shape in their own watchdogs —
+`grep -q` over a log containing NUL bytes, which GNU grep classifies as binary and
+skips, so the error check could never fire and a crashed run reported as healthy.
+
+So when you add a check, ask the question that catches all three: **what would make
+this report failure, and have I seen it do so?** A check you have only ever seen pass
+is a check you have not tested. Where it is cheap, make it prove its own reachability —
+`emit_fuzz_seeds` exists so the fuzz targets start from input this crate produced, and
+the CI step fails loudly if a corpus directory is empty rather than fuzzing from
+nothing.
+
+Related and specific: `grep` skips files it decides are binary (use `-a`), `grep -c`
+exits non-zero on zero matches, and a shell parse error aborts every statement in the
+command — including ones before the error, which will look as though they ran.
+
 ## Conventions
 
 - **`#![forbid(unsafe_code)]`.** Not negotiable in the core.

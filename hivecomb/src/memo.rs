@@ -319,9 +319,9 @@ mod tests {
     }
 
     fn bob() -> PrivateKey {
-        /// Bob's key. Published on purpose and used by no Hive account in any role —
-        /// checked against `condenser_api.get_key_references` on 2026-08-23. A WIF in a
-        /// signing library should never leave a reader guessing whether it is real.
+        // Bob's key. Published on purpose and used by no Hive account in any role —
+        // checked against `condenser_api.get_key_references` on 2026-08-23. A WIF in a
+        // signing library should never leave a reader guessing whether it is real.
         PrivateKey::from_wif("5J4KCbg1G3my9b9hCaQXnHSm6vrwW9xQTJS6ZciW2Kek7cCkCEk").unwrap()
     }
 

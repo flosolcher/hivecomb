@@ -66,14 +66,22 @@ jobs:
           workspaces: fuzz
       - name: install cargo-fuzz
         run: cargo install cargo-fuzz --locked
-      - name: seed the corpus from the deterministic sweep
+      # Every target's assertions sit behind `if let Ok(..)`, so a corpus that never
+      # parses produces a target that cannot fail -- "no bug found" and "nothing was
+      # tested" look identical. The previous seeds here were three hand-written byte
+      # strings and **none of them parsed as a transaction body**, so that target had
+      # been reporting success without executing its round-trip check. These seeds are
+      # emitted by the crate itself, so the interesting branch is reachable by
+      # construction.
+      - name: seed the corpus with input the crate produced
         run: |
-          mkdir -p fuzz/corpus/${{ matrix.target }}
-          # A handful of shapes worth starting from, so the fuzzer does not spend its
-          # budget rediscovering that a varint exists.
-          printf '\x02\x05alice\x03bob' > fuzz/corpus/${{ matrix.target }}/seed-op
-          printf '\x00' > fuzz/corpus/${{ matrix.target }}/seed-zero
-          printf '\xff\xff\xff\xff' > fuzz/corpus/${{ matrix.target }}/seed-max
+          cargo run --release --example emit_fuzz_seeds \
+            --no-default-features --features memo -- fuzz/corpus
+          echo "seeds for ${{ matrix.target }}:"
+          ls -la "fuzz/corpus/${{ matrix.target }}" 2>/dev/null || {
+            echo "::error::no corpus for ${{ matrix.target }} -- it would fuzz from nothing"
+            exit 1
+          }
       - name: fuzz
         run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=240 -timeout=10
         working-directory: fuzz

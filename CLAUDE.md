@@ -70,6 +70,14 @@ PYTHONPATH=dist python3.8 tests/differential_beem.py     # python3.8 is the one 
 | `RELEASING.md` | how a release happens, and what is not set up yet |
 | `SECURITY.md` | how to report a defect |
 
+## A check that cannot fail is worse than no check
+
+Ask of every check: **what would make this report failure, and have I seen it do so?**
+Three instances in one day — stubs shipped outside the importable package, a test
+comparing against the development layout rather than the shipped one, and fuzz targets
+whose assertions sat behind `if let Ok(..)` with a corpus that never parsed. All three
+could only pass. See CONTRIBUTING.md.
+
 ## Traps that have already cost time
 
 - A job-level `permissions:` block in a GitHub workflow **replaces** the workflow-level
