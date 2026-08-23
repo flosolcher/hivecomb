@@ -169,6 +169,35 @@ Python 3.8+ (abi3), Node 20+.
   and what is known not to be sound (the master-password and brain-key schemes,
   which are Hive's design and cannot be changed).
 
+### Verified by someone else
+
+An outside integrator replaced beem with this library in a production application,
+built their own ten-case digest gate from that application's real `custom_json` payload
+shapes, and reproduced digest equality with beem byte for byte. They found no defect
+here; four they did find were in their own code. That is a narrow slice — one operation
+type — and weak evidence of absence, but it is the first check of this crate's
+serialization written by someone other than its author.
+
+Their report produced three fixes: the JSON framing divergence recorded above, type
+stubs, and an explicit `__all__`.
+
+### Type stubs, and an explicit `__all__`
+
+The wheel ships `__init__.pyi` and a `py.typed` marker **inside the package**, so a
+consumer's type checker resolves the module rather than seeing `Any`. A test asserts the
+stub against the module's own `__text_signature__`: a stub that has drifted is worse
+than none, because it type-checks code that fails at runtime.
+
+`__all__` is declared explicitly and is identical however the package is installed.
+Derived automatically it carried `__doc__` and `__version__`, so `from hivecomb import *`
+would have rebound the importer's docstring — and `dir()` differed by one between a bare
+`.so` and a wheel, because Python binds a submodule on its parent. **Bind capability
+checks to `__all__`, not `dir()`.**
+
+**Stubs do not replace a runtime capability check.** Stubs are checked against the path
+at type-check time; a capability check runs against the `.so` actually loaded, and only
+that catches a stale installed build — source updated, package not reinstalled.
+
 ### Verified
 
 - **hived serialization oracle** — 57 cases, all 48 operations, 57 identical
