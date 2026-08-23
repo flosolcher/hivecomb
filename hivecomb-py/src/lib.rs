@@ -984,5 +984,37 @@ fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(operation_names, m)?)?;
     m.add_function(wrap_pyfunction!(recover_digest, m)?)?;
     m.add_function(wrap_pyfunction!(check_authority, m)?)?;
+
+    // Declared explicitly, because pyo3 otherwise derives `__all__` from every
+    // `m.add*` call — which put `__doc__` and `__version__` in it, so
+    // `from hivecomb import *` would rebind the importing module's docstring.
+    // Listing the real surface also keeps it identical however the module is
+    // loaded: an integrator pinning on a capability tuple saw 20 names from a
+    // bare `.so` and 21 from the wheel, and neither number was wrong on its own.
+    m.add(
+        "__all__",
+        vec![
+            "BlockRef",
+            "PrivateKey",
+            "PublicKey",
+            "TaposCache",
+            "Wallet",
+            "chain_id",
+            "check_authority",
+            "decode_memo",
+            "encode_memo",
+            "generate_mnemonic",
+            "is_encrypted_memo",
+            "operation_names",
+            "recover_digest",
+            "recover_message",
+            "sign_message",
+            "sign_transaction",
+            "transaction_digest",
+            "transaction_id",
+            "validate_mnemonic",
+            "verify_message",
+        ],
+    )?;
     Ok(())
 }

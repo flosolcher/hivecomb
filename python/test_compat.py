@@ -591,7 +591,17 @@ def _():
             args = [a.arg for a in node.args.args]
             stub_sigs[node.name] = args
 
-    real = {n for n in dir(hivecomb) if not n.startswith("_")}
+    # `__all__`, not `dir()`. Python binds a submodule on its parent at import, so a
+    # wheel-installed `hivecomb` also has `hivecomb.hivecomb` in `dir()` while a bare
+    # `.so` on PYTHONPATH does not — an integrator pinning on a capability tuple saw
+    # 20 names in one layout and 21 in the other. `__all__` is declared explicitly in
+    # the extension and is identical either way, which is what a consumer should bind
+    # to and therefore what this asserts.
+    assert hasattr(hivecomb, "__all__"), "the extension must declare __all__"
+    real = set(hivecomb.__all__)
+    assert "__doc__" not in real and "__version__" not in real, (
+        "__all__ must not carry dunders — `from hivecomb import *` would rebind them"
+    )
     # TypedDicts and aliases in the stub are not module attributes; ignore those.
     helpers = {"SignedTransaction", "AuthorityCheck", "Operation"}
 

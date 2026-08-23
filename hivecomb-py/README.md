@@ -176,6 +176,36 @@ nodes and its own contract schema, on its own release schedule — the same reas
 is no HAF client. What it does is sign the `custom_json` correctly, which is the part
 where a mistake costs you money.
 
+### Types, and why you should still check at runtime
+
+The wheel ships `py.typed` and `__init__.pyi`, so a type checker resolves the module
+fully rather than as `Any`.
+
+**Stubs are not a substitute for a runtime capability check, and it is worth being
+precise about why.** They are checked against whatever is on the path at type-check
+time; a capability check runs against the `.so` that is actually loaded. The failure
+they cannot catch is a **stale installed build** — source updated, package not
+reinstalled — where the checker is perfectly happy and the loaded module is old. An
+integrator hit exactly that state while upgrading and reported it.
+
+So bind to `__all__`, which is declared explicitly and is identical however the package
+was installed:
+
+```python
+REQUIRED = {"sign_transaction", "transaction_digest", "chain_id", "TaposCache"}
+missing = REQUIRED - set(hivecomb.__all__)
+if missing:
+    raise RuntimeError(f"hivecomb is missing {missing}; is the installed build stale?")
+```
+
+Not `dir()`: Python binds a submodule on its parent at import, so a wheel-installed
+package also has `hivecomb.hivecomb` in `dir()` where a bare `.so` does not. That
+difference is an artifact of packaging, not of version, and it is exactly the sort of
+thing a capability tuple should not trip over.
+
+`__version__` is available too, but it tells you what the source claimed, not what is
+loaded — which is the question worth asking.
+
 ## Things worth knowing
 
 - **Amounts are exact.** `"50000000000.123456 VESTS"` is parsed as a decimal, never
