@@ -160,6 +160,31 @@ Things that go wrong here:
 * **A pending publisher does not reserve the name.** Nothing does, on any of the three
   registries — first publish wins. See step 5.
 
+### 4b. TestPyPI — optional, and the only way to prove any of step 4
+
+Trusted publishing mints its token at upload, so a dry run cannot exercise it: a
+misconfigured publisher stays invisible until the real release, and surfaces as an OIDC
+error that does not name the wrong field.
+
+TestPyPI is a **separate instance** with its own accounts and its own publishers, so a
+run against it exercises the identical code path for real. Setting it up is step 4
+again, at a different host:
+
+1. Account at https://test.pypi.org (separate from your PyPI one), with 2FA.
+2. At https://test.pypi.org/manage/account/publishing/, add the **same two pending
+   publishers** — same owner, repository, workflow and environments (`release` and
+   `release-beem`). TestPyPI enforces the same one-publisher-per-configuration rule, so
+   the two environments are needed there too.
+3. `Actions → release → Run workflow`, **test pypi: true**.
+
+That uploads both distributions to TestPyPI and publishes **nothing** to crates.io or
+npm — those stay in dry-run, because there is no test instance of either and burning a
+real version number while rehearsing would be a poor trade.
+
+**TestPyPI will not accept the same version twice.** A second attempt at `0.1.0` fails
+with a filename conflict, exactly as the real index would. If you need to rehearse
+again, bump the version or accept that the first run was the test.
+
 ### 5. Check the names are still free
 
 All four were free on 2026-08-23. Re-check immediately before releasing, because none of
