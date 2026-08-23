@@ -17,19 +17,90 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 
 ## One-time setup, none of which is done yet
 
-- [ ] **crates.io** — create a scoped publish token, add it as the repository secret
-      `CARGO_REGISTRY_TOKEN`.
-- [ ] **npm** — create an automation token, add it as `NPM_TOKEN`.
-- [ ] **PyPI** — configure *trusted publishing* for **both** projects, `hivecomb` and
-      `hivecomb-beem`, each pointing at this repository, workflow `release.yml`, and
-      environment `release`. Nothing is stored in GitHub for PyPI; the workflow
-      authenticates with a short-lived OIDC token.
-- [ ] **A `release` environment** in repository settings. Adding required reviewers to
-      it means a human approves before anything is uploaded, which is worth having for
-      an action that cannot be undone.
-- [ ] **Name squatting is not a risk here but availability is** — re-check that
-      `hivecomb` is still free on all three registries immediately before the first
-      release.
+Do these in order. Step 1 has to come first because everything else names it.
+
+### 1. The `release` environment, in GitHub
+
+`Settings → Environments → New environment`, named exactly **`release`** — the workflow
+gates four jobs on that name (`crate`, `pypi`, `pypi-shim`, `npm`), and PyPI's trusted
+publisher will be configured against it.
+
+Add **yourself as a required reviewer**. Publishing cannot be undone: crates.io never
+unpublishes, npm only within 72 hours and under conditions, PyPI never reuses a
+filename. A human approval step in front of an irreversible upload is worth the extra
+click.
+
+### 2. crates.io
+
+1. Log in at crates.io with GitHub.
+2. `Account Settings → API Tokens → New Token`.
+3. Scopes: **`publish-new`** and **`publish-update`**. Leave the crate scope
+   unrestricted for the first release — you cannot scope a token to a crate that does
+   not exist yet. After 0.1.0 is out, replace it with one scoped to `hivecomb` alone.
+4. Add it to the **`release` environment** (not repository-wide) as
+   **`CARGO_REGISTRY_TOKEN`**. Environment secrets are only readable by jobs that
+   declare that environment, so a compromised unrelated workflow cannot reach it.
+
+### 3. npm
+
+1. Account at npmjs.com. Enable 2FA.
+2. `Access Tokens → Generate New Token → Classic → **Automation**`. Automation is the
+   one that works from CI; a Publish token will prompt for 2FA and the job will hang.
+3. Add to the **`release` environment** as **`NPM_TOKEN`**.
+
+Nothing needs claiming ahead of time — the first publish creates `hivecomb` and the five
+per-platform packages (`hivecomb-linux-x64-gnu` and friends) together.
+
+### 4. PyPI — two projects, no token at all
+
+`hivecomb` and `hivecomb-beem` are separate PyPI projects and each needs its own
+publisher. Neither stores anything in GitHub: the workflow authenticates with a
+short-lived OIDC token, which is why there is no `PYPI_TOKEN` anywhere.
+
+For **each** of the two, go to `Your projects → Publishing → Add a new pending
+publisher` and fill in:
+
+| field | value |
+|---|---|
+| PyPI Project Name | `hivecomb` — then repeat for `hivecomb-beem` |
+| Owner | `flosolcher` |
+| Repository name | `hivecomb` |
+| Workflow name | `release.yml` |
+| Environment name | `release` |
+
+"Pending" is correct: it lets the project be created by the first publish. Get the
+environment name right — a mismatch fails at upload with a confusing OIDC error rather
+than a helpful one.
+
+### 5. Check the names are still free
+
+All four were free on 2026-08-23. Re-check immediately before releasing, because none of
+this reserves anything:
+
+```bash
+curl -s -o /dev/null -w "%{http_code} crates\n" https://crates.io/api/v1/crates/hivecomb
+curl -s -o /dev/null -w "%{http_code} pypi\n"   https://pypi.org/pypi/hivecomb/json
+curl -s -o /dev/null -w "%{http_code} shim\n"   https://pypi.org/pypi/hivecomb-beem/json
+curl -s -o /dev/null -w "%{http_code} npm\n"    https://registry.npmjs.org/hivecomb
+```
+
+404 means free. crates.io answers 403 to a bare request — check it in a browser.
+
+### 6. Rehearse before trusting any of it
+
+`Actions → release → Run workflow`, dry run **true**. It builds every wheel and every
+addon, installs a wheel and checks the cross-binding digest vector against it, and
+**verifies both tokens are accepted** — `crates.io/api/v1/me` and `npm whoami` — before
+running `cargo publish --dry-run` and `npm publish --dry-run`.
+
+The token checks are there deliberately. Neither `--dry-run` authenticates, so without
+them a rehearsal would say nothing about your credentials and the first real release
+would be the first time they were tested.
+
+The one thing a rehearsal cannot check is **PyPI**: trusted publishing mints its token
+at upload, so a misconfigured publisher only shows up on the real run — as an OIDC error
+that does not name the mismatched field. Re-read the table in step 4 before tagging;
+the environment name is the usual culprit.
 
 ## Before each release
 
