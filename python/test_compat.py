@@ -563,6 +563,58 @@ def _():
         assert issubclass(getattr(exc, name), Exception)
 
 
+@check("type stubs match the module they describe")
+def _():
+    # A stub that has drifted is worse than no stub: it type-checks code that will
+    # fail at runtime. So this asserts the .pyi against the real module rather than
+    # trusting it. Added after an integrator reported having to cast the module to
+    # `object` because no stubs shipped.
+    import ast
+    import os
+
+    stub_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "hivecomb-py", "hivecomb.pyi",
+    )
+    if not os.path.exists(stub_path):
+        raise AssertionError(f"no stub at {stub_path}")
+
+    tree = ast.parse(open(stub_path, encoding="utf-8").read())
+    stub_names, stub_sigs = set(), {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            stub_names.add(node.name)
+        elif isinstance(node, ast.FunctionDef):
+            stub_names.add(node.name)
+            args = [a.arg for a in node.args.args]
+            stub_sigs[node.name] = args
+
+    real = {n for n in dir(hivecomb) if not n.startswith("_")}
+    # TypedDicts and aliases in the stub are not module attributes; ignore those.
+    helpers = {"SignedTransaction", "AuthorityCheck", "Operation"}
+
+    missing = real - stub_names
+    assert not missing, f"module exports these, the stub does not describe them: {sorted(missing)}"
+
+    extra = stub_names - real - helpers
+    assert not extra, f"stub describes these, the module does not export them: {sorted(extra)}"
+
+    # And the free functions' parameter names must match the real signatures.
+    for name, args in stub_sigs.items():
+        obj = getattr(hivecomb, name, None)
+        if obj is None or not callable(obj):
+            continue
+        sig = getattr(obj, "__text_signature__", None)
+        if not sig:
+            continue
+        realargs = [
+            a.split("=")[0].strip()
+            for a in sig.strip("()").split(",")
+            if a.strip() and a.strip() != "$self"
+        ]
+        assert args == realargs, f"{name}: stub says {args}, module says {realargs}"
+
+
 # --------------------------------------------------------------------------
 def main():
     print(f"hivecomb compatibility layer: {len(PASS) + len(FAIL)} checks\n")

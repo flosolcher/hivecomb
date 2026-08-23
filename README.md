@@ -357,6 +357,38 @@ The corpus covers varint boundaries, `int16` boundaries, multi-byte UTF-8, empty
 maximum-length `custom_json` ids, unsorted and duplicated auth sets, and amounts on both
 sides of the `2**53` threshold. **It is a floor. Extend it rather than trusting it.**
 
+### By someone who is not the author
+
+An outside integrator replaced beem with `hivecomb` in a production application and
+built their **own** digest gate to check it — ten `custom_json` cases whose shapes came
+from that application's real payloads: long id strings, forty-element arrays,
+two-hundred-character fields, multi-byte UTF-8, nested and mixed types, integers either
+side of 2⁵³. Compared against beem byte for byte, through their own framing layer.
+**Green.** They also verified signatures recover to the right key and refuse a
+different message, and completed an end-to-end broadcast the chain accepted.
+
+Two things about that, because the distinction matters more than the headline.
+
+**Ten cases, not a hundred and fifty.** They also ran the corpus in this repository and
+it passed, but that is this project's harness and this project's corpus — running it
+elsewhere is not independent validation and is not claimed as such. What is independent
+is the ten: a corpus written by someone else, from payload shapes this project had
+never seen.
+
+**They found no defect in `hivecomb`, and that is weak evidence.** Ten cases of a single
+operation type is a narrow slice; their own report says so. Four defects were found
+during that work and all four were in their code. The
+[hived oracle](tests/hived_serialization_oracle.py) remains the stronger gate, because
+it covers every operation and compares against the chain's own software rather than
+against another implementation.
+
+What the integration did surface is the more useful kind of finding: `custom_json`
+payloads handed over as a dict were framed as raw UTF-8 here and `\uXXXX`-escaped by
+beem, so the same logical payload signed different bytes. Both valid, neither a bug,
+and invisible to any test using ASCII — it took someone diffing the two on real data.
+That is now [documented](MIGRATION.md), and it is why the API ships type stubs it did
+not have before.
+
 ## Before you trust it
 
 Serialization is proven against hived, and the signing path is proven on the live
