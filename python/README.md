@@ -22,6 +22,36 @@ pip install hivecomb hivecomb-beem
 
 It deliberately shadows beem's package names, so **do not install it alongside beem**.
 
+## What you get for switching
+
+Speed, measured on the same machine with both libraries signing identical operations
+(CPython 3.8, medians of nine one-second windows):
+
+| | hivecomb-beem | beem 0.24.26 | |
+|---|---|---|---|
+| sign a `custom_json` | 102 µs | 33 ms | ~330× |
+| sign a `transfer` | 86 µs | 31 ms | ~360× |
+| serialize and digest, no signing | 19 µs | 151 µs | ~8× |
+
+The signing rows are that wide because of *which* backend beem ends up on, not because
+Python is slow. beem prefers `secp256k1` and falls back to `cryptography`, and on the
+fallback it derives each signature's recovery parameter by recovering the public key in
+pure Python, inside a loop that retries until the signature is canonical. The
+`secp256k1` path would close most of the gap — but installed against a current binding
+it raises `AttributeError: 'PrivateKey' object has no attribute 'ctx'`, because beem was
+pinned to an API that changed and has not been maintained since 2021. The fallback is
+what you actually get.
+
+The last row is the fair one: serialization alone, no cryptography, ~8×.
+
+**And correctness, which matters more.** beem 0.24.26's `known_chains["HIVE"]` is the
+all-zero pre-hardfork-24 chain id, so it signs against a chain that has not existed
+since 2020 unless you override it. That and twenty-four other findings are catalogued
+with file and line in
+[SECURITY_FINDINGS.md](https://github.com/flosolcher/hivecomb/blob/main/SECURITY_FINDINGS.md)
+— including one that turned out to be **wrong**, marked as retracted, because a
+catalogue you cannot check is not worth much.
+
 Full detail — what was fixed, what diverges on purpose, what was added, what is not
 implemented — is in [MIGRATION.md](../MIGRATION.md).
 

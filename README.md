@@ -246,6 +246,46 @@ maturin develop          # build and install into the active venv
 maturin build --release  # abi3 wheel, CPython 3.8+
 ```
 
+## Speed, against beem
+
+Both libraries signing identical operations, same machine, same interpreter
+(CPython 3.8, the newest beem 0.24.26 supports). Medians of nine one-second windows.
+
+|  | hivecomb | beem 0.24.26 | |
+|---|---|---|---|
+| sign a message | 139 µs | 35 ms | ~250× |
+| sign a `custom_json` | 102 µs | 33 ms | ~330× |
+| sign a `transfer` | 86 µs | 31 ms | ~360× |
+| serialize and digest, no signing | 19 µs | 151 µs | ~8× |
+
+Both produce the same digest — `cef35a5b34…` — which is checked before anything is
+timed. A benchmark of two implementations that disagree measures nothing.
+
+**Those ratios need three caveats, and they matter more than the numbers.**
+
+**It is beem's ECDSA backend, not Python, that costs 30 ms.** beem picks a backend at
+import. On the `cryptography` one it grinds for a canonical signature and derives the
+recovery parameter by recovering the public key **in pure Python** on every attempt.
+That loop is the 30 ms. The gap in the last row — serialization only, no cryptography —
+is the honest measure of Rust against Python here, and it is ~8×, not ~300×.
+
+**beem's fast backend no longer works.** It prefers `secp256k1` when importable, which
+would close most of the gap. Installed against a current binding (0.14.0) it raises
+`AttributeError: 'PrivateKey' object has no attribute 'ctx'` — beem was pinned to an API
+that has since changed, and has not been maintained since 2021. So the slow path is not
+a strawman; it is what an install gets today.
+
+**beem had to be handed the right chain id to compare at all.** Its
+`known_chains["HIVE"]` is the all-zero pre-hardfork-24 value
+([finding 5](SECURITY_FINDINGS.md#5)), so out of the box it signs against a chain that
+has not existed since 2020. The benchmark passes the real chain id explicitly, exactly
+as [the differential oracle](tests/differential_beem.py) does.
+
+Reproduce with [`tests/bench_vs_beem.py`](tests/bench_vs_beem.py). There is also
+[`tests/bench_vs_nectar.py`](tests/bench_vs_nectar.py) against beem's maintained
+successor, where the gap is much smaller — 2–7× — because nectar hands its curve
+arithmetic to the same C library this crate does.
+
 ## Verification
 
 There are two digest oracles, and the second one matters more.
