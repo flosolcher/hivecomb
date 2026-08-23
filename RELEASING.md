@@ -56,11 +56,40 @@ click.
 ### 3. npm
 
 1. Account at npmjs.com. Enable 2FA.
-2. `Access Tokens → Generate New Token → Classic → **Automation**`. Automation is the
-   one that works from CI; a Publish token will prompt for 2FA and the job will hang.
+2. `Access Tokens → Generate New Token`. npm has retired Classic tokens in favour of
+   **Granular Access Tokens**, so that is what you get. Settings that matter:
+
+   | field | value |
+   |---|---|
+   | Token name | `hivecomb-release` |
+   | Allowed IP ranges | **leave empty** — GitHub-hosted runners have no stable IPs, and a range here locks CI out |
+   | Packages and scopes | **Read and write**, **All packages** |
+   | Organizations | No access |
+   | Expiration | the longest offered |
+
+   **"All packages" is forced, not lazy.** A granular token can only select packages
+   that already exist, and none of these do yet. It is also not one package: napi
+   publishes **six** — `hivecomb` plus `hivecomb-linux-x64-gnu`,
+   `hivecomb-linux-arm64-gnu`, `hivecomb-darwin-x64`, `hivecomb-darwin-arm64` and
+   `hivecomb-win32-x64-msvc`. After the first release, regenerate the token scoped to
+   those six by name.
+
+   **Granular tokens expire.** Classic automation tokens did not; these must, and the
+   default is 30 days. The pipeline will work now and fail months later with an auth
+   error at the worst possible moment. Record the expiry date next to this checklist
+   and rotate before it:
+
+       npm token expires: ____________  (set at creation)
+
 3. Add it as an **environment secret** on `release`, named **`NPM_TOKEN`** — a
    secret rather than a variable, and on the environment rather than the repository,
    for the reasons in step 2.
+4. Verify it before relying on it. The `npm` job runs `npm whoami` first, but that
+   only happens once Actions can run; locally:
+
+       read -rs TOK   # paste, Enter -- not echoed, not in shell history
+       NODE_AUTH_TOKEN=$TOK npm whoami --registry=https://registry.npmjs.org
+       unset TOK
 
 Nothing needs claiming ahead of time — the first publish creates `hivecomb` and the five
 per-platform packages (`hivecomb-linux-x64-gnu` and friends) together.

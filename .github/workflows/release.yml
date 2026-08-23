@@ -14,8 +14,10 @@
 #              publish-new and publish-update scope. A secret, not a variable:
 #              variable values are returned by the API and printed verbatim in
 #              logs, which are public once this repository is.
-#   npm        NPM_TOKEN, likewise an environment secret. Automation type -- a
-#              Publish token prompts for 2FA and the job hangs.
+#   npm        NPM_TOKEN, likewise an environment secret. A Granular Access
+#              Token with read-and-write on all packages -- six get published,
+#              and none exist to select until the first release. These expire;
+#              the default is 30 days.
 #   PyPI       trusted publishing configured for BOTH projects, `hivecomb` and
 #              `hivecomb-beem`, each pointing at this repository and the
 #              environment named below. No token is stored for PyPI.
