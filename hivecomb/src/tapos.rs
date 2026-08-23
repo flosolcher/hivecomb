@@ -31,10 +31,25 @@ use std::time::{Duration, Instant};
 
 /// How long a cached block reference stays usable by default.
 ///
-/// Well inside hived's own limit. The bound that matters in practice is that the
-/// reference should be newer than the transaction's expiration window, so that a
-/// transaction signed now and broadcast a moment later still refers to a block the
-/// node has.
+/// Conservative on purpose, and conservative by a very wide margin — measured
+/// 2026-08-23, the protocol bound is about a thousand times this:
+///
+/// * The TaPoS window is 65536 blocks, because `ref_block_num` is the low 16 bits of
+///   the block number. At three-second blocks that is **54.6 hours**.
+/// * Orphaning is not a factor. `head_block_number` was compared against
+///   `last_irreversible_block_num` on `api.hive.blog`, `api.openhive.network` and
+///   `api.syncad.com`: **lag zero on all three**. Hive has one-block irreversibility,
+///   so a head-block reference is already final, and a fresh reference is no riskier
+///   than an old one — which is the opposite of the intuition.
+///
+/// So a stale *reference* cannot realistically produce a rejected transaction at any
+/// sane cache age. The clock that actually runs out is the transaction's own
+/// expiration, capped at [`crate::transaction::MAX_EXPIRATION_SECS`] (3600s) by hived,
+/// and measured from signing rather than from the reference.
+///
+/// Raise this if you want fewer refreshes; 600s is still two orders of magnitude
+/// inside the bound. The number worth measuring instead is whatever delay sits between
+/// your signing and your broadcast, because that is what should size the expiration.
 pub const DEFAULT_MAX_AGE: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Clone, Copy)]
