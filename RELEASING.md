@@ -117,26 +117,48 @@ click.
 Nothing needs claiming ahead of time — the first publish creates `hivecomb` and the five
 per-platform packages (`hivecomb-linux-x64-gnu` and friends) together.
 
-### 4. PyPI — two projects, no token at all
+### 4. PyPI — two projects, two environments, no token at all
 
-`hivecomb` and `hivecomb-beem` are separate PyPI projects and each needs its own
+`hivecomb` and `hivecomb-beem` are separate PyPI projects, each needing its own
 publisher. Neither stores anything in GitHub: the workflow authenticates with a
 short-lived OIDC token, which is why there is no `PYPI_TOKEN` anywhere.
 
-For **each** of the two, go to `Your projects → Publishing → Add a new pending
-publisher` and fill in:
+**They cannot share an environment.** PyPI permits only one *pending* publisher per
+(owner, repository, workflow, environment) combination, so two that differ only in
+project name are rejected with *"a pending trusted publisher matching this
+configuration has already been registered for a different project name"*. The workflow
+therefore puts the two jobs in different environments.
 
-| field | value |
-|---|---|
-| PyPI Project Name | `hivecomb` — then repeat for `hivecomb-beem` |
-| Owner | `flosolcher` |
-| Repository name | `hivecomb` |
-| Workflow name | `release.yml` |
-| Environment name | `release` |
+First, create a second environment: `Settings → Environments → New environment`, named
+**`release-beem`**. It needs no secrets — trusted publishing uses none. Add the same
+required reviewers you gave `release`, if you set any.
 
-"Pending" is correct: it lets the project be created by the first publish. Get the
-environment name right — a mismatch fails at upload with a confusing OIDC error rather
-than a helpful one.
+Then at https://pypi.org/manage/account/publishing/, add a **pending publisher** for
+each:
+
+| field | `hivecomb` | `hivecomb-beem` |
+|---|---|---|
+| PyPI Project Name | `hivecomb` | `hivecomb-beem` |
+| Owner | `flosolcher` | `flosolcher` |
+| Repository name | `hivecomb` | `hivecomb` |
+| Workflow name | `release.yml` | `release.yml` |
+| Environment name | **`release`** | **`release-beem`** |
+
+Only the first and last rows differ, and the last row is the one that makes PyPI accept
+the second registration.
+
+"Pending" is correct for both: it authorises a project name that does not exist yet, and
+the first successful upload creates the project and converts the publisher to an
+ordinary one.
+
+Things that go wrong here:
+
+* **Workflow name is the filename**, `release.yml`, not `.github/workflows/release.yml`.
+* **Environment name must match exactly.** Blank is not the same as `release`.
+* **A mismatch fails with an OIDC error that does not name the wrong field.** Re-read
+  the table rather than guess.
+* **A pending publisher does not reserve the name.** Nothing does, on any of the three
+  registries — first publish wins. See step 5.
 
 ### 5. Check the names are still free
 

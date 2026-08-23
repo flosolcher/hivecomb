@@ -254,7 +254,13 @@ jobs:
     name: PyPI (hivecomb-beem)
     needs: guard
     runs-on: ubuntu-latest
-    environment: release
+    # A separate environment, forced by PyPI: it permits only one *pending*
+    # publisher per (owner, repository, workflow, environment), so two pending
+    # publishers differing only in project name are rejected with "already been
+    # registered for a different project name". Giving this job its own
+    # environment makes the two configurations distinct. It holds no secrets --
+    # trusted publishing needs none.
+    environment: release-beem
     permissions:
       # `contents: read` must be repeated here. A job-level permissions block
       # REPLACES the workflow-level one rather than adding to it, so declaring only
