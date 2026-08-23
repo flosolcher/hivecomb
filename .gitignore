@@ -1,35 +1,33 @@
-/target
-**/*.rs.bk
-# Cargo.lock IS committed, deliberately. The old advice not to commit it for a
-# library is out of date: it is ignored by downstream consumers either way, and
-# committing it makes CI reproducible, lets `cargo audit` see exact versions, and
-# makes the declared MSRV mean something -- without it, dependencies resolve to
-# whatever is newest and the floor moves on its own.
-.idea/
-__pycache__/
-*.so
-*.pyd
-.venv/
-dist/
 
-# Node addon build output and dependencies
-node_modules/
-*.node
-hivecomb-node/index.js
-hivecomb-node/index.d.ts
-package-lock.json
-
-# Secrets. Nothing holding a private key may ever be committed — this repo is
 # about to be public, and git history keeps what you delete.
+# cargo-fuzz working state. The targets are committed; the corpus and the crashes
+# Cargo.lock IS committed, deliberately. The old advice not to commit it for a
+# committing it makes CI reproducible, lets `cargo audit` see exact versions, and
+dist/
 .env
 .env.*
 !.env.example
-*.wif
-wallet.json
-
-# cargo-fuzz working state. The targets are committed; the corpus and the crashes
-# it finds are not — a crash artifact belongs in a bug report, not in git.
-fuzz/target/
-fuzz/corpus/
 fuzz/artifacts/
+fuzz/corpus/
 fuzz/coverage/
+fuzz/target/
+hivecomb-node/index.d.ts
+hivecomb-node/index.js
+.idea/
+# it finds are not — a crash artifact belongs in a bug report, not in git.
+# library is out of date: it is ignored by downstream consumers either way, and
+# makes the declared MSRV mean something -- without it, dependencies resolve to
+*.node
+# Node addon build output and dependencies
+node_modules/
+package-lock.json
+__pycache__/
+*.pyd
+**/*.rs.bk
+# Secrets. Nothing holding a private key may ever be committed — this repo is
+*.so
+/target
+.venv/
+wallet.json
+# whatever is newest and the floor moves on its own.
+*.wif

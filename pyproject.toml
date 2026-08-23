@@ -33,11 +33,9 @@ manifest-path = "hivecomb-py/Cargo.toml"
 module-name = "hivecomb"
 # abi3 so one wheel per platform covers CPython 3.8+.
 features = ["pyo3/extension-module"]
-# PEP 561: ship the stubs and the marker beside the extension, so a consumer's type
-# checker sees a typed module instead of `Any`. An integrator had to cast the whole
-# module to `object` and hand-roll a hasattr check without these.
-include = [
-    { path = "hivecomb-py/hivecomb.pyi", format = "wheel" },
-    { path = "hivecomb-py/py.typed", format = "wheel" },
-]
+# PEP 561 requires py.typed and the stubs to live *inside* the importable package,
+# so they come from a python source tree rather than from `include` -- an included
+# file keeps its repo path in the wheel, which put them outside `hivecomb/` where no
+# type checker would ever look.
+python-source = "python-src"
 strip = true
