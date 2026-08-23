@@ -55,7 +55,25 @@ click.
 
 ### 3. npm
 
-1. Account at npmjs.com. Enable 2FA.
+1. Account at npmjs.com. Enable 2FA — then set its **mode** deliberately, because the
+   default blocks CI.
+
+   `Account → Two-Factor Authentication` offers roughly two levels:
+
+   * **Authorization and writes** — 2FA is required to publish as well as to log in.
+     A CI job cannot satisfy this: it hangs waiting for a one-time password nobody
+     can type.
+   * **Authorization only** — 2FA guards login and account changes; publishing is
+     authorised by the token alone. **This is the one CI needs.**
+
+   Be clear about what that trades: on "authorization only" the npm token becomes the
+   sole credential for publishing, so its scope and its expiry are the compensating
+   control rather than paperwork. Keep 2FA itself on — this is about which *actions*
+   it gates, not about turning it off.
+
+   There is a second, per-package switch of the same kind, which only appears once a
+   package exists. If a later publish starts demanding an OTP even though the account
+   setting is right, check the package's own settings.
 2. `Access Tokens → Generate New Token`. npm has retired Classic tokens in favour of
    **Granular Access Tokens**, so that is what you get. Settings that matter:
 
