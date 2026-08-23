@@ -218,7 +218,7 @@ Everything else in that module is right, including the part beem gets wrong: xyl
 
 The Rust comparison above is only half the picture, because `hivecomb` also ships a
 Python module and a beem-compatible layer. The other library in that space is
-[hive-nectar](https://github.com/thecrazygm/hive-nectar) 1.0.7, by Michael Garcia.
+[hive-nectar](https://github.com/srbde/hive-nectar) 1.0.7, by Michael Garcia.
 
 It is worth being precise about the relationship, because the obvious framing — pure
 Python against Rust — is wrong.

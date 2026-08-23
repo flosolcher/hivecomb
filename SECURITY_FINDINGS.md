@@ -47,6 +47,12 @@ Thirteen findings do carry forward: [9](#9), [10](#10), [11](#11), [12](#12),
 and [25](#25). Of those, [22](#22) and [23](#23) are the ones that change **signed**
 bytes, and [25](#25) is the wallet KDF.
 
+Thirteen findings, fourteen distinct sites: [22](#22) lands twice, on `Escrow_release`
+and on `Escrow_dispute`, and the operation table is a partial carry-forward — nectar
+fixed the numbering ([2](#2)) but the table is still 85 entries against hived's 93, with
+retired names at ids 16, 67 and 74. The report sent upstream lists the sites, not the
+finding numbers.
+
 This paragraph previously led with `unicodify` ([8](#8)) as the widest-blast-radius
 finding carried into nectar. That finding has been **retracted** — beem and nectar are
 both right and this crate was wrong. It was never reported to nectar; the retraction

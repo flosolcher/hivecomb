@@ -489,7 +489,7 @@ And `verify()` checks the recovered key against the account's memo key **and ret
 result** — beem's `verify_message` computed a tautology and threw it away
 ([finding 6](SECURITY_FINDINGS.md#6)).
 
-Verified interoperable with [hive-nectar](https://github.com/thecrazygm/hive-nectar) in
+Verified interoperable with [hive-nectar](https://github.com/srbde/hive-nectar) in
 both directions: nectar verifies a signature produced here, and this recovers the signer
 of one produced there.
 

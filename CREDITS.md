@@ -85,8 +85,9 @@ implementation's output.
 
 ## Honourable mention — hive-nectar
 
-**[hive-nectar](https://github.com/thecrazygm/hive-nectar)** — by **Michael Garcia**
-(`thecrazygm`). MIT. 1.0.7 at the time of writing.
+**[hive-nectar](https://github.com/srbde/hive-nectar)** — by **Michael Garcia**
+(`thecrazygm`), now under the **SRBDE** organisation alongside xylem and
+nectarengine. MIT. 1.0.7 at the time of writing.
 
 beem's actively maintained successor, and the one this project owes the most to after
 beem itself. Its own README puts it plainly: *"If you are using beem, Nectar is where
