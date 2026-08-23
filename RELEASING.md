@@ -15,7 +15,12 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 
 ---
 
-## One-time setup, none of which is done yet
+## One-time setup
+
+Status as of 2026-08-23: the `release` environment exists, and both
+`CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` are environment secrets on it. **PyPI is not
+configured**, and no token has been proven to work — the checks that would prove them
+need Actions, which is unavailable (see the note under *Before each release*).
 
 Do these in order. Step 1 has to come first because everything else names it.
 
