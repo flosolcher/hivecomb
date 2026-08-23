@@ -572,9 +572,11 @@ def _():
     import ast
     import os
 
+    # python-src/hivecomb/__init__.pyi, because PEP 561 needs the stubs inside the
+    # importable package rather than wherever the repo happens to keep them.
     stub_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "hivecomb-py", "hivecomb.pyi",
+        "python-src", "hivecomb", "__init__.pyi",
     )
     if not os.path.exists(stub_path):
         raise AssertionError(f"no stub at {stub_path}")
