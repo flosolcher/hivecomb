@@ -33,7 +33,15 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 
 ## Before each release
 
-- [ ] CI green on `main`.
+- [ ] **CI green on `main`, on a run that includes the commit you are tagging.**
+      Not "it passed last week". Local passing is weak evidence here: CI has caught
+      a false MSRV, macOS PyO3 linking, a PowerShell-hostile glob, clippy lints from
+      a newer toolchain, CRLF corruption of the SHA-pinned word lists, a broken
+      feature flag and two dependency advisories — none of which reproduced on the
+      development machine. Do not publish on local evidence alone.
+- [ ] If Actions is unavailable (billing, quota), that is a **blocker**, not an
+      inconvenience. Publishing three artifacts across five platforms without a
+      cross-platform run is how the first user finds the bug.
 - [ ] The live oracles green — they are scheduled, so check the last run rather than
       assuming. A red serialization oracle means the chain and this library disagree,
       which is a reason not to ship.

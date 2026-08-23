@@ -217,6 +217,8 @@ def main():
     # hive-js, dhive and Keychain all write. Most messages survive on both sides
     # because the fallback paths fire; a message whose first byte reads as a valid
     # length for the rest does not, and beem loses that byte against its own encoder.
+    # Published on purpose, used by no Hive account in any role (checked against
+    # condenser_api.get_key_references, 2026-08-23).
     bob_wif = "5J4KCbg1G3my9b9hCaQXnHSm6vrwW9xQTJS6ZciW2Kek7cCkCEk"
     bob = BeemPrivateKey(bob_wif)
     bob_pub = format(bob.pubkey, "STM")
