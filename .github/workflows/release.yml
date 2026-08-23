@@ -10,8 +10,12 @@
 #
 # One-time setup before the first real release:
 #
-#   crates.io  a CARGO_REGISTRY_TOKEN secret with publish scope
-#   npm        an NPM_TOKEN secret (automation token)
+#   crates.io  CARGO_REGISTRY_TOKEN, an *environment* secret on `release` with
+#              publish-new and publish-update scope. A secret, not a variable:
+#              variable values are returned by the API and printed verbatim in
+#              logs, which are public once this repository is.
+#   npm        NPM_TOKEN, likewise an environment secret. Automation type -- a
+#              Publish token prompts for 2FA and the job hangs.
 #   PyPI       trusted publishing configured for BOTH projects, `hivecomb` and
 #              `hivecomb-beem`, each pointing at this repository and the
 #              environment named below. No token is stored for PyPI.

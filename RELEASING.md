@@ -37,16 +37,30 @@ click.
 3. Scopes: **`publish-new`** and **`publish-update`**. Leave the crate scope
    unrestricted for the first release — you cannot scope a token to a crate that does
    not exist yet. After 0.1.0 is out, replace it with one scoped to `hivecomb` alone.
-4. Add it to the **`release` environment** (not repository-wide) as
-   **`CARGO_REGISTRY_TOKEN`**. Environment secrets are only readable by jobs that
-   declare that environment, so a compromised unrelated workflow cannot reach it.
+4. Add it as an **environment secret** — `Settings → Environments → release →
+   Add environment secret` — named **`CARGO_REGISTRY_TOKEN`**.
+
+   **A secret, not a variable.** GitHub environments hold both, and the difference
+   matters here: secret values are never returned by the API and are automatically
+   masked to `***` in workflow logs. Variable values are returned by the API and are
+   printed verbatim. Once this repository is public its workflow logs are public and
+   permanent, so one `set -x`, one crashing tool that dumps its environment, or one
+   `curl -v` would put a publish token where anyone can read it. Revoking the token
+   afterwards does not remove the log entry.
+
+   **An environment secret, not a repository secret.** Repository secrets are readable
+   by every workflow, including `ci.yml`, which runs on pull requests and has no
+   business holding a publish token. Environment secrets are readable only by jobs
+   that declare `environment: release` — which is exactly the four publish jobs.
 
 ### 3. npm
 
 1. Account at npmjs.com. Enable 2FA.
 2. `Access Tokens → Generate New Token → Classic → **Automation**`. Automation is the
    one that works from CI; a Publish token will prompt for 2FA and the job will hang.
-3. Add to the **`release` environment** as **`NPM_TOKEN`**.
+3. Add it as an **environment secret** on `release`, named **`NPM_TOKEN`** — a
+   secret rather than a variable, and on the environment rather than the repository,
+   for the reasons in step 2.
 
 Nothing needs claiming ahead of time — the first publish creates `hivecomb` and the five
 per-platform packages (`hivecomb-linux-x64-gnu` and friends) together.
