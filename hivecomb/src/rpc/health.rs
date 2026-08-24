@@ -35,6 +35,25 @@
 //!   404 on `account_history_api`, which is common when an operator runs a partial
 //!   node. Cooling that pair, rather than the whole node, keeps the node useful for
 //!   everything else.
+//! # A note on how these are tested
+//!
+//! Arithmetic that decides an outcome — the projection, the reference, the gap — lives
+//! in free functions ([`project`], `best_of`, `blocks_behind`) so tests can exercise the
+//! production code rather than a copy of it. That is not tidiness. An earlier version of
+//! the sweep recomputed the reference and the gap inline, and the mutation that stopped
+//! `is_stale` flooring the gap went straight past it: the test kept asserting a bound
+//! the system no longer had, because the test's own copy still floored.
+//!
+//! Arithmetic that *constructs the scenario* is a different thing and stays in the
+//! tests — working out what head a chain is at, at a given instant, is the world the
+//! test builds, not behaviour under test. So is
+//! `the_timeout_bounds_the_artefact_below_the_threshold`, which asserts a relationship
+//! between two configured defaults that no production code computes.
+//!
+//! The distinction is worth holding: a test that reimplements what it checks cannot
+//! fail, and a test whose name claims an arc while its body checks one step cannot
+//! notice. Both were found here, one of each.
+//!
 //! # Recovery is expiry, not a state machine
 //!
 //! There is no demotion list, no probation and no half-open state. A cooldown is one
@@ -278,7 +297,7 @@ impl NodeState {
 ///
 /// A free function because the interesting property here is arithmetic, and testing it
 /// through the tracker would need a controllable clock — see
-/// `the_projection_is_never_more_than_one_block_from_the_truth`.
+/// `nodes_that_are_in_sync_never_appear_behind_at_all`.
 ///
 /// # Why the age stays fractional, and the *gap* is floored instead
 ///
@@ -317,6 +336,29 @@ impl NodeState {
 /// `threshold + 1` can floor back to `threshold` when the lagging node's reading happens
 /// to be a shade older. The effective threshold is somewhere in
 /// `(threshold, threshold + 1]`, erring toward not demoting.
+/// The highest of a set of projections, or `None` if there are none.
+///
+/// A fold rather than `max`, because projections are fractional and `f64` is not `Ord`.
+fn best_of(projections: impl Iterator<Item = f64>) -> Option<f64> {
+    projections.fold(None, |acc, v| match acc {
+        Some(a) if a >= v => Some(a),
+        _ => Some(v),
+    })
+}
+
+/// How many whole blocks `mine` is behind `best`.
+///
+/// Floored *here*, at the comparison, and deliberately not at the projections — see
+/// [`project`] for why that is the difference between a one-block residual and none.
+fn blocks_behind(best: f64, mine: f64) -> u64 {
+    let gap = (best - mine).floor();
+    if gap <= 0.0 {
+        0
+    } else {
+        gap as u64
+    }
+}
+
 fn project(head: u64, age: Duration, interval: Duration) -> f64 {
     let interval = interval.as_secs_f64();
     if interval <= 0.0 {
@@ -399,13 +441,7 @@ impl HealthTracker {
     /// With no fresh observation at all this is `None`, and nothing can be judged stale
     /// — the correct answer, not a reason to guess.
     fn best_projected(&self, state: &[NodeState], now: Instant) -> Option<f64> {
-        state
-            .iter()
-            .filter_map(|s| self.projected(s, now))
-            .fold(None, |acc, v| match acc {
-                Some(a) if a >= v => Some(a),
-                _ => Some(v),
-            })
+        best_of(state.iter().filter_map(|s| self.projected(s, now)))
     }
 
     /// This node's head, aged forward to now, if the observation is still fresh.
@@ -417,13 +453,7 @@ impl HealthTracker {
         let (Some(best), Some(mine)) = (best_head, self.projected(s, now)) else {
             return false;
         };
-        // Floor the *gap*, not the projections. Keeping the age fractional until here is
-        // what makes the bound exact: every in-sync node projects to the true head minus
-        // its own fractional offset, so the spread across them is a difference of two
-        // fractions and floors to zero. Flooring each projection first discards exactly
-        // the term that cancels, which is where a residual block came from.
-        let gap = (best - mine).floor();
-        gap > self.policy.stale_block_threshold as f64
+        blocks_behind(best, mine) > self.policy.stale_block_threshold
     }
 
     /// Record that `index` answered `method`.
@@ -590,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn the_projection_is_never_more_than_one_block_from_the_truth() {
+    fn nodes_that_are_in_sync_never_appear_behind_at_all() {
         // The bound that makes slow-but-alive nodes a non-event here, swept rather than
         // sampled. Every node is genuinely in sync; each reads the chain at its own
         // arrival, and they are compared at the instant the last one lands.
@@ -622,12 +652,14 @@ mod tests {
                     })
                     .collect();
 
-                // The gap as `is_stale` computes it: floored at comparison, not at
-                // projection.
-                let best = projections.iter().copied().fold(f64::MIN, f64::max);
+                // The production reference and the production gap, not a copy of
+                // either. An earlier version of this test recomputed both inline, and
+                // the mutation that stopped `is_stale` flooring the gap sailed straight
+                // past it -- the test was asserting a bound the system no longer had.
+                let best = best_of(projections.iter().copied()).expect("non-empty");
                 let worst_here = projections
                     .iter()
-                    .map(|p| (best - p).floor() as u64)
+                    .map(|p| blocks_behind(best, *p))
                     .max()
                     .expect("non-empty");
                 worst = worst.max(worst_here);
