@@ -91,6 +91,23 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  docs:
+    name: documentation says what is true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Counts in the documentation drift silently: each is true the day it is
+      # typed and nobody re-reads it. On 2026-08-24 the same test count appeared
+      # as 292, 295 and 305 across four files while the real number was 337.
+      # These figures sit beside comparisons with other people's projects, so
+      # they are checked rather than trusted. Also verifies that every local
+      # link and anchor resolves, because a claim about another project is
+      # supposed to link to its evidence.
+      - name: documented figures, links and duplicated tables
+        run: python3 tests/doc_stats.py
+
   python:
     name: python ${{ matrix.python }}
     runs-on: ubuntu-latest

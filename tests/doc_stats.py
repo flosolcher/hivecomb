@@ -74,6 +74,83 @@ def rust_source_lines():
     )
 
 
+def slug(heading):
+    """GitHub's anchor for a heading: lowercase, punctuation dropped, spaces hyphened."""
+    text = heading.lstrip("#").strip()
+    kept = "".join(c for c in text.lower() if c.isalnum() or c in " -_")
+    return kept.strip().replace(" ", "-")
+
+
+def check_links(files):
+    """Every local link and anchor in the documentation resolves.
+
+    The comparison documents cross-reference each other heavily -- a claim about
+    another project is supposed to link to its evidence -- so a link that quietly
+    404s is the same class of defect as a number that quietly drifted.
+    """
+    import re as _re
+
+    anchors = {}
+    for name in files:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        found = {slug(line) for line in text.splitlines() if line.startswith("#")}
+        # Explicit anchors too. SECURITY_FINDINGS.md numbers its findings and refers
+        # to them as `[14](#14)`, which no heading slug will ever produce, so each
+        # carries an <a id="14"> of its own.
+        found |= set(_re.findall(r'<a\s+(?:id|name)="([^"]+)"', text))
+        anchors[name] = found
+
+    problems = []
+    for name in files:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        for label, target in _re.findall(r"\[([^\]]+)\]\(([^)]+)\)", text):
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue
+            path, _, anchor = target.partition("#")
+            if path:
+                dest = (ROOT / name).parent / path
+                if not dest.exists():
+                    problems.append(f"{name}: [{label}] -> {target} (no such file)")
+                    continue
+                key = str(dest.resolve().relative_to(ROOT))
+            else:
+                key = name
+            if anchor and key in anchors and anchor not in anchors[key]:
+                problems.append(f"{name}: [{label}] -> {target} (no such heading)")
+    return problems
+
+
+def check_tables_agree():
+    """The beem speed table appears in two READMEs. They must not drift apart.
+
+    Keeping one copy would be tidier, but python/README.md is the PyPI long
+    description for `hivecomb-beem` and has to stand on its own there. So both
+    stay, and the duplication is made unable to rot instead of being argued about.
+    """
+    import re as _re
+
+    rows = {}
+    for name in ("README.md", "python/README.md"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        rows[name] = dict(
+            _re.findall(r"\| (sign a [^|]+|serialize and digest[^|]*) \| ([^|]+) \|", text)
+        )
+    a, b = rows["README.md"], rows["python/README.md"]
+    shared = set(a) & set(b)
+    if not shared:
+        return [
+            "README.md and python/README.md share no benchmark rows. Either the tables "
+            "were reworded or this check is looking for the wrong thing -- an empty "
+            "comparison is not a passing one."
+        ]
+    return [
+        f"the '{k.strip()}' row differs: README says {a[k].strip()}, "
+        f"python/README says {b[k].strip()}"
+        for k in sorted(shared)
+        if a[k].strip() != b[k].strip()
+    ]
+
+
 def main():
     print("measuring what is actually true ...")
     lib = cargo_test_count(["-p", "hivecomb", "--all-features", "--lib"])
@@ -137,6 +214,28 @@ def main():
             )
         else:
             print(f"  ok  {filename}: {what} = {actual:,}")
+
+    DOCS = [
+        "README.md",
+        "COMPARISON.md",
+        "MIGRATION.md",
+        "SECURITY_FINDINGS.md",
+        "CHANGELOG.md",
+        "CREDITS.md",
+        "CONTRIBUTING.md",
+        "python/README.md",
+    ]
+    link_problems = check_links(DOCS)
+    for problem in link_problems:
+        failures.append(problem)
+    if not link_problems:
+        print(f"  ok  every local link and anchor across {len(DOCS)} documents resolves")
+
+    table_problems = check_tables_agree()
+    for problem in table_problems:
+        failures.append(problem)
+    if not table_problems:
+        print("  ok  the beem benchmark table agrees between README.md and python/README.md")
 
     if failures:
         print("\nthe documentation disagrees with the code:\n")

@@ -1,16 +1,77 @@
-# hivecomb and the other Rust Hive libraries
+# Comparisons
 
-`hivecomb` is not the first Rust library for Hive. This document says what the others do,
-what `hivecomb` took from looking at them, and — since the question deserves a straight
-answer — **which is actually more mature**.
+`hivecomb` is a port. The protocol knowledge in it was worked out by other people over
+roughly a decade, and [CREDITS.md](CREDITS.md) records who. This document sets it beside
+three libraries it came from or sits next to — [`hive-xylem`](https://github.com/srbde/hive-xylem)
+in Rust, [`hive-nectar`](https://github.com/srbde/hive-nectar) in Python and
+[`dhive`](https://github.com/openhive-network/dhive) in Node — and for each one says what
+this project took from it, where each is ahead, and what the measurements show.
 
-Everything here was measured on 2026-08-22 against
-[`hive-xylem` 0.1.6](https://github.com/srbde/hive-xylem) at commit
-`2026-07-18`. Numbers move; re-measure before relying on them.
+## How to read this
+
+A comparison document written by one of the projects being compared is worth reading
+sceptically, so here are the rules it is written under.
+
+**Every claim about another project links to the evidence for it.** A count of defects,
+a "does not have this", a benchmark — each says where it comes from and how to check it.
+Claims about someone else's code that cannot be checked do not belong here.
+
+**This project has already got one of those wrong.** [Finding 8](SECURITY_FINDINGS.md#8)
+was published as a High-severity defect in beem's string serialization. It was wrong —
+beem was right and this crate was not — and it was retracted, in place, with the
+reasoning left visible rather than deleted. It was never sent to nectar, which had
+inherited the same code, because the retraction happened first. That is the standard the
+rest of this document is trying to meet, and the reason the claims here are checked
+against the other library rather than reasoned about.
+
+**Where another project is ahead, it says so.** xylem is published and this crate is not.
+nectar is more mature than this project's Python side by every measure that can be
+counted. dhive beats hivecomb at serializing large batches, and the reason is structural
+rather than fixable. Those are in here as plainly as the rest.
+
+**Feature counts are not maturity.** The tables below count operations, tests and lines,
+because those are what can be counted. Production exposure is what actually separates a
+mature library from a thorough one, and on that measure this crate is the least proven of
+the four.
+
+## How the measurements were taken
+
+Every benchmark here is reproducible from a script in `tests/`, named in its section.
+
+Runs are pinned to one core, and both sides are measured in the same process on the same
+inputs, alternating so that CPU frequency drift hits both equally. The payload varies on
+every iteration: signing grinds until the signature is canonical, and how many attempts
+that takes depends on the digest, so a fixed payload measures one payload's luck — and
+taking medians over a fixed payload makes that result *stable*, which hides the bias
+rather than removing it.
+
+Two estimators appear, and the difference matters when reading across sections:
+
+| section | estimator | why |
+|---|---|---|
+| Python (beem, nectar) | median of seven one-second windows | matches how those harnesses have always reported |
+| Node (dhive) | minimum of 11–15 interleaved windows | interference can only make a window slower, so the fastest is closest to the true cost |
+
+**Do not compare a number from one table against a number from another.** They answer
+the same question with different estimators on different runtimes.
+
+The machine's CPU governor is `powersave`, which is not fixable without root, so the Node
+harness prints its own window spread (3–8% on the runs quoted) rather than asking to be
+trusted. Nothing here was measured on a quiet, tuned benchmarking machine, and none of
+these gaps is small enough for that to change the ordering.
+
+**Before any timing, both sides are checked to produce the same result.** A benchmark of
+two implementations that disagree measures nothing. Every harness aborts on a mismatch
+rather than printing a table.
 
 ---
 
-## The libraries
+## Rust: hive-xylem
+
+Measured on 2026-08-22 against [`hive-xylem` 0.1.6](https://github.com/srbde/hive-xylem)
+at commit `2026-07-18`. Numbers move; re-measure before relying on them.
+
+### The libraries
 
 | crate | version | downloads | what it is |
 |---|---|---|---|
@@ -23,7 +84,113 @@ Everything here was measured on 2026-08-22 against
 
 ---
 
-## Is xylem more mature than hivecomb?
+### What hivecomb took from xylem
+
+Reading xylem changed six things here. They are listed before the comparison table
+below because they are the part of this section that cost someone else effort: each
+was a gap in this crate that xylem had already thought about, and finding them is why
+the comparison was worth doing at all.
+
+Each was written independently rather than copied. xylem is MIT/Apache-2.0 so copying
+would have been permitted; the rest of this crate is written to its own conventions.
+
+#### 1. Authority satisfaction — `Authority::check`
+
+Given a set of public keys, does it satisfy an authority? `hivecomb` had
+`is_satisfiable()` (*can* these weights ever reach the threshold) but not *do these
+keys reach it*.
+
+xylem's `verify_authority` counts `key_auths` and **ignores `account_auths`**, so an
+authority satisfied through a delegated account reports `false`. `hivecomb`'s version
+reports that case as *inconclusive* instead:
+
+```rust
+let check = account.posting.check(&keys);
+check.satisfied            // definitely satisfied, from keys alone
+check.is_conclusive()      // false => depends on accounts not looked up
+check.unresolved_accounts  // the delegations that were not followed
+```
+
+That distinction is not academic. Checked against `@hiveio`'s live posting authority,
+which delegates to `@threespeak` and `@vimm.app`, a stranger's key gives
+`satisfied: false, conclusive: false` — because the honest answer is "not from these
+keys alone", not "no". Most active Hive accounts share posting rights this way.
+
+Exposed as `hivecomb.check_authority()` in Python, `Account.verify_account_authority()` in
+the beem layer, and `beempy verifyauthority`.
+
+#### 2. `get_ops_in_block` — the only route to virtual operations
+
+Virtual operations are emitted by consensus, not carried in a transaction, so they are
+**not in `block_api.get_block` at all**. Filtering a block's transactions for them
+returns nothing rather than erroring — which is exactly what `beempy virtualops` did
+before this was found.
+
+Added as `NodeClient::ops_in_block` / `ops_in_block_range` in Rust,
+`Blockchain.get_ops_in_block` in Python, and `beempy opsinblock --virtual`.
+
+#### 3. Block streaming in Rust
+
+`hivecomb` had streaming in Python but not in Rust. `NodeClient::stream_blocks` is a lazy
+iterator with `StreamMode::Irreversible` (the default worth having: about a minute
+behind, but the blocks cannot be orphaned) and `StreamMode::Head`.
+
+It **yields an error item rather than ending** when a call fails, so a transient outage
+does not silently terminate a stream — which is the kind of failure that looks like
+"the chain went quiet".
+
+#### 4. Exponential backoff
+
+`NodeClient` tried each node once per call. It can now retry the whole list with
+backoff, capped at 30s. The default is still **one pass**, because a call on a deadline
+— a submit window — should fail fast and let the caller decide; multiple passes suit a
+background task. Same in the Python client.
+
+#### 5. Reputation, and follow/mute helpers
+
+Small conveniences xylem had that `hivecomb` only had on the Python side.
+
+#### 6. An async layer — but for a different reason, and doing more
+
+Reading xylem prompted the question, and the answer turned out to be more specific than
+"Rust services are async".
+
+Signing in `hivecomb` needs no network, so async buys nothing there. It buys something
+on **broadcast**, which is a real call and is often inside a deadline. Sequential
+failover — what `hivecomb` did and what **xylem also does** — has a worst case of *the
+sum of the timeouts*. Three sick nodes at fifteen seconds each is forty-five seconds
+before the fourth is even tried, and a transaction that misses its window is simply
+lost.
+
+Racing removes that: fire at several nodes at once, take the first answer, worst case
+one timeout. `AsyncNodeClient::race` is it, and expressing it is the reason the layer is
+async at all.
+
+Two differences from xylem's async design:
+
+* **Runtime-agnostic.** The trait uses `-> impl Future` rather than a boxed
+  `#[async_trait]`, and the retry backoff takes a caller-supplied sleep, so tokio,
+  async-std and smol all work. xylem is Tokio-locked. `hivecomb`'s `async` feature pulls
+  in `futures-util` and no executor at all; `reqwest-transport` is the opt-in
+  batteries-included path.
+* **Racing the same request across nodes**, which xylem does not do. It uses
+  concurrency well elsewhere — `get_ops_in_block_range` fans out with a semaphore-bounded
+  `join_all`, the same shape as `hivecomb`'s `AsyncNodeClient::blocks` — but its
+  *failover* is still one node at a time (`client.rs:60`, a loop over the node list with
+  rotation and backoff). So it keeps the sum-of-timeouts worst case that async was the
+  opportunity to remove.
+
+Measured with two dead nodes in front of a working one, through the Python client's
+threaded equivalent: **878 ms racing against 3,366 ms sequential.** The Rust tests
+assert the same property on a paused virtual clock — one timeout versus the sum.
+
+The sync path keeps sequential failover as its default, and the core still builds with
+`--no-default-features` into keys, serialization and signing with no HTTP client and no
+executor.
+
+---
+
+### Is xylem more mature than hivecomb?
 
 **On the one measure that matters most — production exposure — neither is mature, and
 xylem is slightly ahead of hivecomb.** It is published on crates.io with five releases;
@@ -71,109 +238,7 @@ be dishonest to present them as such.
 
 ---
 
-## What hivecomb changed after reading xylem
-
-Five gaps, all now closed. Each was written independently rather than copied; xylem is
-MIT/Apache-2.0, so copying would have been permitted, but the rest of this crate is
-written to its own conventions.
-
-### 1. Authority satisfaction — `Authority::check`
-
-Given a set of public keys, does it satisfy an authority? `hivecomb` had
-`is_satisfiable()` (*can* these weights ever reach the threshold) but not *do these
-keys reach it*.
-
-xylem's `verify_authority` counts `key_auths` and **ignores `account_auths`**, so an
-authority satisfied through a delegated account reports `false`. `hivecomb`'s version
-reports that case as *inconclusive* instead:
-
-```rust
-let check = account.posting.check(&keys);
-check.satisfied            // definitely satisfied, from keys alone
-check.is_conclusive()      // false => depends on accounts not looked up
-check.unresolved_accounts  // the delegations that were not followed
-```
-
-That distinction is not academic. Checked against `@hiveio`'s live posting authority,
-which delegates to `@threespeak` and `@vimm.app`, a stranger's key gives
-`satisfied: false, conclusive: false` — because the honest answer is "not from these
-keys alone", not "no". Most active Hive accounts share posting rights this way.
-
-Exposed as `hivecomb.check_authority()` in Python, `Account.verify_account_authority()` in
-the beem layer, and `beempy verifyauthority`.
-
-### 2. `get_ops_in_block` — the only route to virtual operations
-
-Virtual operations are emitted by consensus, not carried in a transaction, so they are
-**not in `block_api.get_block` at all**. Filtering a block's transactions for them
-returns nothing rather than erroring — which is exactly what `beempy virtualops` did
-before this was found.
-
-Added as `NodeClient::ops_in_block` / `ops_in_block_range` in Rust,
-`Blockchain.get_ops_in_block` in Python, and `beempy opsinblock --virtual`.
-
-### 3. Block streaming in Rust
-
-`hivecomb` had streaming in Python but not in Rust. `NodeClient::stream_blocks` is a lazy
-iterator with `StreamMode::Irreversible` (the default worth having: about a minute
-behind, but the blocks cannot be orphaned) and `StreamMode::Head`.
-
-It **yields an error item rather than ending** when a call fails, so a transient outage
-does not silently terminate a stream — which is the kind of failure that looks like
-"the chain went quiet".
-
-### 4. Exponential backoff
-
-`NodeClient` tried each node once per call. It can now retry the whole list with
-backoff, capped at 30s. The default is still **one pass**, because a call on a deadline
-— a submit window — should fail fast and let the caller decide; multiple passes suit a
-background task. Same in the Python client.
-
-### 5. Reputation, and follow/mute helpers
-
-Small conveniences xylem had that `hivecomb` only had on the Python side.
-
-### 6. An async layer — but for a different reason, and doing more
-
-Reading xylem prompted the question, and the answer turned out to be more specific than
-"Rust services are async".
-
-Signing in `hivecomb` needs no network, so async buys nothing there. It buys something
-on **broadcast**, which is a real call and is often inside a deadline. Sequential
-failover — what `hivecomb` did and what **xylem also does** — has a worst case of *the
-sum of the timeouts*. Three sick nodes at fifteen seconds each is forty-five seconds
-before the fourth is even tried, and a transaction that misses its window is simply
-lost.
-
-Racing removes that: fire at several nodes at once, take the first answer, worst case
-one timeout. `AsyncNodeClient::race` is it, and expressing it is the reason the layer is
-async at all.
-
-Two differences from xylem's async design:
-
-* **Runtime-agnostic.** The trait uses `-> impl Future` rather than a boxed
-  `#[async_trait]`, and the retry backoff takes a caller-supplied sleep, so tokio,
-  async-std and smol all work. xylem is Tokio-locked. `hivecomb`'s `async` feature pulls
-  in `futures-util` and no executor at all; `reqwest-transport` is the opt-in
-  batteries-included path.
-* **Racing the same request across nodes**, which xylem does not do. It uses
-  concurrency well elsewhere — `get_ops_in_block_range` fans out with a semaphore-bounded
-  `join_all`, the same shape as `hivecomb`'s `AsyncNodeClient::blocks` — but its
-  *failover* is still one node at a time (`client.rs:60`, a loop over the node list with
-  rotation and backoff). So it keeps the sum-of-timeouts worst case that async was the
-  opportunity to remove.
-
-Measured with two dead nodes in front of a working one, through the Python client's
-threaded equivalent: **878 ms racing against 3,366 ms sequential.** The Rust tests
-assert the same property on a paused virtual clock — one timeout versus the sum.
-
-The sync path keeps sequential failover as its default, and the core still builds with
-`--no-default-features` into keys, serialization and signing with no HTTP client and no
-executor.
-
----
-
-## A defect found in xylem while comparing
+### A defect found in xylem while comparing
 
 Reported here because it is verifiable and because it affects interoperability. It is
 not a criticism of the project — it is the kind of thing differential testing exists to
@@ -214,7 +279,7 @@ Everything else in that module is right, including the part beem gets wrong: xyl
 
 ---
 
-## The Python comparison: hive-nectar
+## Python: hive-nectar
 
 The Rust comparison above is only half the picture, because `hivecomb` also ships a
 Python module and a beem-compatible layer. The other library in that space is
@@ -241,6 +306,25 @@ These are **alternatives, not rivals**. The real distinction is where the protoc
 logic lives — readable and patchable in place in nectar, faster and memory-safe in
 `hivecomb` — and which of those matters more depends on who is holding it.
 
+### What hivecomb took from nectar
+
+**How the beem findings get disclosed.** An earlier draft of
+[SECURITY_FINDINGS.md](SECURITY_FINDINGS.md) argued that publishing was the only option
+because beem has no maintainer to report to. nectar carries beem's package layout
+forward and is actively maintained, so there *is* somewhere for those findings to go.
+The document was rewritten around that, and the surviving findings were reported to
+nectar rather than only published here. That correction came from reading nectar.
+
+**The signed-message envelope.** `python/beem/message.py` was written to match, and
+`tests/nectar_message_interop.py` checks it against nectar rather than against this
+project's own expectations.
+
+**A finding withdrawn before it was sent.** [Finding 8](SECURITY_FINDINGS.md#8) had been
+published against beem and was about to be reported to nectar as an inherited defect.
+Checking it against hived first showed it was wrong in both projects' favour — see
+[what nectar found first](#what-this-project-found-in-nectar-and-what-nectar-found-first)
+below.
+
 **nectar is more mature than `hivecomb`'s Python side by every measure that can be
 counted.** It is published, at 1.0.7 rather than 0.1.0, and takes roughly 700 downloads
 a month against this project's zero. It is beem's designated successor and says so.
@@ -259,8 +343,8 @@ a month against this project's zero. It is beem's designated successor and says 
 | signed-message envelope (`Message`) | yes, V1 and V2 | yes, V1 and V2 |
 | image upload | yes | no |
 | verified against hived itself | no | 57/57 operations |
-| beem's crypto-critical defects | fixed | fixed |
-| beem's serialization defects | 13 carried forward | fixed |
+| beem's crypto-critical defects | [fixed independently, first](SECURITY_FINDINGS.md#the-findings-outlive-beem-so-there-is-someone-to-tell) | fixed |
+| beem's serialization defects | [13 carried forward](SECURITY_FINDINGS.md#the-findings-outlive-beem-so-there-is-someone-to-tell) | fixed |
 
 The `Message` row is checked rather than asserted: `tests/nectar_message_interop.py`
 loads both libraries in one interpreter and compares the V1 envelope constants, which
@@ -271,14 +355,12 @@ timestamp (`+00:00`), where beem used a naive `utcnow()` and this project keeps 
 rendering. Neither is wrong and signatures still verify across the two, because the
 verifier reads the timestamp out of the payload it was given.
 
-### Measured, on the same machine in the same interpreter
+### Measured
 
-Both libraries installed side by side on CPython 3.12, signing identical operations
-from identical inputs, pinned to one core. Median of seven one-second windows, because
-signature grinding — retrying until the signature is canonical — makes any single
-window noisy, and with the **payload varied on every call**, because a fixed payload
-repeats one payload's grind count for the whole run. Taking medians over a fixed
-payload makes the result *stable*, which hides that bias rather than removing it.
+Both libraries installed side by side on CPython 3.12, signing identical operations from
+identical inputs. Method as described in
+[How the measurements were taken](#how-the-measurements-were-taken): pinned, varying
+payload, **median** of seven one-second windows.
 
 Reproduce with `tests/bench_vs_nectar.py`, which checks both produce the same digest
 before timing anything and aborts if they do not.
@@ -357,20 +439,35 @@ more thoroughly than a workaround. And one finding this project published agains
 right, and `hivecomb` had "fixed" correct behaviour into a real bug of its own. That
 retraction is in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md#8).
 
-## The Node comparison: dhive
+## Node: dhive
 
 Measured against [`@hiveio/dhive`](https://github.com/openhive-network/dhive) 1.3.6 on
-Node 22, same process, same key, a real `custom_json` payload. The run is pinned to one
-core, A and B alternate window by window so frequency drift hits both equally, the
-payload varies on every iteration, and the reported figure is the **minimum** window —
-interference can only make a window slower, so the fastest one is closest to the true
-cost. Window spread was 3–8%, which is printed by the harness rather than assumed.
+Node 22, same process, same key, a real `custom_json` payload. Method as described in
+[How the measurements were taken](#how-the-measurements-were-taken), with the **minimum**
+window as the estimator — so these numbers are not comparable against the Python tables
+above, which use a median.
 
 Two things are checked before anything is timed: that both produce the same digest, and
 that **dhive itself recovers the correct public key from hivecomb's signature**. The two
 do *not* produce identical signature bytes, and that is correct rather than a defect —
 any canonical signature over the digest is valid and the two grind to different ones, so
 byte-equality would be the wrong test.
+
+### What hivecomb took from dhive
+
+**The node health tracker.** `NodeClient` walked its node list from the front on every
+call and remembered nothing, so a dead first node cost its full timeout on every request
+for the life of the process. dhive's `NodeHealthTracker` had already worked out what is
+worth remembering — consecutive failures per node, failures per node *and* API, and how
+far behind the head a node has fallen — and what the thresholds should be. That design,
+and its default numbers, are dhive's; the implementation here is independent and
+[diverges in two places](#the-gap-that-was-worth-closing-node-health) that are argued
+rather than assumed.
+
+**A measurement that overturned this document's own advice.** An outside evaluator
+benchmarking dhive against this crate measured the crossover point and found the adoption
+niche recorded here was backwards — see
+[what that means for a JavaScript adopter](#what-that-means-for-a-javascript-adopter).
 
 ### Signing a transaction — the call an application actually makes
 
@@ -598,6 +695,20 @@ in a library whose signing path deliberately has no network dependency at all.
 
 ## Credit
 
-`hive-xylem` is credited in [CREDITS.md](CREDITS.md). The comparison sharpened five
-parts of this crate, and finding a bug in someone else's careful work is a reason to
-say so publicly rather than quietly.
+All three are credited in [CREDITS.md](CREDITS.md), which is where the credit properly
+lives; this is what each comparison specifically gave back to this crate.
+
+**`hive-xylem`** sharpened six parts of it, and comparing against it turned up a defect
+in someone else's careful work — a reason to say so publicly, and upstream first, rather
+than quietly.
+
+**`hive-nectar`** changed how this project discloses the beem findings, supplied the
+reference for the signed-message envelope, and independently fixed beem's entire
+crypto-critical set before this project existed. It is also the library that would have
+received a finding that turned out to be wrong, had the retraction not come first.
+
+**`dhive`** contributed the design of the node health tracker, and an outside evaluator
+measuring against it corrected an adoption recommendation this document had published.
+
+None of this is a scoreboard. Three of the four libraries here are maintained by people
+who were solving these problems before this one existed, and the fourth is unpublished.

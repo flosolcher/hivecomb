@@ -111,6 +111,8 @@ adversarial, and corrections are welcome.
 ---
 
 <a id="1"></a>
+<a id="1"></a>
+
 ## 1. Missing comma silently concatenates two operation names — Critical
 
 **`beembase/operationids.py:13-15`**
@@ -147,6 +149,8 @@ fall out of sync.
 ---
 
 <a id="2"></a>
+<a id="2"></a>
+
 ## 2. The active operation table does not match the chain — Critical
 
 **`beembase/operationids.py:56-131`** (the `ops` list that is actually used)
@@ -176,6 +180,8 @@ both spellings accepted on input and `recurrent_transfer` used on the wire.
 ---
 
 <a id="3"></a>
+<a id="3"></a>
+
 ## 3. Silent fall-through to variable-time pure-Python ECDSA — High
 
 **`beemgraphenebase/ecdsasig.py:17-33`**
@@ -210,6 +216,8 @@ construction. There is no selection order to get wrong.
 ---
 
 <a id="4"></a>
+<a id="4"></a>
+
 ## 4. Wall-clock time used as ECDSA nonce entropy — High
 
 **`beemgraphenebase/ecdsasig.py:220-228`**
@@ -239,6 +247,8 @@ reproducible.
 ---
 
 <a id="5"></a>
+<a id="5"></a>
+
 ## 5. Bare `except:` falls back to the pre-HF24 chain id — High
 
 **`beem/blockchaininstance.py:493-496`** and **`:749`**, with
@@ -272,6 +282,8 @@ resolves to the live post-HF24 id; there is no fallback for an unknown chain; an
 ---
 
 <a id="6"></a>
+<a id="6"></a>
+
 ## 6. `verify_message` cannot verify, and a discarded result hides it — Medium
 
 **`beemgraphenebase/ecdsasig.py:285-292`**
@@ -310,6 +322,8 @@ by both.
 ---
 
 <a id="7"></a>
+<a id="7"></a>
+
 ## 7. `Signed_Transaction.verify()` collects every recovery candidate — High
 
 **`beemgraphenebase/signedtransactions.py:140-155`**
@@ -341,6 +355,8 @@ recovery id comes from the signature's own header byte, which is range-checked.
 ---
 
 <a id="8"></a>
+<a id="8"></a>
+
 ## 8. ~~`String` serialization mangles control characters~~ — **RETRACTED**
 
 **This finding was wrong. beem is correct here, and `hivecomb` had the bug.**
@@ -418,6 +434,8 @@ been added to the beem corpus, where the two now agree.
 ---
 
 <a id="9"></a>
+<a id="9"></a>
+
 ## 9. A private key renders itself as the secret — High
 
 **`beemgraphenebase/account.py:806-813`**
@@ -451,6 +469,8 @@ no key material.
 ---
 
 <a id="10"></a>
+<a id="10"></a>
+
 ## 10. Invalid base58 decodes to wrong bytes instead of erroring — Medium
 
 **`beemgraphenebase/base58.py:104-106`**
@@ -474,6 +494,8 @@ checksum schemes compare in constant time.
 ---
 
 <a id="11"></a>
+<a id="11"></a>
+
 ## 11. The WIF version byte is discarded without being checked — Medium
 
 **`beemgraphenebase/base58.py:164-173`**
@@ -502,6 +524,8 @@ the reason.
 ---
 
 <a id="12"></a>
+<a id="12"></a>
+
 ## 12. Validation via bare `assert`, removed under `python -O` — Medium
 
 **`beemgraphenebase/types.py:215, 221, 227`** and **`account.py:738`**
@@ -531,6 +555,8 @@ Rust has no equivalent of `-O` stripping.
 ---
 
 <a id="13"></a>
+<a id="13"></a>
+
 ## 13. The private scalar is never range-checked — Medium
 
 **`beemgraphenebase/account.py:726-738`**
@@ -551,6 +577,8 @@ all-`0xff`.
 ---
 
 <a id="14"></a>
+<a id="14"></a>
+
 ## 14. Brain-key word selection is biased and can index out of range — Medium
 
 **`beemgraphenebase/account.py:154-163`**
@@ -584,6 +612,8 @@ is exactly uniform, and refuses fewer than 12 words.
 ---
 
 <a id="15"></a>
+<a id="15"></a>
+
 ## 15. Encrypted memos are unauthenticated, and unpad fails open — Medium
 
 **`beembase/memo.py`**
@@ -621,6 +651,8 @@ but **not** integrity.
 ---
 
 <a id="16"></a>
+<a id="16"></a>
+
 ## 16. Amounts round-trip through binary `float`, and mutate global state — Medium
 
 **`beembase/objects.py:24-26`**
@@ -671,6 +703,8 @@ five rows above are exact.
 ---
 
 <a id="17"></a>
+<a id="17"></a>
+
 ## 17. Timezone-aware datetimes are read as though UTC — Medium
 
 **`beemgraphenebase/types.py:270-278`**
@@ -697,6 +731,8 @@ strictly, accepts a trailing `Z`, and **rejects** any other offset rather than g
 ---
 
 <a id="18"></a>
+<a id="18"></a>
+
 ## 18. `is` used to compare integers — Low
 
 **`beemgraphenebase/objects.py:61`**, and identically in `beembase/objects.py` and
@@ -715,6 +751,8 @@ to stay under 256 today. It also emits a `SyntaxWarning` on modern Python.
 ---
 
 <a id="19"></a>
+<a id="19"></a>
+
 ## 19. Dead code and a broken import path — Low
 
 * **`beembase/memo.py`** defines `init_aes` **three times**. The first two are
@@ -735,6 +773,8 @@ to stay under 256 today. It also emits a `SyntaxWarning` on modern Python.
 ---
 
 <a id="20"></a>
+<a id="20"></a>
+
 ## 20. Master passwords get a single unsalted SHA-256 — Low (protocol-inherent)
 
 **`beemgraphenebase/account.py:50-62`**
@@ -761,6 +801,8 @@ at the call site, and the module documentation states the cost plainly.
 ---
 
 <a id="21"></a>
+<a id="21"></a>
+
 ## 21. `flat_set` fields are serialized in caller order — High
 
 **`beembase/operations.py`**, `Custom_json` and `Custom`
@@ -798,6 +840,8 @@ does not change the output bytes.
 ---
 
 <a id="22"></a>
+<a id="22"></a>
+
 ## 22. The escrow operations are missing fields — Critical
 
 **`beembase/operations.py`**, `Escrow_release` and `Escrow_dispute`
@@ -841,6 +885,8 @@ serialized length and that `agent` actually appears in the bytes.
 ---
 
 <a id="23"></a>
+<a id="23"></a>
+
 ## 23. `custom_binary` serializes two of its six fields — High
 
 **`beembase/operations.py`**, `Custom_binary`
@@ -879,6 +925,8 @@ deduplicated per [finding 21](#21), and `id` length-checked against
 ---
 
 <a id="24"></a>
+<a id="24"></a>
+
 ## 24. Encrypted memos omit the varint length prefix — Medium
 
 **`beembase/memo.py`**, `encode_memo` and `decode_memo`
@@ -940,6 +988,8 @@ as it does in Keychain — consistent, even where it is not what beem's author i
 ---
 
 <a id="25"></a>
+<a id="25"></a>
+
 ## 25. The wallet encrypts keys with an unsalted SHA-256 and no MAC — High
 
 **`beemgraphenebase/aes.py`**, used by **`beemstorage/masterpassword.py`** and
