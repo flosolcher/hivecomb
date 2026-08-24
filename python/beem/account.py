@@ -27,7 +27,9 @@ from .instance import BlockchainInstance
 __all__ = ["Account", "Accounts", "AccountsObject"]
 
 #: Seconds for a mana bar to refill from empty to full.
-VOTING_MANA_REGENERATION_SECONDS = 432_000
+# From the Rust core rather than restated here. It is a protocol constant, and a second
+# copy in Python is a second thing to get wrong if the chain ever moves it.
+VOTING_MANA_REGENERATION_SECONDS = hivecomb.VOTING_MANA_REGENERATION_SECONDS
 
 
 #: How many history entries a filtered search reads before giving up.

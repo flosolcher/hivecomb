@@ -632,6 +632,61 @@ def _():
 # has no equivalent -- so the first check here is that the default is unchanged.
 
 
+@check("SSOT: protocol constants come from Rust, not restated in Python")
+def _ssot_constants():
+    # The Rust core reads these from hived and they are exported through the extension.
+    # Anything that restates one in Python is a second thing to get wrong when the chain
+    # moves, so this asserts the Python layer is using the exported values.
+    import hivecomb
+
+    from beem.account import VOTING_MANA_REGENERATION_SECONDS
+
+    for name in (
+        "MAX_CUSTOM_ID_LEN", "MAX_CUSTOM_DATA_LEN", "MAX_CUSTOM_OPS_PER_BLOCK",
+        "MAX_MEMO_LEN", "MAX_TITLE_LEN", "MAX_PERMLINK_LEN",
+        "MAX_AUTHORITY_MEMBERSHIP", "MAX_BENEFICIARIES",
+        "MAX_PROPOSAL_SUBJECT_LEN", "MAX_PROPOSAL_IDS", "MAX_WITNESS_URL_LEN",
+        "VOTING_MANA_REGENERATION_SECONDS",
+    ):
+        assert hasattr(hivecomb, name), f"the extension no longer exports {name}"
+
+    assert VOTING_MANA_REGENERATION_SECONDS is hivecomb.VOTING_MANA_REGENERATION_SECONDS \
+        or VOTING_MANA_REGENERATION_SECONDS == hivecomb.VOTING_MANA_REGENERATION_SECONDS
+
+
+@check("SSOT: the health policy defaults agree between Rust and Python")
+def _ssot_health_defaults():
+    # The Python health tracker is a separate implementation on purpose -- the compat
+    # client is stdlib-only -- but its *policy* must not drift from the Rust one, or the
+    # same code behaves differently depending on which binding it went through.
+    #
+    # Rust's values are read out of its own doc comment rather than hard-coded here, so
+    # this compares two sources rather than restating a third.
+    import pathlib
+    import re
+
+    from hivecomb_compat import HealthPolicy
+
+    src = pathlib.Path(__file__).resolve().parent.parent / "hivecomb/src/rpc/health.rs"
+    text = src.read_text(encoding="utf-8")
+    body = text[text.index("impl Default for HealthPolicy"):]
+    body = body[: body.index("\n    }")]
+
+    rust = {}
+    for field, value in re.findall(r"(\w+): Duration::from_secs\((\d+)\)", body):
+        rust[field] = float(value)
+    for field, value in re.findall(r"(\w+): (\d+),", body):
+        rust.setdefault(field, int(value))
+
+    missing = set(HealthPolicy.DEFAULTS) - set(rust)
+    assert not missing, f"Rust HealthPolicy::default has no {missing}"
+
+    for field, py in HealthPolicy.DEFAULTS.items():
+        assert float(rust[field]) == float(py), (
+            f"{field}: Rust default {rust[field]}, Python default {py}"
+        )
+
+
 @check("health tracking is off unless asked for")
 def _health_off_by_default():
     from hivecomb_compat import NodeClient

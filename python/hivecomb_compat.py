@@ -82,16 +82,50 @@ class HealthPolicy:
     field-tested numbers available for this.
     """
 
+    #: Defaults, kept in one place. `stale_block_threshold` and `block_interval` come
+    #: from the Rust core, which reads them from hived; the cooldowns and thresholds are
+    #: this project's own policy rather than protocol, so they live here and are mirrored
+    #: by `HealthPolicy::default()` in Rust. A test asserts the two agree.
+    DEFAULTS = {
+        "node_cooldown": 30.0,
+        "api_cooldown": 60.0,
+        "failures_before_cooldown": 3,
+        "api_failures_before_cooldown": 2,
+        "stale_block_threshold": 30,
+        "head_block_ttl": 120.0,
+        "block_interval": 3.0,
+    }
+
     def __init__(
         self,
-        node_cooldown=30.0,
-        api_cooldown=60.0,
-        failures_before_cooldown=3,
-        api_failures_before_cooldown=2,
-        stale_block_threshold=30,
-        head_block_ttl=120.0,
-        block_interval=3.0,
+        node_cooldown=None,
+        api_cooldown=None,
+        failures_before_cooldown=None,
+        api_failures_before_cooldown=None,
+        stale_block_threshold=None,
+        head_block_ttl=None,
+        block_interval=None,
     ):
+        d = self.DEFAULTS
+        node_cooldown = d["node_cooldown"] if node_cooldown is None else node_cooldown
+        api_cooldown = d["api_cooldown"] if api_cooldown is None else api_cooldown
+        failures_before_cooldown = (
+            d["failures_before_cooldown"]
+            if failures_before_cooldown is None
+            else failures_before_cooldown
+        )
+        api_failures_before_cooldown = (
+            d["api_failures_before_cooldown"]
+            if api_failures_before_cooldown is None
+            else api_failures_before_cooldown
+        )
+        stale_block_threshold = (
+            d["stale_block_threshold"]
+            if stale_block_threshold is None
+            else stale_block_threshold
+        )
+        head_block_ttl = d["head_block_ttl"] if head_block_ttl is None else head_block_ttl
+        block_interval = d["block_interval"] if block_interval is None else block_interval
         self.node_cooldown = node_cooldown
         self.api_cooldown = api_cooldown
         self.failures_before_cooldown = failures_before_cooldown

@@ -1219,7 +1219,7 @@ def cmd_claimreward(args):
     )
 
 
-@arg("id", help="the custom_json id, at most 32 bytes")
+@arg("id", help=f"the custom_json id, at most {hivecomb.MAX_CUSTOM_ID_LEN} bytes")
 @arg("json_data", help="the payload, as JSON")
 @arg("--active", action="store_true", help="sign with the active authority instead")
 @arg("--account")

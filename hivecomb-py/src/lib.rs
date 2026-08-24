@@ -964,6 +964,53 @@ fn operation_names() -> Vec<&'static str> {
 fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__doc__", MODULE_DOC)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+
+    // Protocol constants, exported so the Python layer reads them from here rather than
+    // restating them. They are hived's, verified against a live node's
+    // `database_api.get_config` and against hived's source at the revision mainnet runs;
+    // a second copy in Python is a second thing to get wrong when the chain moves.
+    m.add(
+        "MAX_CUSTOM_ID_LEN",
+        hivecomb_core::operations::MAX_CUSTOM_ID_LEN,
+    )?;
+    m.add(
+        "MAX_CUSTOM_DATA_LEN",
+        hivecomb_core::operations::MAX_CUSTOM_DATA_LEN,
+    )?;
+    m.add(
+        "MAX_CUSTOM_OPS_PER_BLOCK",
+        hivecomb_core::operations::MAX_CUSTOM_OPS_PER_BLOCK,
+    )?;
+    m.add("MAX_MEMO_LEN", hivecomb_core::operations::MAX_MEMO_LEN)?;
+    m.add("MAX_TITLE_LEN", hivecomb_core::operations::MAX_TITLE_LEN)?;
+    m.add(
+        "MAX_PERMLINK_LEN",
+        hivecomb_core::operations::MAX_PERMLINK_LEN,
+    )?;
+    m.add(
+        "MAX_AUTHORITY_MEMBERSHIP",
+        hivecomb_core::operations::MAX_AUTHORITY_MEMBERSHIP,
+    )?;
+    m.add(
+        "MAX_BENEFICIARIES",
+        hivecomb_core::operations::MAX_BENEFICIARIES,
+    )?;
+    m.add(
+        "MAX_PROPOSAL_SUBJECT_LEN",
+        hivecomb_core::operations::MAX_PROPOSAL_SUBJECT_LEN,
+    )?;
+    m.add(
+        "MAX_PROPOSAL_IDS",
+        hivecomb_core::operations::MAX_PROPOSAL_IDS,
+    )?;
+    m.add(
+        "MAX_WITNESS_URL_LEN",
+        hivecomb_core::operations::MAX_WITNESS_URL_LEN,
+    )?;
+    m.add(
+        "VOTING_MANA_REGENERATION_SECONDS",
+        hivecomb_core::chain::REGENERATION_SECONDS,
+    )?;
     m.add_class::<PyPrivateKey>()?;
     m.add_class::<PyPublicKey>()?;
     m.add_class::<PyBlockRef>()?;
