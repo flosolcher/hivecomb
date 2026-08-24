@@ -437,7 +437,19 @@ fn operation_from_json(mut value: serde_json::Value) -> Result<RsOperation> {
         }
     }
 
-    RsOperation::from_json(&value).map_err(err)
+    // Owned: the vector came from our own `serde_json::from_str`, so there is nothing
+    // to preserve and a clone of every field would be pure waste.
+    RsOperation::from_json_owned(value).map_err(err)
+}
+
+/// WIF strings or `PrivateKey` instances, or a mix.
+fn private_keys_from(keys: Vec<Either<String, &PrivateKey>>) -> Result<Vec<RsPrivateKey>> {
+    keys.iter()
+        .map(|k| match k {
+            Either::A(wif) => RsPrivateKey::parse(wif).map_err(err),
+            Either::B(key) => Ok(key.inner.clone()),
+        })
+        .collect()
 }
 
 fn operations_from_json(operations: Vec<serde_json::Value>) -> Result<Vec<RsOperation>> {
@@ -498,13 +510,7 @@ pub fn sign_transaction<'a>(
 ) -> Result<Unknown<'a>> {
     let chain = chain_from(chain)?;
     let ops = operations_from_either(operations)?;
-    let keys: Vec<RsPrivateKey> = keys
-        .iter()
-        .map(|k| match k {
-            Either::A(wif) => RsPrivateKey::parse(wif).map_err(err),
-            Either::B(key) => Ok(key.inner.clone()),
-        })
-        .collect::<Result<_>>()?;
+    let keys = private_keys_from(keys)?;
 
     let tx =
         RsTransaction::new(block_ref.inner, ops, expiration_seconds.unwrap_or(60)).map_err(err)?;
@@ -520,6 +526,53 @@ pub fn sign_transaction<'a>(
     let text = serde_json::to_string(&rendered)
         .map_err(|e| Error::from_reason(format!("could not render the signed transaction: {e}")))?;
     json_parse(env, &text)
+}
+
+/// Build and sign a transaction, returning it as a **JSON string**.
+///
+/// Identical work to [`sign_transaction`], and identical bytes — the same signature over
+/// the same digest — but it hands back the rendered JSON instead of a JavaScript object.
+///
+/// This exists because of what callers do next. A signed transaction's destination is
+/// almost always an HTTP body, so the object form is rendered to JSON internally, parsed
+/// into an object to cross the boundary, and then serialized straight back to JSON by
+/// the caller. Two of those three steps are pure loss, and they scale with the number of
+/// operations: at fifty operations the parse alone costs more than the elliptic curve
+/// work.
+///
+/// Use this when the result is going onto the wire. Use `signTransaction` when the
+/// caller needs to inspect or modify the transaction, where the object is worth its
+/// price.
+///
+/// ```js
+/// const trx = hivecomb.signTransactionJson(operations, blockRef, [key])
+/// const body = `{"jsonrpc":"2.0","method":"network_broadcast_api.broadcast_transaction",`
+///            + `"params":{"trx":${trx}},"id":1}`
+/// ```
+#[napi]
+pub fn sign_transaction_json(
+    operations: Either<String, Vec<serde_json::Value>>,
+    block_ref: &BlockRef,
+    keys: Vec<Either<String, &PrivateKey>>,
+    expiration_seconds: Option<u32>,
+    chain: Option<String>,
+) -> Result<String> {
+    let chain = chain_from(chain)?;
+    let ops = operations_from_either(operations)?;
+    let keys = private_keys_from(keys)?;
+    let tx =
+        RsTransaction::new(block_ref.inner, ops, expiration_seconds.unwrap_or(60)).map_err(err)?;
+    let trx_id = tx.id().map_err(err)?;
+    let expiration = tx.expiration.to_iso().map_err(err)?;
+    let signed = tx.sign(&keys, chain).map_err(err)?;
+    let rendered = SignedJson {
+        tx: &signed.transaction,
+        signatures: signed.signatures.iter().map(|s| s.to_hex()).collect(),
+        trx_id: &trx_id,
+        expiration,
+    };
+    serde_json::to_string(&rendered)
+        .map_err(|e| Error::from_reason(format!("could not render the signed transaction: {e}")))
 }
 
 /// The digest a transaction would be signed over, without signing it.

@@ -5,7 +5,7 @@ import { inspect } from 'node:util'
 import {
   PrivateKey, PublicKey, BlockRef, TaposCache,
   signMessage, verifyMessage, recoverMessage,
-  signTransaction, transactionDigest, transactionId,
+  signTransaction, signTransactionJson, transactionDigest, transactionId,
   encodeMemo, decodeMemo, isEncryptedMemo,
   generateMnemonic, validateMnemonic, checkAuthority, chainId, version,
 } from '../index.js'
@@ -321,4 +321,86 @@ test('the chain id is a local constant, not a lookup', () => {
 
 test('reports its version', () => {
   assert.match(version(), /^\d+\.\d+\.\d+$/)
+})
+
+// --- signTransactionJson ----------------------------------------------------
+// Same work and the same signed bytes as signTransaction, handed back as JSON text
+// because a signed transaction's destination is almost always an HTTP body. The
+// risk in having two entry points is that they drift, so these compare them.
+
+test('signTransactionJson returns text that parses to the same transaction', () => {
+  const ops = [['custom_json', {
+    required_auths: [], required_posting_auths: ['alice'],
+    id: 'my_app', json: '{"a":1}',
+  }]]
+  const ref = BlockRef.fromBlockId(BLOCK_ID)
+
+  const text = signTransactionJson(ops, ref, [WIF], 600)
+  assert.equal(typeof text, 'string', 'it must return text, not an object')
+  const parsed = JSON.parse(text)
+  const object = signTransaction(ops, ref, [WIF], 600)
+
+  // Expiration is relative to now, so the two calls can land a second apart.
+  // Everything else must be identical, signatures included: the digest is the
+  // same whenever the expiration matches, and RFC-6979 makes signing
+  // deterministic, so a difference here means the two paths built different
+  // transactions.
+  if (parsed.expiration === object.expiration) {
+    assert.deepEqual(parsed, object, 'the two entry points disagree')
+  } else {
+    parsed.expiration = object.expiration
+    parsed.signatures = object.signatures
+    parsed.trx_id = object.trx_id
+    assert.deepEqual(parsed, object, 'the two entry points disagree beyond the expiration')
+  }
+
+  assert.equal(parsed.signatures.length, 1)
+  assert.match(parsed.signatures[0], /^[0-9a-f]{130}$/)
+  assert.equal(parsed.ref_block_num, 5)
+  assert.deepEqual(parsed.extensions, [])
+})
+
+test('signTransactionJson output splices into a broadcast envelope', () => {
+  // The reason the string form exists: it goes straight into a request body.
+  const ref = BlockRef.fromBlockId(BLOCK_ID)
+  const trx = signTransactionJson(
+    [['transfer', { from: 'alice', to: 'bob', amount: '1.234 HIVE', memo: 'hi' }]],
+    ref, [WIF], 600,
+  )
+  const body = `{"jsonrpc":"2.0","method":"network_broadcast_api.broadcast_transaction","params":{"trx":${trx}},"id":1}`
+  const decoded = JSON.parse(body)
+  assert.equal(decoded.params.trx.operations[0][0], 'transfer')
+  assert.equal(decoded.params.trx.operations[0][1].amount, '1.234 HIVE')
+})
+
+test('signTransactionJson normalises an object json field, as the object form does', () => {
+  // The signature covers the *string* form of a json field. If the text form echoed
+  // the caller's object back, the transaction would not match what was signed.
+  const ref = BlockRef.fromBlockId(BLOCK_ID)
+  const ops = [['comment', {
+    parent_author: '', parent_permlink: 'hive-100', author: 'alice', permlink: 'p',
+    title: 't', body: 'b', json_metadata: { tags: ['a', 'b'] },
+  }]]
+  const parsed = JSON.parse(signTransactionJson(ops, ref, [WIF], 600))
+  assert.equal(typeof parsed.operations[0][1].json_metadata, 'string',
+    'an object json_metadata must come back as the signed string')
+  assert.equal(parsed.operations[0][1].json_metadata, '{"tags":["a","b"]}')
+})
+
+test('signTransactionJson accepts a pre-stringified operations array', () => {
+  const ref = BlockRef.fromBlockId(BLOCK_ID)
+  const ops = [['vote', { voter: 'alice', author: 'bob', permlink: 'p', weight: 10000 }]]
+  const a = JSON.parse(signTransactionJson(ops, ref, [WIF], 600))
+  const b = JSON.parse(signTransactionJson(JSON.stringify(ops), ref, [WIF], 600))
+  assert.deepEqual(a.operations, b.operations)
+})
+
+test('signTransactionJson refuses what signTransaction refuses', () => {
+  const ref = BlockRef.fromBlockId(BLOCK_ID)
+  for (const bad of [[], [['not_an_operation', {}]], [['vote', { voter: 'alice' }]]]) {
+    assert.throws(() => signTransactionJson(bad, ref, [WIF], 600),
+      undefined, `signTransactionJson accepted ${inspect(bad)}`)
+    assert.throws(() => signTransaction(bad, ref, [WIF], 600),
+      undefined, `signTransaction accepted ${inspect(bad)}`)
+  }
 })

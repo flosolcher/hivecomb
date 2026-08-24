@@ -2113,6 +2113,21 @@ impl Operation {
     /// Use [`AnyOperation::from_json`] when reading history, where both kinds appear.
     pub fn from_json(value: &serde_json::Value) -> Result<Self> {
         let (name, payload) = virtual_ops::split_operation_json(value)?;
+        Self::from_named(name, payload)
+    }
+
+    /// Build from JSON that the caller owns, without copying the payload.
+    ///
+    /// Identical to [`Operation::from_json`] except that it consumes the value. The
+    /// borrowing version has to clone the payload out of it, which for a caller that
+    /// just parsed the JSON itself is a deep copy of every field for nothing — the
+    /// dominant cost in decoding a transaction with many operations.
+    pub fn from_json_owned(value: serde_json::Value) -> Result<Self> {
+        let (name, payload) = virtual_ops::split_operation_json_owned(value)?;
+        Self::from_named(name, payload)
+    }
+
+    fn from_named(name: String, payload: serde_json::Value) -> Result<Self> {
         let id = OperationId::from_name(&name)?;
         if id.is_virtual() {
             return Err(Error::ser(format!(
@@ -3079,6 +3094,75 @@ mod tests {
     }
 
     /// One value of every `Operation` variant, so the tests above cover all of them.
+    /// The owned decoder must agree with the borrowing one on every variant.
+    ///
+    /// `from_json_owned` exists only to avoid a deep copy, so any difference in what it
+    /// accepts or produces is a bug and not a trade-off. Two decoders for the signed
+    /// wire format that disagree is precisely the kind of divergence this crate cannot
+    /// afford, so they are compared over every variant and in both JSON shapes.
+    #[test]
+    fn the_owned_decoder_agrees_with_the_borrowing_one() {
+        for op in sample_of_every_variant() {
+            let payload = serde_json::to_value(&op).expect("operation renders as JSON");
+            let name = op.id().name();
+
+            let condenser = serde_json::json!([name, payload]);
+            let appbase = serde_json::json!({ "type": name, "value": payload });
+
+            for (shape, value) in [("condenser", condenser), ("appbase", appbase)] {
+                let borrowed = Operation::from_json(&value)
+                    .unwrap_or_else(|e| panic!("{name} as {shape} failed to decode: {e}"));
+                let owned = Operation::from_json_owned(value)
+                    .unwrap_or_else(|e| panic!("{name} as {shape} failed to decode owned: {e}"));
+                assert_eq!(borrowed, owned, "{name} decoded differently as {shape}");
+                assert_eq!(borrowed, op, "{name} did not round-trip as {shape}");
+            }
+        }
+    }
+
+    /// And they must agree on what to *reject*, or the owned path is a hole.
+    #[test]
+    fn the_owned_decoder_rejects_what_the_borrowing_one_rejects() {
+        let bad = [
+            serde_json::json!([]),
+            serde_json::json!(["vote"]),
+            serde_json::json!(["vote", {}, "extra"]),
+            // The input that distinguishes a length check from a "take the last two"
+            // implementation: the trailing pair here IS a valid operation, so an owned
+            // decoder that pops from the back without checking the length would accept
+            // a three-element array that the borrowing one rejects. Found by mutating
+            // `arr.len() == 2` to `>= 2` and noticing the corpus did not catch it.
+            serde_json::json!([
+                "ignored",
+                "vote",
+                { "voter": "alice", "author": "bob", "permlink": "p", "weight": 10000 }
+            ]),
+            serde_json::json!([
+                { "voter": "alice", "author": "bob", "permlink": "p", "weight": 10000 },
+                "vote"
+            ]),
+            serde_json::json!([1, {}]),
+            serde_json::json!({ "type": 7, "value": {} }),
+            serde_json::json!({ "type": "vote" }),
+            serde_json::json!({ "value": {} }),
+            serde_json::json!({}),
+            serde_json::json!("vote"),
+            serde_json::json!(42),
+            serde_json::json!(null),
+            // A real virtual operation: refused by both, not decoded as signable.
+            serde_json::json!(["producer_reward", { "producer": "alice", "vesting_shares": "1.000000 VESTS" }]),
+        ];
+        for value in bad {
+            let borrowed = Operation::from_json(&value);
+            let owned = Operation::from_json_owned(value.clone());
+            assert_eq!(
+                borrowed.is_err(),
+                owned.is_err(),
+                "the two decoders disagree on whether to accept {value}"
+            );
+        }
+    }
+
     fn sample_of_every_variant() -> Vec<Operation> {
         let key = crate::keys::PrivateKey::generate().public_key();
         let auth = Authority::from_key(key).unwrap();

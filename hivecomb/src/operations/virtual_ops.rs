@@ -715,6 +715,47 @@ impl VirtualOperation {
 /// Split either JSON operation shape into a name and a payload.
 ///
 /// Shared with [`crate::operations`], which parses the non-virtual half the same way.
+/// Split an operation into its name and payload, **taking ownership**.
+///
+/// The borrowing version has to clone the payload, and for a caller that already owns
+/// the `Value` — anything that just parsed it out of a request body — that clone is a
+/// full deep copy of every field for nothing. Measured through the Node addon it was
+/// the largest single cost in converting a 50-operation transaction.
+///
+/// Same two shapes as [`split_operation_json`]: appbase `{"type", "value"}` and
+/// condenser `["name", {...}]`.
+pub(crate) fn split_operation_json_owned(
+    value: serde_json::Value,
+) -> Result<(String, serde_json::Value)> {
+    match value {
+        serde_json::Value::Object(mut map) => {
+            // Only treat it as appbase if both keys are there; otherwise fall through to
+            // the error, rather than half-consuming the map and guessing.
+            if map.contains_key("type") && map.contains_key("value") {
+                let payload = map.remove("value").expect("checked above");
+                match map.remove("type").expect("checked above") {
+                    serde_json::Value::String(name) => return Ok((name, payload)),
+                    _ => return Err(Error::ser("operation \"type\" is not a string")),
+                }
+            }
+            Err(Error::ser(
+                "operation must be [name, value] or {type, value}".to_string(),
+            ))
+        }
+        serde_json::Value::Array(mut arr) if arr.len() == 2 => {
+            // Pop from the back so neither removal shifts the other.
+            let payload = arr.pop().expect("length checked");
+            match arr.pop().expect("length checked") {
+                serde_json::Value::String(name) => Ok((name, payload)),
+                _ => Err(Error::ser("operation name is not a string")),
+            }
+        }
+        _ => Err(Error::ser(
+            "operation must be [name, value] or {type, value}".to_string(),
+        )),
+    }
+}
+
 pub(crate) fn split_operation_json(
     value: &serde_json::Value,
 ) -> Result<(String, serde_json::Value)> {
