@@ -428,6 +428,47 @@ the signature actually covers — so echoing the caller's own array could return
 transaction that does not match what was signed. In a signing library that trade is not
 available.
 
+### What dhive has that hivecomb does not
+
+Speed is not the only axis, so the surface was compared too. Most of dhive's API has an
+equivalent here — `RCAPI` against `rc_accounts`/`has_rc_for` (which does the same mana
+regeneration arithmetic as `calculateRCMana`), `AccountByKeyAPI` against
+`accounts_by_key`, `getVestingSharePrice`/`getVests` against `vests_to_hive` and
+`chain::manabar`, `Blockchain` streaming against `stream_blocks` with the same
+irreversible-by-default choice. hivecomb additionally has `transaction_status`,
+`ops_in_block_range`, node racing, TaPoS caching, BIP-32/38/39 and brain keys, and a
+local `Authority::check` that answers "will these keys satisfy this account" without a
+round trip.
+
+Four real gaps, listed in the order they are worth caring about:
+
+**1. Stateful node health tracking.** dhive's `NodeHealthTracker` remembers which nodes
+failed and for which API, puts a failing node in cooldown (30 s node-wide, 60 s for the
+specific API, after 3 consecutive failures), and deprioritises nodes more than 30 blocks
+behind the best known head. hivecomb's failover is *stateless*: `call` walks
+`for node in &self.nodes` from the front on every request. It fails over correctly and
+reports every node that failed, but it does not remember. A dead first node therefore
+costs its full timeout on every single call for the life of the process. This is the one
+gap with a concrete operational cost, and it is squarely inside what this crate already
+does.
+
+**2. The Hivemind/bridge API.** `getRankedPosts`, `getAccountPosts`, `getCommunity`,
+`listCommunities`, `listAllSubscriptions`, `getAccountNotifications` — the social and
+community layer. hivecomb has none of it. This is a scope decision rather than an
+oversight: `bridge` is the API a content application needs, and this crate is a keys,
+serialization and signing core. It is recorded here so nobody has to discover it.
+
+**3. Two database calls.** `get_vesting_delegations` and `get_chain_properties` have no
+wrapper, though `call` reaches both. `verify_authority` also has none, which is
+deliberate — `Authority::check` answers the same question locally.
+
+**4. `hivecomb-node` is signing-only.** dhive ships a `Client`, failover, streaming and
+per-operation broadcast helpers (`vote`, `transfer`, `comment`, `json`,
+`delegateVestingShares`). The Node addon deliberately exposes none of that; the Rust
+crate and the Python layer do. A JavaScript caller replacing dhive wholesale needs an
+RPC client from somewhere else, and that is the single biggest practical reason not to
+reach for the addon.
+
 ### What that means for a JavaScript adopter
 
 Take `hivecomb-node` when **signing is your bottleneck** — bulk or batch signing, an
