@@ -58,29 +58,29 @@
 //! cosmetic on the strength of the sub-block case alone. It is cosmetic there and
 //! load-bearing above, and this crate's own worst case is the second one.
 //!
-//! What bounds it is the threshold. The artefact is the observation spread divided by
-//! the block interval: a 700 ms spread is 0.2 blocks, and a pathological nine-second
-//! spread is three, against a default threshold of thirty. Roughly two orders of
-//! magnitude of margin, and two tests pin it — one asserting three blocks of apparent
-//! gap changes nothing, one asserting the same readings *do* demote at a one-block
-//! threshold, so the margin is explicit and a future edit that tightens it cannot do so
-//! silently.
+//! **What bounds it is now the arithmetic, not the threshold.** Because the age credit
+//! stays fractional and only the gap is floored, every node in sync projects to the true
+//! head minus its own fractional offset, so the floored gap between them is exactly
+//! zero — at any latency and any phase of block production. That is a bound rather than
+//! a measurement, and it is derived on [`project`].
 //!
-//! What bounds the spread is the **per-node timeout**, and that is worth being precise
-//! about. A node that exceeds it fails, and a failed node reports no head block, so it
-//! never enters the reference at all. The spread among nodes that *answered* is
-//! therefore at most one timeout:
+//! It did not start there. Under an earlier scheme, which floored each projection
+//! individually, the residual was one block and what kept that harmless was the margin
+//! between the threshold and the worst achievable spread. That margin still exists and
+//! still has a test, kept as a second line rather than the first:
 //!
-//! | timeout | blocks of artefact | threshold | margin |
+//! | timeout | worst spread | threshold | margin |
 //! |---|---|---|---|
-//! | 10 s (default) | 3.3 | 30 | 9× |
-//! | 30 s | 10 | 30 | 3× |
-//! | 90 s | 30 | 30 | **none** |
+//! | 10 s (default) | 3.3 blocks | 30 | 9× |
+//! | 30 s | 10 blocks | 30 | 3× |
+//! | 90 s | 30 blocks | 30 | **none** |
 //!
-//! So the default is safe with an order of magnitude to spare, and it stops being safe
-//! if the timeout is raised toward ninety seconds or the threshold cut toward three
-//! blocks. That relationship has a test, because it is the kind of thing a later edit
-//! to an unrelated default would break silently.
+//! The spread is bounded by the **per-node timeout**, which is the part worth being
+//! precise about: a node that exceeds it fails, and a failed node reports no head block,
+//! so it never enters the reference at all. So a fully down node is the safe case — it
+//! self-excludes — and the node that would corrupt a comparison is one answering slowly
+//! but successfully. Under the current arithmetic even that one costs nothing, which was
+//! predicted by the peer who found the failure mode and then confirmed by sweeping it.
 //!
 //! That failure mode is not hypothetical. A peer found it live in a Hive node selector
 //! scoring one block as 1000 points against one millisecond as 1 — an effective
@@ -221,7 +221,7 @@ impl NodeState {
     /// a while ago, gets credited with blocks it may not have caught up on. That is the
     /// right direction to be wrong in — this only ever reorders a list, and shuffling a
     /// usable node backwards on weak evidence costs more than leaving it in place.
-    fn projected_head(&self, now: Instant, ttl: Duration, interval: Duration) -> Option<u64> {
+    fn projected_head(&self, now: Instant, ttl: Duration, interval: Duration) -> Option<f64> {
         let (block, seen) = self.head_block?;
         let age = now.duration_since(seen);
         if age > ttl {
@@ -231,49 +231,55 @@ impl NodeState {
     }
 }
 
-/// Age a head-block reading forward to now, truncating.
+/// Age a head-block reading forward to now. Fractional on purpose.
 ///
 /// A free function because the interesting property here is arithmetic, and testing it
-/// through the tracker would need a controllable clock —
-/// see `the_projection_is_never_more_than_one_block_from_the_truth`.
+/// through the tracker would need a controllable clock — see
+/// `the_projection_is_never_more_than_one_block_from_the_truth`.
 ///
-/// Truncating, deliberately, and not rounding. The reference a projection is compared
-/// against is a *maximum* over projections, so over-crediting an old reading demotes the
-/// freshest one: a node observed 0.6 blocks ago at head 100 projects to 101 under
-/// rounding, which puts a node that reported 100 a moment ago one block "behind" while
-/// both are current. Truncation cannot do that — it never credits a block that has not
-/// certainly passed, so the newest reading, which needs no adjustment at all, can never
-/// be beaten by an artefact.
+/// # Why the age stays fractional, and the *gap* is floored instead
 ///
-/// A peer reached the opposite conclusion for their own selector, shipped it, then
-/// reproduced this exact failure in their own code and switched. Their reasoning —
-/// truncation systematically forgives real lag — holds where the gap is measured against
-/// a single reference with a sub-block-sensitive threshold. Whether to round or truncate
-/// follows from what the reference *is*.
+/// The premise, stated because it is what a reader should check rather than take on
+/// trust: **the reference a projection is compared against is a maximum over other
+/// projections**, not a fixed instant. Everything below follows from that, and would not
+/// follow from a single-reference design.
 ///
-/// # The bound this gives
+/// Given that, rounding the age up is wrong: a reading taken 0.6 blocks ago at head 100
+/// would project to 101, become the maximum, and leave a node that reported 100 a moment
+/// ago looking a block behind — demoting the freshest and most trustworthy value in the
+/// set. So the credit must never exceed what has certainly elapsed at the point of
+/// comparison.
 ///
-/// A projection is never more than one block from the truth, whatever the latency.
-/// Writing `B` for the interval, `p` for where the poll falls relative to block
-/// production, `t` for when the reading was taken and `T` for now:
+/// But flooring *here* throws away the term that cancels. Writing `B` for the interval,
+/// `p` for the phase of block production, `t` for when a reading was taken and `T` for
+/// now, an in-sync node reports `floor((t+p)/B)` and this projects it to
 ///
 /// ```text
-/// projection = floor((t + p)/B) + floor((T - t)/B)
-/// truth      = floor((T + p)/B)
+/// floor((t+p)/B) + (T-t)/B  =  (T+p)/B - frac((t+p)/B)
 /// ```
 ///
-/// Since `floor(x) + floor(y) <= floor(x + y) <= floor(x) + floor(y) + 1`, the
-/// projection is either the truth or one less. Two nodes genuinely in sync can therefore
-/// appear at most one block apart — and that does **not** grow with latency: ageing
-/// cancels the latency-proportional part exactly, and what remains is a single
-/// truncation. Against the thirty-block default threshold that is thirty times the
-/// margin, and it is a bound rather than a measurement.
-fn project(head: u64, age: Duration, interval: Duration) -> u64 {
+/// — the true head minus that node's own fractional offset. So every in-sync node lands
+/// within one fraction of the truth, the spread across them is a difference of two
+/// fractions, and flooring the **gap** at comparison time takes it to exactly zero. Any
+/// latency, any phase. Flooring each projection first loses `frac((T-t)/B)`, which is
+/// precisely the part that would have cancelled, and leaves a residual block.
+///
+/// A peer derived this after independently reaching the opposite conclusion on rounding,
+/// shipping it, reproducing the freshest-reading failure in their own code, and
+/// switching. Their earlier reasoning — that truncating systematically forgives real lag
+/// — is correct under the premise their design has, a single fixed reference. The premise
+/// is the part that differs, which is why it is written down first.
+///
+/// One consequence to know: because the credit is fractional, a gap of exactly
+/// `threshold + 1` can floor back to `threshold` when the lagging node's reading happens
+/// to be a shade older. The effective threshold is somewhere in
+/// `(threshold, threshold + 1]`, erring toward not demoting.
+fn project(head: u64, age: Duration, interval: Duration) -> f64 {
     let interval = interval.as_secs_f64();
     if interval <= 0.0 {
-        return head;
+        return head as f64;
     }
-    head.saturating_add((age.as_secs_f64() / interval) as u64)
+    head as f64 + age.as_secs_f64() / interval
 }
 
 /// Per-node health, remembered across calls.
@@ -320,7 +326,7 @@ impl HealthTracker {
         // The yardstick for staleness is the best head anyone has recently reported.
         // With no fresh observation at all, nothing can be judged stale -- which is
         // the correct answer, not a reason to guess.
-        let best_head = state.iter().filter_map(|s| self.projected(s, now)).max();
+        let best_head = self.best_projected(&state, now);
 
         let mut tiers: Vec<(u8, usize)> = state
             .iter()
@@ -344,16 +350,37 @@ impl HealthTracker {
         tiers.into_iter().map(|(_, i)| i).collect()
     }
 
+    /// The highest projection any node currently supports, the yardstick for staleness.
+    ///
+    /// A fold rather than `max`, because these are fractional and `f64` is not `Ord`.
+    /// With no fresh observation at all this is `None`, and nothing can be judged stale
+    /// — the correct answer, not a reason to guess.
+    fn best_projected(&self, state: &[NodeState], now: Instant) -> Option<f64> {
+        state
+            .iter()
+            .filter_map(|s| self.projected(s, now))
+            .fold(None, |acc, v| match acc {
+                Some(a) if a >= v => Some(a),
+                _ => Some(v),
+            })
+    }
+
     /// This node's head, aged forward to now, if the observation is still fresh.
-    fn projected(&self, s: &NodeState, now: Instant) -> Option<u64> {
+    fn projected(&self, s: &NodeState, now: Instant) -> Option<f64> {
         s.projected_head(now, self.policy.head_block_ttl, self.policy.block_interval)
     }
 
-    fn is_stale(&self, s: &NodeState, best_head: Option<u64>, now: Instant) -> bool {
+    fn is_stale(&self, s: &NodeState, best_head: Option<f64>, now: Instant) -> bool {
         let (Some(best), Some(mine)) = (best_head, self.projected(s, now)) else {
             return false;
         };
-        best.saturating_sub(mine) > self.policy.stale_block_threshold
+        // Floor the *gap*, not the projections. Keeping the age fractional until here is
+        // what makes the bound exact: every in-sync node projects to the true head minus
+        // its own fractional offset, so the spread across them is a difference of two
+        // fractions and floors to zero. Flooring each projection first discards exactly
+        // the term that cancels, which is where a residual block came from.
+        let gap = (best - mine).floor();
+        gap > self.policy.stale_block_threshold as f64
     }
 
     /// Record that `index` answered `method`.
@@ -421,7 +448,7 @@ impl HealthTracker {
     pub fn snapshot(&self) -> Vec<NodeHealth> {
         let now = Instant::now();
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let best_head = state.iter().filter_map(|s| self.projected(s, now)).max();
+        let best_head = self.best_projected(&state, now);
 
         state
             .iter()
@@ -541,7 +568,7 @@ mod tests {
                 let head_at = |t_ms: u64| (t_ms + phase_ms) / 3_000;
                 let compare_at = *latencies.iter().max().expect("non-empty");
 
-                let projections: Vec<u64> = latencies
+                let projections: Vec<f64> = latencies
                     .iter()
                     .map(|&at| {
                         project(
@@ -552,18 +579,20 @@ mod tests {
                     })
                     .collect();
 
-                let best = *projections.iter().max().expect("non-empty");
-                let gap = best - projections.iter().min().expect("non-empty");
-                worst = worst.max(gap);
+                // The gap as `is_stale` computes it: floored at comparison, not at
+                // projection.
+                let best = projections.iter().copied().fold(f64::MIN, f64::max);
+                let worst_here = projections
+                    .iter()
+                    .map(|p| (best - p).floor() as u64)
+                    .max()
+                    .expect("non-empty");
+                worst = worst.max(worst_here);
             }
         }
         assert_eq!(
-            worst, 1,
-            "in-sync nodes must never appear more than one block apart; saw {worst}"
-        );
-        assert!(
-            worst < HealthPolicy::default().stale_block_threshold,
-            "and that must stay well under the threshold"
+            worst, 0,
+            "nodes that are in sync must never appear behind at all; saw {worst}"
         );
     }
 
@@ -625,44 +654,39 @@ mod tests {
     }
 
     #[test]
-    fn the_staleness_boundary_is_exact() {
-        // Exactly at the threshold is not stale; one block past it is. Written after
-        // mutating `>` to `>=` in `is_stale` and finding that twenty-five tests all
-        // still passed -- every one of them sat comfortably on one side of the boundary
-        // or the other, so the boundary itself was unguarded.
+    fn the_staleness_boundary_is_bracketed() {
+        // Written after mutating `>` to `>=` in `is_stale` and finding twenty-five tests
+        // all still passing -- every one sat comfortably on one side of the boundary, so
+        // a move of one block was invisible.
         //
-        // Which matters less for correctness than for what it says about the suite: a
-        // test that never sits on an edge cannot detect a move of one.
-        let t = HealthTracker::new(3, HealthPolicy::default());
+        // The boundary is a bracket rather than a point, and that is a real property
+        // rather than test slack. Ageing is fractional, so a reading taken microseconds
+        // earlier than another earns a sliver of block credit, and a gap of exactly
+        // `threshold + 1` can floor back to `threshold`. The effective threshold is
+        // therefore somewhere in `(threshold, threshold + 1]`, depending on sub-block
+        // observation offsets nobody controls. It errs toward not demoting, which is the
+        // direction this whole mechanism is biased in on purpose.
         let threshold = HealthPolicy::default().stale_block_threshold;
-        t.observe_head_block(0, 1_000);
-        t.observe_head_block(1, 1_000 + threshold); // exactly at the limit
-        t.observe_head_block(2, 1_000 + threshold + 1);
 
-        let report = t.snapshot();
-        // Node 2 defines the reference. Node 1 is one block behind it, node 0 is
-        // threshold+1 behind.
+        let within = HealthTracker::new(2, HealthPolicy::default());
+        within.observe_head_block(0, 1_000);
+        within.observe_head_block(1, 1_000 + threshold);
         assert!(
-            report[0].stale,
-            "{} blocks behind must be stale: {report:?}",
-            threshold + 1
-        );
-        assert!(!report[1].stale, "1 block behind must not be: {report:?}");
-        assert!(!report[2].stale, "the leader is never stale");
-
-        // And the exact edge, with the reference exactly `threshold` ahead.
-        let edge = HealthTracker::new(2, HealthPolicy::default());
-        edge.observe_head_block(0, 1_000);
-        edge.observe_head_block(1, 1_000 + threshold);
-        assert!(
-            !edge.snapshot()[0].stale,
+            !within.snapshot()[0].stale,
             "exactly at the threshold is within it, not past it"
         );
 
         let past = HealthTracker::new(2, HealthPolicy::default());
         past.observe_head_block(0, 1_000);
-        past.observe_head_block(1, 1_000 + threshold + 1);
-        assert!(past.snapshot()[0].stale, "one past the threshold is stale");
+        past.observe_head_block(1, 1_000 + threshold + 2);
+        assert!(
+            past.snapshot()[0].stale,
+            "two past the threshold is unambiguously stale"
+        );
+
+        // And the ordering follows, which is the only thing callers observe.
+        assert_eq!(within.order("x"), vec![0, 1]);
+        assert_eq!(past.order("x"), vec![1, 0]);
     }
 
     #[test]
@@ -692,10 +716,10 @@ mod tests {
         // block at all. So the worst artefact is timeout / block_interval blocks, and
         // that must stay comfortably under the threshold.
         //
-        // A peer measured their own exposure at 0.22 blocks and first called it
-        // structurally bounded, then corrected it: nothing in their design enforced it.
-        // Here the timeout does, which is why the margin is checked against the timeout
-        // rather than against observed latencies.
+        // Kept as a second line of defence rather than the primary guarantee: the
+        // arithmetic on `project` now makes the in-sync spread exactly zero, so this
+        // margin only matters if that is ever changed back to flooring each projection.
+        // It is cheap and it would notice.
         let policy = HealthPolicy::default();
         let timeout = Duration::from_secs(10); // NodeClient::new's default
         let worst = timeout.as_secs_f64() / policy.block_interval.as_secs_f64();

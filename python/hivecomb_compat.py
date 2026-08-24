@@ -25,6 +25,7 @@ never a silent wrong answer.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import threading
@@ -173,12 +174,15 @@ class HealthTracker:
             return None
         interval = self.policy.block_interval
         if interval and interval > 0:
-            # int() truncates, deliberately. The reference is a maximum over
-            # projections, so crediting an old reading a block it has not certainly
-            # earned would demote the freshest reading instead -- and the freshest
-            # reading needs no adjustment and is the most trustworthy one here.
-            return head + int((now - state.head_seen_at) / interval)
-        return head
+            # Fractional, and the *gap* is floored at comparison instead. The premise:
+            # the reference is a maximum over projections, not a fixed instant. Rounding
+            # the credit up would let an old reading outrank the freshest one; flooring
+            # it here would discard the fraction that cancels and leave a residual
+            # block. Keeping it fractional and flooring the gap makes the spread between
+            # in-sync nodes exactly zero at any latency. See the Rust `project` for the
+            # derivation.
+            return head + (now - state.head_seen_at) / interval
+        return float(head)
 
     def order(self, method):
         """Indices to try, best first. Always every index, exactly once."""
@@ -195,7 +199,7 @@ class HealthTracker:
                 elif (
                     best is not None
                     and heads[i] is not None
-                    and best - heads[i] > self.policy.stale_block_threshold
+                    and math.floor(best - heads[i]) > self.policy.stale_block_threshold
                 ):
                     tier = 1
                 else:
@@ -262,7 +266,8 @@ class HealthTracker:
                     "stale": (
                         best is not None
                         and projected[i] is not None
-                        and best - projected[i] > self.policy.stale_block_threshold
+                        and math.floor(best - projected[i])
+                        > self.policy.stale_block_threshold
                     ),
                 }
                 for i, s in enumerate(self._state)

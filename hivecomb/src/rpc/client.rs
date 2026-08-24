@@ -822,6 +822,80 @@ mod tests {
     }
 
     #[test]
+    fn hammering_one_node_does_not_demote_the_others() {
+        // The access pattern of a long-running service, and the shape of the bug the
+        // staleness compensation was written for. `call` returns on the first success,
+        // so a healthy list means node 0 answers every time and nodes 1 and 2 are never
+        // asked again after whatever first touched them. Their readings then age purely
+        // because nobody asked.
+        //
+        // Comparing raw readings would demote them for that -- and keep node 0 first
+        // for the same reason, since it alone has a fresh reading. The feature would
+        // lock onto whichever node it already preferred and call the healthy majority
+        // stale. An operator running exactly this pattern named it from their side; it
+        // is a positive feedback loop, not a one-off false positive, which is why it
+        // gets a test at the client level and not only in the tracker.
+        // Blocks scaled to 1ms so the test runs in milliseconds while the chain
+        // advances at a rate the compensation can actually credit. Advancing 800
+        // blocks in zero wall-clock time, as a first version of this test did, is not
+        // a chain -- it is a scenario the compensation is right to refuse to explain.
+        const BASE: u64 = 109_242_600;
+        #[derive(Debug)]
+        struct HeadTransport {
+            start: std::time::Instant,
+        }
+        impl Transport for HeadTransport {
+            fn post_json(&self, _url: &str, _b: &str, _t: Duration) -> Result<String> {
+                let elapsed = self.start.elapsed().as_millis() as u64;
+                Ok(format!(
+                    r#"{{"result":{{"head_block_number":{}}}}}"#,
+                    BASE + elapsed
+                ))
+            }
+        }
+
+        let policy = HealthPolicy {
+            block_interval: Duration::from_millis(1),
+            head_block_ttl: Duration::from_secs(30),
+            ..quick_policy()
+        };
+        let client = NodeClient::new(
+            HeadTransport {
+                start: std::time::Instant::now(),
+            },
+            nodes(),
+        )
+        .unwrap()
+        .with_health_tracking(policy);
+
+        // Nodes 1 and 2 were seen once, at the start, and are never asked again.
+        let health = client.health.as_ref().expect("tracking is on");
+        health.observe_head_block(1, BASE);
+        health.observe_head_block(2, BASE);
+
+        // Long enough that the chain has moved many blocks past their readings.
+        std::thread::sleep(Duration::from_millis(60));
+        for _ in 0..40 {
+            client.call("x", serde_json::json!({})).unwrap();
+        }
+
+        let report = client.health().expect("tracking is on");
+        assert!(
+            report[0].head_block.expect("node 0 was asked") >= BASE + 60,
+            "the chain must have moved well past their readings: {report:?}"
+        );
+        assert!(
+            !report[1].stale && !report[2].stale,
+            "nodes are not stale for not having been asked: {report:?}"
+        );
+        assert_eq!(
+            client.call_order("x"),
+            vec![0, 1, 2],
+            "and the order must not lock onto whichever node happens to be first"
+        );
+    }
+
+    #[test]
     fn health_is_none_unless_it_was_asked_for() {
         let client = NodeClient::new(FakeTransport::new(vec![]), nodes()).unwrap();
         assert!(client.health().is_none());

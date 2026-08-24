@@ -206,8 +206,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 16,791 lines |
-| Tests | 48 | 351 |
+| Rust source | 4,556 lines | 16,889 lines |
+| Tests | 48 | 352 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |
@@ -702,7 +702,11 @@ ninety seconds of chain, and it is deliberately generous: this only reorders a l
 shuffling a usable node backwards on weak evidence costs more than leaving it alone. Raise
 `stale_block_threshold` to disable the check in practice if even that is too eager.
 
-Observations are also **aged forward at the block rate before being compared**. Two nodes
+Observations are also **aged forward at the block rate before being compared**, with the
+credit kept fractional and only the resulting gap floored. That combination makes the
+apparent gap between nodes that are genuinely in sync **exactly zero**, at any latency —
+a derived bound rather than a measured one. An earlier version floored each projection
+individually, which discarded the very term that cancels and left a residual block. Two nodes
 are essentially never observed at the same instant, and the chain keeps producing blocks in
 between, so comparing raw numbers measures the gap between the *observations* rather than
 between the nodes. Without that correction a node that is perfectly current gets judged
