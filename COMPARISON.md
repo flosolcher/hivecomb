@@ -84,6 +84,52 @@ at commit `2026-07-18`. Numbers move; re-measure before relying on them.
 
 ---
 
+### Measured, against every Rust library named here
+
+For a long time this document carried timings for the Python and Node libraries and none
+for the Rust ones, which is not a fair way to present a comparison whatever the intent.
+These are the Rust numbers, for everything named above.
+
+Same machine, same task, pinned to one core and run under a memory cap. Minimum of
+fifteen interleaved windows — each library gets a window in turn, rather than all of one
+library's windows and then the next, because this machine's governor ramps the clock
+during a run and whoever went first would be measured cold. The payload varies every
+iteration. Reproduce with [`benches/rust-libraries`](benches/rust-libraries).
+
+Before anything is timed, all three are required to produce the **same transaction
+digest** for the same transaction. They do. That is worth more than the timings: it is
+the value the chain signs, so it means three independently written serializers agree byte
+for byte, and it is the check that makes the rest of the table meaningful.
+
+| microseconds | hivecomb 0.1.0 | hive-xylem 0.1.6 | hive-rs 0.1.0 | spread |
+|---|---|---|---|---|
+| serialize + digest, 1 transfer | 1.06 | 1.87 | 1.39 | 2% |
+| serialize + digest, 10 `custom_json` | 4.61 | 7.05 | 4.57 | 5% |
+| sign a transfer | 68.79 | 68.17 | 102.70 | 5% |
+| encrypt a memo | 70.14 | `hive_memo` 0.1.2: 151.63 | — | 4% |
+
+**How to read this, because the numbers mislead if taken flat.**
+
+The `spread` column is `(median − minimum) / minimum` across that row. **A difference
+smaller than the spread is not a difference** — so the 10-operation row and the signing
+row are ties, not wins for anybody.
+
+Most of the digest rows is work every library does identically. The CPU here has no SHA
+extensions, so SHA-256 runs in software at about 180 MB/s: roughly 1.9 µs of a 344-byte
+digest, against 0.8 µs to serialize it. That shared cost is why the digest rows converge
+as the payload grows, and it means these rows say less about the three serializers than
+their spread suggests. On a CPU with SHA-NI the whole column would move, for all of them.
+
+The signing row is dominated by elliptic curve arithmetic, which all three hand to
+libsecp256k1 — so it is close, and it should be. `hive-xylem`'s API takes the WIF and
+chain id as strings and therefore re-parses both on every call, which is 1.34 µs of its
+figure and an API choice rather than an implementation one; it is measured separately in
+the harness so a reader can account for it.
+
+`hive_memo` does memo encryption only, so it appears in one row and cannot appear in the
+others. `hive-rs` and `hive-xylem` are general-purpose SDKs and `hive_memo` is a focused
+library, which is a reasonable thing to be.
+
 ### What hivecomb took from xylem
 
 Reading xylem changed six things here. They are listed before the comparison table
@@ -343,8 +389,15 @@ a month against this project's zero. It is beem's designated successor and says 
 | signed-message envelope (`Message`) | yes, V1 and V2 | yes, V1 and V2 |
 | image upload | yes | no |
 | verified against hived itself | no | 57/57 operations |
-| beem's crypto-critical defects | [fixed independently, first](SECURITY_FINDINGS.md#the-findings-outlive-beem-so-there-is-someone-to-tell) | fixed |
-| beem's serialization defects | [13 carried forward](SECURITY_FINDINGS.md#the-findings-outlive-beem-so-there-is-someone-to-tell) | fixed |
+| beem's crypto-critical defects | [fixed independently, and first](SECURITY_FINDINGS.md#the-findings-outlive-beem-so-there-is-someone-to-tell) | fixed |
+
+Both libraries inherit beem's serialization behaviour in places, and
+[SECURITY_FINDINGS.md](SECURITY_FINDINGS.md#the-findings-outlive-beem-so-there-is-someone-to-tell)
+records which of beem's issues survive into each — thirteen into nectar, none into this
+crate, which had the advantage of being written after the audit rather than before it.
+Those were reported to nectar's maintainer rather than only published here, and nectar
+had already fixed the entire crypto-critical set independently, before this project
+existed. A table row is the wrong shape for that, which is why it is a paragraph.
 
 The `Message` row is checked rather than asserted: `tests/nectar_message_interop.py`
 loads both libraries in one interpreter and compares the V1 envelope constants, which
@@ -493,8 +546,8 @@ niche recorded here was backwards — see
 | 20 | 167.3 µs | 165.4 µs | 179.7 µs | dhive 1.08× |
 | 50 | 230.2 µs | 232.9 µs | 331.2 µs | dhive 1.43× |
 
-**hivecomb wins at small transactions and loses at large ones. Where exactly it crosses
-over depends on the machine**, so treat the number as a range rather than a constant:
+**hivecomb is faster at small transactions and slower at large ones. Where exactly the
+two cross over depends on the machine**, so treat the number as a range rather than a constant:
 **between about 6 and 15 operations**. The table above crosses at 12–15; an independent
 evaluator running the same method on different hardware measured the crossing between 5
 and 8, with a faster dhive and a slower hivecomb at n=50 both pushing it left.
@@ -553,8 +606,8 @@ so what it renders is what was signed.
 
 "Many" has two meanings here and they point opposite ways. Many operations under one key is
 the case above. Many *signatures* over one transaction — multiple authorities, or a
-multi-signature account — is the case where signing dominates, and signing is where
-hivecomb wins:
+multi-signature account — is the case where signing dominates, and signing is where this
+crate's curve arithmetic shows:
 
 |  keys | dhive 1.3.6 | hivecomb | |
 |---|---|---|---|

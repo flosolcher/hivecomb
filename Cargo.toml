@@ -2,8 +2,10 @@
 resolver = "2"
 members = ["hivecomb", "hivecomb-py", "hivecomb-node"]
 # cargo-fuzz needs nightly; the library is pinned to stable with a measured MSRV.
-# Excluded so `--workspace` and the MSRV job never try to build it.
-exclude = ["fuzz"]
+# `benches/rust-libraries` pulls in the other Rust Hive crates purely to measure them,
+# and they have no business in this crate's dependency tree or its MSRV job.
+# Excluded so `--workspace` and the MSRV job never try to build either.
+exclude = ["fuzz", "benches/rust-libraries"]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,21 @@
+[package]
+name = "hivecomb-rust-comparison"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Measures hivecomb against the other Rust Hive libraries, on identical work."
+
+# Excluded from the workspace on purpose. These are third-party crates pulled in only to
+# be measured; they have no business in hivecomb's dependency tree, its MSRV job, or its
+# `cargo test --workspace`. Same reasoning as `fuzz/`.
+[dependencies]
+hivecomb = { path = "../../hivecomb", features = ["rpc", "memo"] }
+hive-xylem = "0.1.6"
+hive-rs = { version = "0.1.0", default-features = false }
+hive_memo = "0.1.2"
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4.45", default-features = false }
+
+[profile.release]
+debug = false
