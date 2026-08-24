@@ -259,18 +259,24 @@ maturin build --release  # abi3 wheel, CPython 3.8+
 
 ## Speed, against beem
 
-Both libraries signing identical operations, same machine, same interpreter
-(CPython 3.8, the newest beem 0.24.26 supports). Medians of nine one-second windows.
+Both libraries signing identical operations, same machine, same interpreter, pinned
+to one core. Medians of seven one-second windows, with the **payload varied on every
+call** — signing grinds until the signature is canonical, and how many attempts that
+takes depends on the digest, so a fixed payload measures one payload's luck over and
+over. CPython 3.12, beem 0.24.26 on the `ecdsa` backend a default install selects.
+
+Reproduce with `tests/bench_vs_beem.py`.
 
 |  | hivecomb | beem 0.24.26 | |
 |---|---|---|---|
-| sign a message | 139 µs | 35 ms | ~250× |
-| sign a `custom_json` | 102 µs | 33 ms | ~330× |
-| sign a `transfer` | 86 µs | 31 ms | ~360× |
-| serialize and digest, no signing | 19 µs | 151 µs | ~8× |
+| sign a message | 72.9 µs | 24.4 ms | ~335× |
+| sign a `custom_json` | 90.5 µs | 27.9 ms | ~308× |
+| sign a `transfer` | 90.1 µs | 26.5 ms | ~294× |
+| serialize and digest, no signing | **9.8 µs** | **65.2 µs** | **~6.6×** |
 
 Both produce the same digest — `cef35a5b34…` — which is checked before anything is
-timed. A benchmark of two implementations that disagree measures nothing.
+timed, and a mismatch aborts the run rather than printing a table. A benchmark of two
+implementations that disagree measures nothing.
 
 **Those ratios need three caveats, and they matter more than the numbers.**
 

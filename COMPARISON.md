@@ -265,15 +265,21 @@ a month against this project's zero. It is beem's designated successor and says 
 ### Measured, on the same machine in the same interpreter
 
 Both libraries installed side by side on CPython 3.12, signing identical operations
-from identical inputs. Median of seven one-second windows, because signature grinding
-— retrying until the signature is canonical — makes any single window noisy.
+from identical inputs, pinned to one core. Median of seven one-second windows, because
+signature grinding — retrying until the signature is canonical — makes any single
+window noisy, and with the **payload varied on every call**, because a fixed payload
+repeats one payload's grind count for the whole run. Taking medians over a fixed
+payload makes the result *stable*, which hides that bias rather than removing it.
+
+Reproduce with `tests/bench_vs_nectar.py`, which checks both produce the same digest
+before timing anything and aborts if they do not.
 
 |  | hivecomb | hive-nectar | |
 |---|---|---|---|
-| sign a message (raw ECDSA) | 74 µs | 155 µs | 2.1× |
-| sign a `custom_json` | 75 µs | 260 µs | 3.5× |
-| sign a `transfer` | 116 µs | 275 µs | 2.4× |
-| serialize and digest, no signing | **8.7 µs** | **65 µs** | **7.4×** |
+| sign a message (raw ECDSA) | 75.6 µs | 155.8 µs | 2.1× |
+| sign a `custom_json` | 176.6 µs | 450.9 µs | 2.6× |
+| sign a `transfer` | 158.9 µs | 476.7 µs | 3.0× |
+| serialize and digest, no signing | **14.7 µs** | **121.1 µs** | **8.2×** |
 
 The last row is the one that measures what actually differs *against Python*. Both
 libraries hand the elliptic curve arithmetic to libsecp256k1, so the signature itself
@@ -282,55 +288,6 @@ the WIF, hashing, and grinding for a canonical signature — done in Rust rather
 Python. The gap in the last row is serialization alone, with no cryptography in it.
 
 **Do not carry that conclusion to JavaScript. It inverts.** See below.
-
-## The Node comparison: dhive
-
-Measured against [`@hiveio/dhive`](https://github.com/openhive-network/dhive) 1.3.2 on
-Node 22, same process, same key, a real `custom_json` payload. Interleaved A/B windows
-with the payload varied per iteration, so each call grinds a fresh signature, and both
-JITs warmed first. Contributed by an outside evaluator and reproduced here.
-
-|  | hivecomb | dhive 1.3.2 | |
-|---|---|---|---|
-| sign a `custom_json` | 95.9 µs | 125.4 µs | **hivecomb 1.31×** |
-| serialize and digest, no signing | 11.4 µs | 6.2 µs | **dhive 1.86×** |
-
-**hivecomb wins on signing and loses on serialization**, which is the opposite of the
-Python result on the second row. dhive's serializer is already fast JavaScript, and the
-napi boundary — converting a JS operations array into Rust structures — costs more than
-Rust serialization saves.
-
-It is worth being precise about *why*, because the obvious guess is wrong. A fixed
-crossing cost would be amortised by a larger payload, so the gap should close as
-payloads grow. Measured, it widens:
-
-| operations × array items | dhive | hivecomb | |
-|---|---|---|---|
-| 1 × 1 | 14.9 µs | 13.5 µs | hivecomb 1.10× |
-| 1 × 40 | 15.5 µs | 22.7 µs | dhive 1.47× |
-| 1 × 400 | 73.2 µs | 94.9 µs | dhive 1.30× |
-| 10 × 40 | 88.7 µs | 160.6 µs | dhive 1.81× |
-| 50 × 40 | 411.3 µs | 809.0 µs | dhive 1.97× |
-
-The conversion is **per item**: every array element and every string crosses
-individually. So there is no payload size at which serializing in Rust pays for itself
-from Node. For the addon, the win is the grinding loop and nothing else.
-
-### What that means for a JavaScript adopter
-
-Take `hivecomb-node` for a **CPU-bound signing workload** — bulk or batch signing, an
-indexer, a service signing thousands of operations a second — where 30 µs a signature
-compounds.
-
-Do not take it for a **latency-bound** one. The evaluator's own verdict on their
-trading bot was no, and the arithmetic is worth repeating: their path is dominated by a
-mandatory three-block wait, about nine seconds of consensus, plus REST latency. Signing
-is 125 µs of a >9,000 ms path, so saving 30 µs is roughly 0.0003% — unmeasurable. The
-addon is also signing-only with no network layer, so it does not touch the part that
-actually costs them.
-
-That is the honest shape of it: this crate is worth reaching for when signing is your
-bottleneck, and it usually is not.
 
 Before any of it was timed, both were asked for the digest of the same transaction:
 
@@ -390,6 +347,107 @@ more thoroughly than a workaround. And one finding this project published agains
 — that `unicodify` corrupts control characters — was **wrong**; beem and nectar are both
 right, and `hivecomb` had "fixed" correct behaviour into a real bug of its own. That
 retraction is in [SECURITY_FINDINGS.md](SECURITY_FINDINGS.md#8).
+
+## The Node comparison: dhive
+
+Measured against [`@hiveio/dhive`](https://github.com/openhive-network/dhive) 1.3.6 on
+Node 22, same process, same key, a real `custom_json` payload. The run is pinned to one
+core, A and B alternate window by window so frequency drift hits both equally, the
+payload varies on every iteration, and the reported figure is the **minimum** window —
+interference can only make a window slower, so the fastest one is closest to the true
+cost. Window spread was 3–8%, which is printed by the harness rather than assumed.
+
+Two things are checked before anything is timed: that both produce the same digest, and
+that **dhive itself recovers the correct public key from hivecomb's signature**. The two
+do *not* produce identical signature bytes, and that is correct rather than a defect —
+any canonical signature over the digest is valid and the two grind to different ones, so
+byte-equality would be the wrong test.
+
+### Signing a transaction — the call an application actually makes
+
+|  ops | dhive 1.3.6 | hivecomb | |
+|---|---|---|---|
+| 1 | 123.3 µs | **88.5 µs** | **hivecomb 1.39×** |
+| 2 | 123.8 µs | **94.2 µs** | **hivecomb 1.31×** |
+| 5 | 130.5 µs | **104.7 µs** | **hivecomb 1.25×** |
+| 10 | 149.9 µs | **133.3 µs** | **hivecomb 1.13×** |
+| 20 | 171.2 µs | 186.8 µs | dhive 1.08× |
+| 30 | 190.9 µs | 239.4 µs | dhive 1.25× |
+| 50 | 242.1 µs | 344.3 µs | dhive 1.42× |
+
+**hivecomb wins up to about fifteen operations in one transaction and loses beyond.**
+Essentially every real Hive transaction is one to four operations, so the common case is
+the winning one — but the crossover is real and it is stated here rather than left for
+someone to discover.
+
+### Why: the advantage is the curve, not the serializer
+
+|  | dhive | hivecomb | |
+|---|---|---|---|
+| one signature, raw ECDSA | 103.3 µs | **71.3 µs** | hivecomb 1.45× |
+| overhead above that floor, at 1 operation | 18.9 µs | 19.0 µs | identical |
+
+That second row is the whole story. hivecomb wins at one operation *only* because
+libsecp256k1 through Rust beats dhive's curve arithmetic; the non-cryptographic work
+around it costs the two almost exactly the same.
+
+### Serialization alone, with no signing, is a loss
+
+|  ops | dhive 1.3.6 | hivecomb | |
+|---|---|---|---|
+| 1 | 8.3 µs | 11.5 µs | dhive 1.38× |
+| 10 | 21.4 µs | 46.6 µs | dhive 2.18× |
+| 50 | 69.8 µs | 216.6 µs | dhive 3.10× |
+| 200 | 235.1 µs | 891.4 µs | dhive 3.79× |
+
+This is the **opposite** of the Python result, where serialization is where a compiled
+core pays. The reason is arithmetic rather than mystery: measured directly, hivecomb's
+Rust serializer is only about **1.4× faster than dhive's JavaScript** — dhive's
+serializer is good — and 1.4× is not enough headroom to also pay for marshalling
+operations across the napi boundary. Crossing costs more than compiling saves.
+
+Two rounds of work went into narrowing this and are worth recording, because both were
+real and neither was sufficient:
+
+* `operation_from_json` deep-copied every operation's JSON tree before converting it,
+  on a vector the function already owned. Removing the copy cut the 200-operation
+  digest from 6.3× slower to 3.8×.
+* Operations may be passed as a pre-stringified JSON array instead of a JS array. One
+  string crosses once, where an array is converted field by field. Worth 25–30%.
+
+A third change mattered more than either, and it was on the way *out* rather than in:
+`signTransaction` built a `serde_json::Value` of the whole signed transaction and let
+napi walk that tree node by node. At 50 operations the return path cost more than the
+elliptic curve work did — signing was 239 µs of a 508 µs call. Rendering straight to a
+JSON string and letting V8's `JSON.parse` do the rest took it to 344 µs.
+
+What that change deliberately does *not* do is hand back the operations array the caller
+passed in. That would be faster still and it would be wrong: hivecomb normalises
+operations on the way in — an object-valued `json_metadata` becomes the JSON *string*
+the signature actually covers — so echoing the caller's own array could return a
+transaction that does not match what was signed. In a signing library that trade is not
+available.
+
+### What that means for a JavaScript adopter
+
+Take `hivecomb-node` when **signing is your bottleneck** — bulk or batch signing, an
+indexer, a service signing many transactions a second, each of them the ordinary one or
+two operations. There the margin is 1.3–1.4× and it compounds.
+
+Do not take it for a **latency-bound** path. An evaluator's verdict on their trading bot
+was no, and the arithmetic is worth repeating: their path is dominated by a mandatory
+three-block wait, about nine seconds of consensus, plus REST latency. Signing is ~123 µs
+of a >9,000 ms path, so saving 35 µs is roughly 0.0004% — unmeasurable. The addon is
+also signing-only with no network layer, so it does not touch the part that actually
+costs them.
+
+Do not take it to serialize large batches of operations into a single transaction
+without signing them. dhive is faster at that and the gap widens with size.
+
+An earlier version of this section suggested batch signing as the adoption niche. That
+was a guess, it was contributed in good faith by the evaluator who then measured it, and
+it was wrong in exactly the wrong direction — batch signing is where hivecomb *loses*.
+The crossover table above replaces it, at their request.
 
 ## What hivecomb deliberately does not do
 

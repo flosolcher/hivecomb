@@ -24,14 +24,16 @@ It deliberately shadows beem's package names, so **do not install it alongside b
 
 ## What you get for switching
 
-Speed, measured on the same machine with both libraries signing identical operations
-(CPython 3.8, medians of nine one-second windows):
+Speed, measured on the same machine with both libraries signing identical operations,
+pinned to one core, payload varied on every call (CPython 3.12, medians of seven
+one-second windows, beem 0.24.26 on the `ecdsa` backend a default install selects):
 
 | | hivecomb-beem | beem 0.24.26 | |
 |---|---|---|---|
-| sign a `custom_json` | 102 µs | 33 ms | ~330× |
-| sign a `transfer` | 86 µs | 31 ms | ~360× |
-| serialize and digest, no signing | 19 µs | 151 µs | ~8× |
+| sign a message | 72.9 µs | 24.4 ms | ~335× |
+| sign a `custom_json` | 90.5 µs | 27.9 ms | ~308× |
+| sign a `transfer` | 90.1 µs | 26.5 ms | ~294× |
+| serialize and digest, no signing | **9.8 µs** | **65.2 µs** | **~6.6×** |
 
 The signing rows are that wide because of *which* backend beem ends up on, not because
 Python is slow. beem prefers `secp256k1` and falls back to `cryptography`, and on the

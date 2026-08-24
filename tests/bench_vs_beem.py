@@ -22,6 +22,8 @@ install gets. The row worth reading is the last one -- serialization with no
 cryptography in it.
 """
 
+import itertools
+import statistics, time, hivecomb
 from beembase.operations import Custom_json, Transfer
 from beembase.signedtransactions import Signed_Transaction
 from beemgraphenebase.ecdsasig import sign_message as beem_sign
@@ -32,6 +34,34 @@ N, P, E = 5, 3721182122, "2026-08-22T14:30:00"
 CJ = {"required_auths": [], "required_posting_auths": ["alice"], "id": "my_app", "json": '{"a":1}'}
 TR = {"from": "alice", "to": "bob", "amount": "1.234 HIVE", "memo": "thanks"}
 REF = hivecomb.BlockRef.from_parts(N, P)
+
+# Signing grinds until the signature is canonical, and how many attempts that takes
+# depends on the digest. A fixed payload therefore repeats one payload's grind count
+# for the whole run -- taking medians over many windows makes the result *stable*,
+# which is precisely what hides the bias rather than removing it. Pointed out by an
+# evaluator whose Node harness varies the payload per iteration; these did not.
+#
+# So each call now gets a distinct payload, and the reported figure is an average over
+# the grind distribution rather than a confident measurement of one sample.
+_counter = itertools.count()
+
+
+def cj(i=None):
+    """A custom_json whose payload differs on every call."""
+    n = next(_counter) if i is None else i
+    return {
+        "required_auths": [],
+        "required_posting_auths": ["alice"],
+        "id": "my_app",
+        "json": '{"n":%d}' % n,
+    }
+
+
+def tr(i=None):
+    """A transfer whose memo differs on every call."""
+    n = next(_counter) if i is None else i
+    return {"from": "alice", "to": "bob", "amount": "1.234 HIVE", "memo": "m%d" % n}
+
 
 # beem's known_chains["HIVE"] carries the pre-HF24 all-zero chain id, so it must be
 # given the real one or it signs against a chain that has not existed since 2020.
@@ -72,17 +102,23 @@ except Exception as exc:
 print(f"  digest hivecomb {ours[:32]}")
 print(f"  digest beem     {theirs[:32]}")
 print(f"  {'MATCH' if ours == theirs else 'DIFFER'}\n")
+if ours != theirs:
+    # Printing DIFFER and then timing anyway makes this a check that cannot fail:
+    # the run still produces a confident-looking table comparing two things that do
+    # not compute the same digest.
+    raise SystemExit("hivecomb and beem disagree on the digest; the timings would be "
+                     "meaningless, so nothing was run")
 
 cases = [
     ("sign a message (raw ECDSA)", lambda: hivecomb.sign_message("challenge", WIF),
                                    lambda: beem_sign("challenge", WIF)),
-    ("sign a custom_json", lambda: hivecomb.sign_transaction([("custom_json", CJ)], REF, [WIF]),
-                          lambda: btx(Custom_json, CJ, "custom_json")),
-    ("sign a transfer", lambda: hivecomb.sign_transaction([("transfer", TR)], REF, [WIF]),
-                       lambda: btx(Transfer, TR, "transfer")),
+    ("sign a custom_json", lambda: hivecomb.sign_transaction([("custom_json", cj())], REF, [WIF]),
+                          lambda: btx(Custom_json, cj(), "custom_json")),
+    ("sign a transfer", lambda: hivecomb.sign_transaction([("transfer", tr())], REF, [WIF]),
+                       lambda: btx(Transfer, tr(), "transfer")),
     ("serialize + digest, no signing",
-     lambda: hivecomb.transaction_digest([("custom_json", CJ)], REF, E),
-     lambda: bdig(Custom_json, CJ, "custom_json")),
+     lambda: hivecomb.transaction_digest([("custom_json", cj())], REF, E),
+     lambda: bdig(Custom_json, cj(), "custom_json")),
 ]
 print(f"  {'':34} {'hivecomb':>10} {'beem':>10} {'ratio':>8}")
 for label, a, b in cases:
