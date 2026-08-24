@@ -17,7 +17,7 @@ That asks a live node to serialize every operation and compares digests. It need
 account, no key and no broadcast, and it is the authority on whether the bytes are
 right.
 
-This is not belt-and-braces. On 2026-08-22 it found four defects that 292 unit tests and
+This is not belt-and-braces. On 2026-08-22 it found four defects that the whole unit-test suite and
 a 134-case differential oracle against `beem` had all missed — two field orders, an
 integer width, and a JSON shape hived rejects outright. Every one would have produced a
 transaction the chain refuses.

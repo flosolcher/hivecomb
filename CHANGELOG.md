@@ -76,7 +76,7 @@ disclose keys:
 ### Fixed in hivecomb itself, found by asking hived
 
 `tests/hived_serialization_oracle.py` asks a node to serialize each operation and
-compares digests. It found four defects that 292 unit tests and a 134-case differential
+compares digests. It found four defects that the whole unit-test suite and a 134-case differential
 oracle against `beem` had all missed. Each would have produced a transaction the chain
 rejects:
 

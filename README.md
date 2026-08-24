@@ -200,7 +200,7 @@ CREDITS.md           upstream authorship
 ## Building
 
 ```bash
-cargo test --all-features                  # 295 unit tests + 10 live-node fixtures
+cargo test --all-features                  # 322 unit tests + 10 live-node fixtures
 cargo build -p hivecomb --no-default-features  # signing only: no network, no cipher, no scrypt
 ```
 
@@ -318,7 +318,8 @@ $ python tests/hived_serialization_oracle.py
 57 cases: 57 identical, 0 differ, 0 errored
 ```
 
-This is the authority. It found four defects that the beem oracle and 295 unit tests had
+This is the authority. On 2026-08-22 it found four defects that the beem oracle and the
+whole unit-test suite had
 all missed — three field-order or width errors (`escrow_transfer`, `limit_order_create2`,
 the HF28 `pair_id`, which hived declares `uint8_t`), and one JSON shape hived rejects
 outright. Every one of them would have produced a transaction the chain refuses.

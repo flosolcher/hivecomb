@@ -39,8 +39,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 15,619 lines |
-| Tests | 48 | 305 |
+| Rust source | 4,556 lines | 16,194 lines |
+| Tests | 48 | 337 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |
@@ -256,11 +256,20 @@ a month against this project's zero. It is beem's designated successor and says 
 | Python | 3.10+ | 3.8+ |
 | HAF client | yes | no |
 | `AccountSnapshot` | yes (1,023 lines) | no |
-| signed-message envelope (`Message`) | yes, V1 and V2 | no |
+| signed-message envelope (`Message`) | yes, V1 and V2 | yes, V1 and V2 |
 | image upload | yes | no |
 | verified against hived itself | no | 57/57 operations |
 | beem's crypto-critical defects | fixed | fixed |
 | beem's serialization defects | 13 carried forward | fixed |
+
+The `Message` row is checked rather than asserted: `tests/nectar_message_interop.py`
+loads both libraries in one interpreter and compares the V1 envelope constants, which
+are what decide whether a message signed by one verifies under the other. They are
+identical. The V2 payload is the same list in the same order with the same JSON
+separators, with one difference in the signed bytes: nectar stamps an offset-aware
+timestamp (`+00:00`), where beem used a naive `utcnow()` and this project keeps that
+rendering. Neither is wrong and signatures still verify across the two, because the
+verifier reads the timestamp out of the payload it was given.
 
 ### Measured, on the same machine in the same interpreter
 
