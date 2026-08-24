@@ -1041,6 +1041,18 @@ fn hivecomb(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add(
         "__all__",
         vec![
+            "MAX_AUTHORITY_MEMBERSHIP",
+            "MAX_BENEFICIARIES",
+            "MAX_CUSTOM_DATA_LEN",
+            "MAX_CUSTOM_ID_LEN",
+            "MAX_CUSTOM_OPS_PER_BLOCK",
+            "MAX_MEMO_LEN",
+            "MAX_PERMLINK_LEN",
+            "MAX_PROPOSAL_IDS",
+            "MAX_PROPOSAL_SUBJECT_LEN",
+            "MAX_TITLE_LEN",
+            "MAX_WITNESS_URL_LEN",
+            "VOTING_MANA_REGENERATION_SECONDS",
             "BlockRef",
             "PrivateKey",
             "PublicKey",

@@ -13,6 +13,22 @@ from typing import Any, Mapping, Sequence, TypedDict
 
 Operation = tuple[str, Mapping[str, Any]]
 
+# hived's protocol limits, re-exported from the Rust core so callers read them
+# rather than restating them. Exceeding one gets the whole transaction refused,
+# not the offending operation.
+MAX_AUTHORITY_MEMBERSHIP: int
+MAX_BENEFICIARIES: int
+MAX_CUSTOM_DATA_LEN: int
+MAX_CUSTOM_ID_LEN: int
+MAX_CUSTOM_OPS_PER_BLOCK: int
+MAX_MEMO_LEN: int
+MAX_PERMLINK_LEN: int
+MAX_PROPOSAL_IDS: int
+MAX_PROPOSAL_SUBJECT_LEN: int
+MAX_TITLE_LEN: int
+MAX_WITNESS_URL_LEN: int
+VOTING_MANA_REGENERATION_SECONDS: int
+
 class SignedTransaction(TypedDict):
     ref_block_num: int
     ref_block_prefix: int

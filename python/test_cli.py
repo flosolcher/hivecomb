@@ -335,6 +335,23 @@ def _():
     assert run(["currentnode"]).index("https://b.example") < run(["currentnode"]).index("https://a.example")
 
 
+@check("the config is created with owner-only permissions, not fixed afterwards")
+def _config_permissions():
+    # Nothing secret goes in the config -- `config set` refuses any key outside
+    # DEFAULT_CONFIG and signing keys live in the wallet -- so this is hygiene. It is
+    # pinned because the previous version wrote the file and chmod-ed it afterwards,
+    # inside a `try/except OSError: pass`: a window where it existed world-readable, and
+    # a silent failure if narrowing it did not work.
+    import os
+    import stat
+
+    from beem.cli import load_config, save_config
+
+    path = save_config(load_config())
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    assert mode == 0o600, f"config is mode {mode:o}, expected 600"
+
+
 @check("an unknown config key is refused")
 def _():
     text = run(["set", "nonsense", "1"], expect_exit=1)

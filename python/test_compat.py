@@ -14,6 +14,7 @@ Network tests are skipped unless COMB_COMPAT_LIVE=1 is set.
 
 import json
 import os
+import pathlib
 import sys
 import traceback
 
@@ -590,6 +591,12 @@ def _():
             stub_names.add(node.name)
             args = [a.arg for a in node.args.args]
             stub_sigs[node.name] = args
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            # Module-level constants are declared `NAME: int`, which is an AnnAssign
+            # rather than a def or a class. Without this the walk cannot see them, and
+            # a constant exported but never stubbed would read as a stub that is missing
+            # it -- which is what happened when twelve limits were added.
+            stub_names.add(node.target.id)
 
     # `__all__`, not `dir()`. Python binds a submodule on its parent at import, so a
     # wheel-installed `hivecomb` also has `hivecomb.hivecomb` in `dir()` while a bare
@@ -603,7 +610,10 @@ def _():
         "__all__ must not carry dunders — `from hivecomb import *` would rebind them"
     )
     # TypedDicts and aliases in the stub are not module attributes; ignore those.
-    helpers = {"SignedTransaction", "AuthorityCheck", "Operation"}
+    # `__version__` is a real attribute that the stub must declare for type checkers and
+    # that `__all__` must *not* carry -- the assertion above requires exactly that -- so
+    # it is exempt here rather than being a contradiction between the two checks.
+    helpers = {"SignedTransaction", "AuthorityCheck", "Operation", "__version__"}
 
     missing = real - stub_names
     assert not missing, f"module exports these, the stub does not describe them: {sorted(missing)}"

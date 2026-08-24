@@ -142,11 +142,22 @@ def load_config():
 def save_config(config):
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2, sort_keys=True))
+    # Create with the permissions rather than fixing them afterwards. Writing first and
+    # chmod-ing after leaves a window where the file exists world-readable, and the
+    # `except OSError: pass` around the chmod meant a failure to narrow it was silent.
+    #
+    # Nothing secret goes in here -- `cmd_set` refuses any key outside DEFAULT_CONFIG,
+    # and signing keys live in the wallet -- so this is hygiene rather than a fix for an
+    # exposure. It costs one line and removes a question a reader would otherwise have
+    # to answer by reading `cmd_set`.
+    body = json.dumps(config, indent=2, sort_keys=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(body)
+    except BaseException:
+        os.close(fd)
+        raise
     return path
 
 
@@ -1996,7 +2007,13 @@ def build_parser():
                "what hivecomb adds over beem.",
     )
     parser.add_argument("--node", action="append", help="node URL; repeat for several")
-    parser.add_argument("--key", action="append", help="signing WIF; repeat for several")
+    parser.add_argument(
+        "--key",
+        action="append",
+        help="signing WIF; repeat for several. Visible to every user on the box in "
+             "/proc/PID/cmdline and saved to your shell history -- prefer the wallet, "
+             "or COMB_WIF, which at least is not world-readable",
+    )
     parser.add_argument("--account", help="the account to act as")
     parser.add_argument("--dry-run", action="store_true",
                         help="build and sign, but do not broadcast")
