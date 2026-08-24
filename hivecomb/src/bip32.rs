@@ -82,6 +82,16 @@ impl std::fmt::Debug for ExtendedPrivateKey {
     }
 }
 
+/// The BIP-32 identifier of a node: the first four bytes of `ripemd160(sha256(pubkey))`.
+///
+/// Takes the public key rather than the node so a caller that has already derived it does
+/// not pay for a second scalar multiplication.
+fn fingerprint_of(public: &PublicKey) -> [u8; 4] {
+    let sha = Sha256::digest(public.to_bytes());
+    let ripe = <ripemd::Ripemd160 as Digest>::digest(sha);
+    [ripe[0], ripe[1], ripe[2], ripe[3]]
+}
+
 impl ExtendedPrivateKey {
     /// Derive the master key from a seed.
     ///
@@ -132,9 +142,7 @@ impl ExtendedPrivateKey {
 
     /// The first four bytes of `ripemd160(sha256(pubkey))`, identifying this node.
     pub fn fingerprint(&self) -> [u8; 4] {
-        let sha = Sha256::digest(self.public_key().to_bytes());
-        let ripe = <ripemd::Ripemd160 as Digest>::digest(sha);
-        [ripe[0], ripe[1], ripe[2], ripe[3]]
+        fingerprint_of(&self.public_key())
     }
 
     /// Derive one child.
@@ -144,13 +152,19 @@ impl ExtendedPrivateKey {
         let mut mac = HmacSha512::new_from_slice(&*self.chain_code)
             .map_err(|e| Error::key(format!("HMAC init failed: {e}")))?;
 
+        // Deriving the public key is a scalar multiplication -- at ~23 microseconds it is
+        // by a wide margin the most expensive thing in this function. A normal derivation
+        // needs it for the HMAC and *every* derivation needs it again for the child's
+        // parent fingerprint, so it is computed once here and reused. It used to be
+        // computed twice on the normal path.
+        let public = self.public_key();
         if index >= HARDENED {
             // Hardened: 0x00 || parent private key || index
             mac.update(&[0u8]);
             mac.update(&*self.key.expose_secret());
         } else {
             // Normal: parent public key || index
-            mac.update(&self.public_key().to_bytes());
+            mac.update(&public.to_bytes());
         }
         mac.update(&index.to_be_bytes());
         let i = Zeroizing::new(<[u8; 64]>::from(mac.finalize().into_bytes()));
@@ -175,7 +189,7 @@ impl ExtendedPrivateKey {
                 .depth
                 .checked_add(1)
                 .ok_or_else(|| Error::key("BIP-32 derivation is deeper than 255 levels"))?,
-            parent_fingerprint: self.fingerprint(),
+            parent_fingerprint: fingerprint_of(&public),
             child_number: index,
         })
     }

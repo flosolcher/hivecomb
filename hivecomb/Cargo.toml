@@ -65,5 +65,10 @@ reqwest-transport = ["async", "dep:reqwest", "dep:tokio"]
 
 [dev-dependencies]
 hex = "0.4"
+# For `examples/bench_pipeline.rs` only, which needs to count elliptic-curve operations
+# per signature and therefore has to reach the curve directly. Both are already normal
+# dependencies of this crate, so this adds nothing to a consumer's build.
+secp256k1 = { workspace = true }
+sha2 = { workspace = true }
 # For the async tests only; the library itself pulls in no executor.
 tokio = { version = "1", features = ["rt", "macros", "time", "test-util"] }
