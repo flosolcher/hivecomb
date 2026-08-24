@@ -628,6 +628,226 @@ def _():
 
 
 # --------------------------------------------------------------------------
+# Node health tracking. An addition, not a beem compatibility feature -- beem
+# has no equivalent -- so the first check here is that the default is unchanged.
+
+
+@check("health tracking is off unless asked for")
+def _health_off_by_default():
+    from hivecomb_compat import NodeClient
+
+    client = NodeClient(nodes=["https://a", "https://b"])
+    assert client.health is None
+    assert list(client._call_order("x")) == [0, 1]
+
+
+@check("health: a healthy list keeps the configured order")
+def _health_healthy_order():
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(3, HealthPolicy())
+    assert t.order("x") == [0, 1, 2]
+
+
+@check("health: a failing node sorts last")
+def _health_failing_sorts_last():
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(3, HealthPolicy(api_failures_before_cooldown=2))
+    t.record_failure(0, "x")
+    assert t.order("x") == [0, 1, 2], "one failure is below the threshold"
+    t.record_failure(0, "x")
+    assert t.order("x") == [1, 2, 0]
+    t.record_success(0, "x")
+    assert t.order("x") == [0, 1, 2], "one success clears it"
+
+
+@check("health: one failing method never cools the whole node")
+def _health_one_method():
+    # The rule that makes per-method tracking worth having: a node serving
+    # everything but one API stays first choice for everything else.
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(2, HealthPolicy(failures_before_cooldown=2))
+    for _ in range(20):
+        t.record_failure(0, "account_history_api.get_ops_in_block")
+    assert not t.snapshot()[0]["in_cooldown"]
+    assert t.order("database_api.get_accounts") == [0, 1]
+    assert t.order("account_history_api.get_ops_in_block") == [1, 0]
+
+
+@check("health: failing across methods does cool the whole node")
+def _health_two_methods():
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(2, HealthPolicy(failures_before_cooldown=2))
+    t.record_failure(0, "a.one")
+    t.record_failure(0, "b.two")
+    assert t.snapshot()[0]["in_cooldown"]
+    assert t.order("c.never_failed") == [1, 0]
+
+
+@check("health: a node behind the head sorts after current ones")
+def _health_stale():
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(3, HealthPolicy())
+    t.observe_head_block(0, 1_000)
+    t.observe_head_block(1, 1_100)
+    t.observe_head_block(2, 1_100)
+    assert t.order("x") == [1, 2, 0]
+    assert t.snapshot()[0]["stale"] and not t.snapshot()[1]["stale"]
+
+
+@check("health: reordering never drops a node")
+def _health_never_drops():
+    # The safety property. If every node is unwell the call must still try every
+    # one of them -- a tracker that can exclude a node can turn a partial outage
+    # into a total one.
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(3, HealthPolicy(failures_before_cooldown=1))
+    for i in range(3):
+        t.record_failure(i, "a.one")
+        t.record_failure(i, "b.two")
+    assert sorted(t.order("a.one")) == [0, 1, 2]
+
+
+@check("health: a dead first node stops being tried first")
+def _health_client_skips_dead_node():
+    # Through the client itself rather than the tracker, with the network stubbed.
+    import hivecomb_compat
+    from hivecomb_compat import HealthPolicy, NodeClient
+
+    seen = []
+
+    class Response:
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        url = request.full_url
+        seen.append(url)
+        if url == "https://a":
+            raise OSError("refused")
+        return Response(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}).encode())
+
+    real = hivecomb_compat.urllib.request.urlopen
+    hivecomb_compat.urllib.request.urlopen = fake_urlopen
+    try:
+        client = NodeClient(
+            nodes=["https://a", "https://b", "https://c"],
+            health=HealthPolicy(api_failures_before_cooldown=2),
+        )
+        for _ in range(5):
+            client.call("x")
+    finally:
+        hivecomb_compat.urllib.request.urlopen = real
+
+    assert seen == [
+        "https://a", "https://b",   # call 1
+        "https://a", "https://b",   # call 2, threshold crossed
+        "https://b", "https://b", "https://b",
+    ], seen
+
+    # And the default keeps beem's behaviour: the dead node every time.
+    seen.clear()
+    hivecomb_compat.urllib.request.urlopen = fake_urlopen
+    try:
+        plain = NodeClient(nodes=["https://a", "https://b", "https://c"])
+        for _ in range(3):
+            plain.call("x")
+    finally:
+        hivecomb_compat.urllib.request.urlopen = real
+    assert seen.count("https://a") == 3, seen
+
+
+@check("health: a protocol error is not counted against the node")
+def _health_rpc_error_not_a_node_fault():
+    # The node answered; the request was bad. Counting it would cool the whole
+    # list for one malformed call.
+    import hivecomb_compat
+    from hivecomb_compat import HealthPolicy, NodeClient, RPCError
+
+    class Response:
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        return Response(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "error": {"message": "bad", "code": -32000}}).encode()
+        )
+
+    real = hivecomb_compat.urllib.request.urlopen
+    hivecomb_compat.urllib.request.urlopen = fake_urlopen
+    try:
+        client = NodeClient(nodes=["https://a", "https://b"], health=HealthPolicy())
+        for _ in range(4):
+            try:
+                client.call("x")
+            except RPCError:
+                pass
+    finally:
+        hivecomb_compat.urllib.request.urlopen = real
+
+    report = client.health.snapshot()
+    assert report[0]["consecutive_failures"] == 0, report
+    assert not report[0]["in_cooldown"], report
+
+
+@check("health: the head block is observed from a response that carries one")
+def _health_observes_head_block():
+    import hivecomb_compat
+    from hivecomb_compat import HealthPolicy, NodeClient
+
+    class Response:
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=None):
+        return Response(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"head_block_number": 109242605}}).encode()
+        )
+
+    real = hivecomb_compat.urllib.request.urlopen
+    hivecomb_compat.urllib.request.urlopen = fake_urlopen
+    try:
+        client = NodeClient(nodes=["https://a", "https://b"], health=HealthPolicy())
+        client.call("database_api.get_dynamic_global_properties")
+    finally:
+        hivecomb_compat.urllib.request.urlopen = real
+
+    assert client.health.snapshot()[0]["head_block"] == 109242605
+
+
+# --------------------------------------------------------------------------
 def main():
     print(f"hivecomb compatibility layer: {len(PASS) + len(FAIL)} checks\n")
     for name in PASS:
