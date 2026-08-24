@@ -66,7 +66,12 @@ fn comb_tx(ops: usize, i: u32) -> hivecomb::Transaction {
             } else {
                 Operation::CustomJson(CustomJson {
                     required_auths: vec![],
-                    required_posting_auths: vec!["alice".into()],
+                    // A distinct account per operation. hived allows five custom
+                    // operations per *account* per block and refuses the whole
+                    // transaction beyond that, so ten for one account is not a
+                    // transaction any node would accept. All three builders must
+                    // agree or the digest gate below stops the run.
+                    required_posting_auths: vec![format!("alice{k}")],
                     id: "my_app".into(),
                     json: format!(r#"{{"n":{i},"k":{k}}}"#),
                 })
@@ -106,7 +111,12 @@ fn xylem_tx(ops: usize, i: u32) -> hive_xylem::transaction::Transaction {
             } else {
                 Box::new(CustomJson {
                     required_auths: vec![],
-                    required_posting_auths: vec!["alice".into()],
+                    // A distinct account per operation. hived allows five custom
+                    // operations per *account* per block and refuses the whole
+                    // transaction beyond that, so ten for one account is not a
+                    // transaction any node would accept. All three builders must
+                    // agree or the digest gate below stops the run.
+                    required_posting_auths: vec![format!("alice{k}")],
                     id: "my_app".into(),
                     json: format!(r#"{{"n":{i},"k":{k}}}"#),
                 })
@@ -150,7 +160,12 @@ fn hive_rs_tx(ops: usize, i: u32) -> hive_rs::types::Transaction {
             } else {
                 Operation::CustomJson(CustomJsonOperation {
                     required_auths: vec![],
-                    required_posting_auths: vec!["alice".into()],
+                    // A distinct account per operation. hived allows five custom
+                    // operations per *account* per block and refuses the whole
+                    // transaction beyond that, so ten for one account is not a
+                    // transaction any node would accept. All three builders must
+                    // agree or the digest gate below stops the run.
+                    required_posting_auths: vec![format!("alice{k}")],
                     id: "my_app".into(),
                     json: format!(r#"{{"n":{i},"k":{k}}}"#),
                 })

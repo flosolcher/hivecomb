@@ -64,7 +64,10 @@ const ops = (n, i) =>
     'custom_json',
     {
       required_auths: [],
-      required_posting_auths: ['alice'],
+      // A distinct account per operation. hived allows five custom operations per
+      // *account* per block and refuses the whole transaction beyond that, so ten
+      // for one account is not a transaction any node would accept.
+      required_posting_auths: [`alice${k}`],
       id: 'my_app',
       json: JSON.stringify({ n: i, k, items: [1, 2, 3, 4, 5], tag: 'x'.repeat(20) }),
     },

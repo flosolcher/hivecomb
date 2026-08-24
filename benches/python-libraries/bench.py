@@ -64,7 +64,10 @@ def ops(n, i):
             "custom_json",
             {
                 "required_auths": [],
-                "required_posting_auths": ["alice"],
+                # A distinct account per operation: hived allows five custom
+                # operations per *account* per block and refuses the whole
+                # transaction beyond that.
+                "required_posting_auths": ["alice%d" % k],
                 "id": "my_app",
                 "json": '{"n":%d,"k":%d}' % (i, k),
             },
