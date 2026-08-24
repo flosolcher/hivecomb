@@ -151,12 +151,43 @@ by field. Worth 25–30%.
 | 10 | 149.9 µs | 157.1 µs | **133.3 µs** |
 | 50 | 242.1 µs | 449.4 µs | 344.3 µs |
 
-hivecomb now wins signing up to about fifteen operations in one transaction, where it
-previously crossed over at about five. Beyond that dhive still wins, and the reason is
-structural: hivecomb's serializer is only ~1.4× faster than dhive's JavaScript, which is
-not enough headroom to also pay for crossing the boundary. The win at ordinary sizes is
-the curve arithmetic — 71 µs against dhive's 103 for one signature. The public API and
-`index.d.ts` are unchanged.
+hivecomb now wins signing small transactions and loses large ones, where the crossing
+point moved right by roughly a factor of three. Exactly where it crosses depends on the
+machine — measured between 6 and 15 operations across two sets of hardware — so
+[COMPARISON.md](COMPARISON.md) states it as a range rather than a constant. Real Hive
+transactions are one to four operations, comfortably inside the winning side either way.
+
+Beyond the crossover dhive still wins, and the reason is structural: hivecomb's
+serializer is only ~1.4× faster than dhive's JavaScript, which is not enough headroom to
+also pay for crossing the boundary. The win at ordinary sizes is the curve arithmetic —
+62 µs against dhive's 104 for one signature over an identical pre-hashed digest. The
+public API and `index.d.ts` are unchanged.
+
+**`signTransactionJson`** (Node) returns the signed transaction as JSON text rather than
+as a JavaScript object. Same work and the same signature over the same digest — it shares
+transaction building and key decoding with `signTransaction`, so the two cannot drift — but
+it stops at the string, because a signed transaction's destination is almost always an HTTP
+body and the object form is rendered to JSON, parsed into an object to cross the boundary,
+then serialized straight back by the caller.
+
+Measured to the same finish line as dhive, the JSON body an application would POST:
+
+| ops | dhive 1.3.6 | object | JSON string |
+|---|---|---|---|
+| 1 | 123.7 µs | 89.8 µs | **82.2 µs** — hivecomb 1.50× |
+| 20 | 177.3 µs | 188.7 µs | **156.7 µs** — hivecomb 1.13× |
+| 50 | 254.8 µs | 342.0 µs | 273.7 µs — dhive 1.07× |
+
+On the task that actually gets performed, the crossover moves from about fifteen
+operations to about thirty-five to forty.
+
+Also **`Operation::from_json_owned`** (Rust), which decodes JSON the caller owns without
+copying the payload. `split_operation_json` ended in `arr[1].clone()`, a deep copy of every
+field, and the Node binding was calling it with a value it had just parsed itself.
+
+Many *signatures* is the opposite case from many operations and was already a win: 1.46× at
+one key rising to 1.55× at eight, because each extra signature is curve arithmetic and
+nothing else.
 
 What this deliberately does *not* do is echo back the caller's own operations array,
 which would be faster still and wrong: hivecomb normalises operations on the way in, so

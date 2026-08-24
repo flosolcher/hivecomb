@@ -40,6 +40,24 @@ const tx = signTransaction(
 ## What this is, and is not
 
 It is the **signing and serialization core** — the part that has to be exactly right.
+### Going straight on the wire
+
+`signTransaction` returns a JavaScript object. If the next thing you do is put it in an
+HTTP body — which is usually the case — use `signTransactionJson` instead and skip a
+round trip through an object that only exists to be serialized again:
+
+```js
+const trx = signTransactionJson(operations, blockRef, [key])
+const body = `{"jsonrpc":"2.0","method":"network_broadcast_api.broadcast_transaction",`
+           + `"params":{"trx":${trx}},"id":1}`
+```
+
+Identical work and identical signed bytes; it just stops at the string. Measured to the
+same finish line against dhive 1.3.6 — the body an application would POST — that is
+1.50× at one operation against 1.38× for the object form, and it moves the point where
+dhive overtakes from about fifteen operations to about forty. See
+[COMPARISON.md](../COMPARISON.md).
+
 It is not an RPC client: [`dhive`](https://www.npmjs.com/package/@hiveio/dhive) and
 [`hive-js`](https://www.npmjs.com/package/@hiveio/hive-js) already do that well, and
 this is designed to sit underneath one of them or beside your own fetch calls.
@@ -103,7 +121,7 @@ TypeScript definitions ship with the package. In brief:
 | `BlockRef` | `fromBlockId`, `fromParts` |
 | `TaposCache` | `store`, `storeBlockId`, `blockRef`, `isFresh`, `ageSeconds`, `invalidate` |
 | signing | `signMessage`, `verifyMessage`, `recoverMessage` |
-| transactions | `signTransaction` (WIF strings or `PrivateKey` instances, or a mix), `transactionDigest`, `transactionId` |
+| transactions | `signTransaction` (WIF strings or `PrivateKey` instances, or a mix), `signTransactionJson`, `transactionDigest`, `transactionId` |
 | memos | `encodeMemo`, `decodeMemo`, `isEncryptedMemo` |
 | keys | `generateMnemonic`, `validateMnemonic` |
 | authorities | `checkAuthority` |

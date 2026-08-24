@@ -206,8 +206,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 16,194 lines |
-| Tests | 48 | 337 |
+| Rust source | 4,556 lines | 16,319 lines |
+| Tests | 48 | 339 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |
@@ -471,31 +471,109 @@ niche recorded here was backwards — see
 
 ### Signing a transaction — the call an application actually makes
 
-|  ops | dhive 1.3.6 | hivecomb | |
-|---|---|---|---|
-| 1 | 123.3 µs | **88.5 µs** | **hivecomb 1.39×** |
-| 2 | 123.8 µs | **94.2 µs** | **hivecomb 1.31×** |
-| 5 | 130.5 µs | **104.7 µs** | **hivecomb 1.25×** |
-| 10 | 149.9 µs | **133.3 µs** | **hivecomb 1.13×** |
-| 20 | 171.2 µs | 186.8 µs | dhive 1.08× |
-| 30 | 190.9 µs | 239.4 µs | dhive 1.25× |
-| 50 | 242.1 µs | 344.3 µs | dhive 1.42× |
+|  ops | dhive 1.3.2 | dhive 1.3.6 | hivecomb | |
+|---|---|---|---|---|
+| 1 | 119.8 µs | 121.0 µs | **88.7 µs** | **hivecomb 1.36×** |
+| 2 | 124.2 µs | 126.7 µs | **93.4 µs** | **hivecomb 1.36×** |
+| 5 | 132.5 µs | 134.3 µs | **107.6 µs** | **hivecomb 1.25×** |
+| 8 | 137.9 µs | 137.7 µs | **121.7 µs** | **hivecomb 1.13×** |
+| 10 | 145.3 µs | 145.0 µs | **130.3 µs** | **hivecomb 1.11×** |
+| 15 | 151.5 µs | 152.4 µs | 154.4 µs | dhive 1.01× |
+| 20 | 167.3 µs | 165.4 µs | 179.7 µs | dhive 1.08× |
+| 50 | 230.2 µs | 232.9 µs | 331.2 µs | dhive 1.43× |
 
-**hivecomb wins up to about fifteen operations in one transaction and loses beyond.**
+**hivecomb wins at small transactions and loses at large ones. Where exactly it crosses
+over depends on the machine**, so treat the number as a range rather than a constant:
+**between about 6 and 15 operations**. The table above crosses at 12–15; an independent
+evaluator running the same method on different hardware measured the crossing between 5
+and 8, with a faster dhive and a slower hivecomb at n=50 both pushing it left.
+
 Essentially every real Hive transaction is one to four operations, so the common case is
-the winning one — but the crossover is real and it is stated here rather than left for
-someone to discover.
+comfortably on the winning side of that range whichever end you land on. The crossover is
+stated here rather than left for someone to discover.
+
+Both dhive versions are in the table because the disagreement between those two runs
+looked at first like a dhive regression between 1.3.2 and 1.3.6. Measured on one machine
+in one run, it is not: the two versions are within noise of each other at every size. The
+difference is the hardware.
+
+### The end-to-end task: producing the body you POST
+
+The table above returns a JavaScript object, which is what dhive returns too. But a
+signed transaction's destination is almost always an HTTP request body, and the object is
+not that — the caller's next act is `JSON.stringify`. hivecomb renders the transaction to
+JSON internally, has V8 parse it into an object to cross the boundary, and then the caller
+serializes it straight back. Two of those three steps are loss, and they scale with the
+operation count.
+
+`signTransactionJson` stops at the string. Same work, same signature over the same digest;
+it shares transaction building and key decoding with `signTransaction`, so the two cannot
+drift apart.
+
+Measured to the same finish line for both libraries — the JSON body an application would
+POST, so dhive pays for its own `JSON.stringify` exactly as a real caller would:
+
+|  ops | dhive 1.3.6 | hivecomb, object | hivecomb, JSON string | |
+|---|---|---|---|---|
+| 1 | 123.7 µs | 89.8 µs | **82.2 µs** | **hivecomb 1.50×** |
+| 2 | 127.3 µs | 92.5 µs | **85.4 µs** | **hivecomb 1.49×** |
+| 5 | 135.1 µs | 108.8 µs | **98.0 µs** | **hivecomb 1.38×** |
+| 10 | 151.8 µs | 134.0 µs | **116.3 µs** | **hivecomb 1.30×** |
+| 20 | 177.3 µs | 188.7 µs | **156.7 µs** | **hivecomb 1.13×** |
+| 50 | 254.8 µs | 342.0 µs | 273.7 µs | dhive 1.07× |
+| 200 | 650.9 µs | 1097.3 µs | 861.7 µs | dhive 1.32× |
+
+On the task that actually gets performed, **the crossover moves from about fifteen
+operations to about thirty-five to forty**, and fifty operations goes from a 1.34× loss to
+a near-tie. Reach for `signTransactionJson` when the result is going on the wire, and
+`signTransaction` when you need to inspect or modify it.
+
+What the text form deliberately does *not* do is echo back the caller's own operations
+array, which would be faster still and wrong: hivecomb normalises operations on the way in,
+so what it renders is what was signed.
+
+### Many signatures, rather than many operations
+
+"Many" has two meanings here and they point opposite ways. Many operations under one key is
+the case above. Many *signatures* over one transaction — multiple authorities, or a
+multi-signature account — is the case where signing dominates, and signing is where
+hivecomb wins:
+
+|  keys | dhive 1.3.6 | hivecomb | |
+|---|---|---|---|
+| 1 | 120.8 µs | **82.6 µs** | **hivecomb 1.46×** |
+| 2 | 226.1 µs | **152.7 µs** | **hivecomb 1.48×** |
+| 3 | 335.5 µs | **223.5 µs** | **hivecomb 1.50×** |
+| 5 | 556.7 µs | **359.0 µs** | **hivecomb 1.55×** |
+| 8 | 879.8 µs | **569.2 µs** | **hivecomb 1.55×** |
+
+The margin *grows* with the signature count, toward the 1.67× floor below, because each
+extra signature adds curve arithmetic and nothing else. There is no crossover on this axis.
+
+Reproduce with the harnesses named in
+[How the measurements were taken](#how-the-measurements-were-taken); every one checks that
+dhive recovers the correct public key from each hivecomb signature before timing anything.
 
 ### Why: the advantage is the curve, not the serializer
 
 |  | dhive | hivecomb | |
 |---|---|---|---|
-| one signature, raw ECDSA | 103.3 µs | **71.3 µs** | hivecomb 1.45× |
-| overhead above that floor, at 1 operation | 18.9 µs | 19.0 µs | identical |
+| one signature, raw ECDSA over a 32-byte digest | 103.9 µs | **62.0 µs** | **hivecomb 1.67×** |
+| overhead above that floor, at 1 operation | 17.5 µs | 23.4 µs | dhive 1.34× |
 
-That second row is the whole story. hivecomb wins at one operation *only* because
-libsecp256k1 through Rust beats dhive's curve arithmetic; the non-cryptographic work
-around it costs the two almost exactly the same.
+**The advantage is the curve arithmetic, and it is partly given back.** libsecp256k1
+through Rust is 1.67× faster at the signature itself; hivecomb then spends about 6 µs
+more than dhive on everything around it — building the transaction, crossing the napi
+boundary, rendering the result. Net at one operation: 1.36×.
+
+An earlier version of this table reported the floor as 1.45× and the overhead as
+"identical, 18.9 against 19.0". Both were wrong, and for the same reason: hivecomb's
+floor was measured with `signMessage`, which hashes its input, against dhive's
+`key.sign(digest)`, which does not. A sha256 was being counted on one side only, which
+understated the floor advantage and inflated hivecomb's apparent overhead into a false
+match. An evaluator flagged the subtraction as not cleanly separable; isolating the hash
+confirmed it and moved both numbers. The row above signs an identical pre-hashed digest
+on both sides.
 
 ### Serialization alone, with no signing, is a loss
 
@@ -600,24 +678,35 @@ a decision the caller did not ask for.
 
 ### What that means for a JavaScript adopter
 
-Take `hivecomb-node` when **signing is your bottleneck** — bulk or batch signing, an
-indexer, a service signing many transactions a second, each of them the ordinary one or
-two operations. There the margin is 1.3–1.4× and it compounds.
+Take `hivecomb-node` when **signing is your bottleneck**: a service signing many
+transactions a second, each the ordinary one to four operations, or anything signing with
+**several keys at once**. Both are on the winning side and the second one widens with
+scale — 1.50× at one key, 1.55× at eight. If the result is going onto the wire, use
+`signTransactionJson` and the margin at one operation is 1.50× rather than 1.38×.
 
 Do not take it for a **latency-bound** path. An evaluator's verdict on their trading bot
 was no, and the arithmetic is worth repeating: their path is dominated by a mandatory
 three-block wait, about nine seconds of consensus, plus REST latency. Signing is ~123 µs
-of a >9,000 ms path, so saving 35 µs is roughly 0.0004% — unmeasurable. The addon is
+of a >9,000 ms path, so saving 40 µs is roughly 0.0004% — unmeasurable. The addon is
 also signing-only with no network layer, so it does not touch the part that actually
 costs them.
 
-Do not take it to serialize large batches of operations into a single transaction
-without signing them. dhive is faster at that and the gap widens with size.
+Do not take it to **serialize without signing**. dhive wins that at every size and the
+gap widens: 1.38× at one operation, 3.79× at two hundred. Rust cannot pay for the
+boundary crossing there because there is no cryptography for it to win back.
 
-An earlier version of this section suggested batch signing as the adoption niche. That
-was a guess, it was contributed in good faith by the evaluator who then measured it, and
-it was wrong in exactly the wrong direction — batch signing is where hivecomb *loses*.
-The crossover table above replaces it, at their request.
+Above about forty operations in a single transaction, dhive wins the signing case too. In
+practice that shape barely exists — Hive transactions are one to four operations — but the
+crossover is real and the tables above give it rather than leaving it to be discovered.
+
+Two corrections worth recording, because the advice in this section has now been wrong
+twice. The first version recommended batch signing as the adoption niche; that was a guess
+contributed in good faith by an evaluator who then measured it and found it backwards, and
+they asked for their guess to be replaced with their measurement. The second version put
+the crossover at fifteen operations as though it were a constant; two runs on different
+hardware disagreed (12–15 here, 5–8 there) against the same dhive version, so it is a
+range and depends on the machine. Both replacements came from someone re-running the
+numbers rather than from re-reading the code.
 
 ## What hivecomb deliberately does not do
 
