@@ -32,6 +32,17 @@ use crate::types::{
 /// Maximum length of a `custom_json` id, from hived's `custom_id_type`.
 pub const MAX_CUSTOM_ID_LEN: usize = 32;
 
+/// Custom operations one account may have in a single block.
+///
+/// hived's `HIVE_CUSTOM_OP_BLOCK_LIMIT`, confirmed against a live node's
+/// `database_api.get_config`. Enforced in `database::limit_custom_op_count`, which
+/// counts `custom`, `custom_json` and `custom_binary` alike, per **impacted account**,
+/// accumulating transactions already pending in the same block.
+///
+/// It is a rate limit rather than a shape rule, so no node selection routes around it
+/// and no library can fully check it — the rest of the block is not visible from here.
+pub const MAX_CUSTOM_OPS_PER_BLOCK: usize = 5;
+
 /// Maximum payload of a `custom_json` or `custom` operation, in bytes.
 ///
 /// hived's `HIVE_CUSTOM_OP_DATA_MAX_LENGTH`, confirmed against a live node's
@@ -1159,6 +1170,32 @@ pub enum Operation {
 }
 
 impl Operation {
+    /// Accounts this operation counts against, for hived's per-block custom-op limit.
+    ///
+    /// Empty for everything that is not a custom operation. For the three that are, it
+    /// is the accounts whose authority the operation requires — which is what
+    /// `operation_get_impacted_accounts` yields for them, and what
+    /// `database::limit_custom_op_count` tallies.
+    pub fn custom_op_accounts(&self) -> Vec<&str> {
+        match self {
+            Operation::Custom(o) => o.required_auths.iter().map(String::as_str).collect(),
+            Operation::CustomJson(o) => o
+                .required_auths
+                .iter()
+                .chain(o.required_posting_auths.iter())
+                .map(String::as_str)
+                .collect(),
+            Operation::CustomBinary(o) => o
+                .required_owner_auths
+                .iter()
+                .chain(o.required_active_auths.iter())
+                .chain(o.required_posting_auths.iter())
+                .map(String::as_str)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// The operation's id in hived's static variant.
     pub fn id(&self) -> OperationId {
         match self {

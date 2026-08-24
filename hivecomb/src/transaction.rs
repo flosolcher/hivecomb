@@ -139,6 +139,7 @@ impl Transaction {
     /// the bytes, and putting the signatures back; a failure in between left the
     /// object without its signatures. Here the body simply never contains them.
     pub fn body_bytes(&self) -> Result<Vec<u8>> {
+        self.check_custom_op_budget()?;
         let mut out = Vec::with_capacity(64 + self.operations.len() * 64);
         write_u16(&mut out, self.ref_block_num);
         write_u32(&mut out, self.ref_block_prefix);
@@ -146,6 +147,56 @@ impl Transaction {
         write_array(&mut out, &self.operations)?;
         write_varint32(&mut out, 0); // extensions: always empty for a client transaction
         Ok(out)
+    }
+
+    /// Refuse a transaction that is certain to exceed hived's per-block custom-op limit.
+    ///
+    /// `database::limit_custom_op_count` counts `custom`, `custom_json` and
+    /// `custom_binary` operations **per impacted account, across a whole block**, and
+    /// asserts the count stays within
+    /// [`MAX_CUSTOM_OPS_PER_BLOCK`](crate::operations::MAX_CUSTOM_OPS_PER_BLOCK):
+    ///
+    /// ```text
+    /// Account ${a} already submitted ${n} custom json operation(s) this block.
+    /// ```
+    ///
+    /// # What this catches, and what it cannot
+    ///
+    /// One transaction carrying more than the limit for a single account is a
+    /// **guaranteed** failure, and it is caught here before anything is signed. The
+    /// whole transaction is refused by the chain, so every other operation batched
+    /// alongside goes with it.
+    ///
+    /// What no library can check is the rest of the block. hived adds the count from
+    /// transactions already pending, so a transaction well within the limit on its own
+    /// can still be refused because the same account sent others into the same block.
+    /// **Passing this check is not a guarantee of acceptance**, only the removal of one
+    /// certain failure — which is worth stating plainly, because a check that quietly
+    /// implies more than it verifies is worse than no check.
+    ///
+    /// This is the failure mode a caller trades into by splitting an oversized payload:
+    /// chunking by bytes with no bound on the number of chunks turns one consensus
+    /// rejection into another.
+    fn check_custom_op_budget(&self) -> Result<()> {
+        use std::collections::HashMap;
+
+        let mut per_account: HashMap<&str, usize> = HashMap::new();
+        for op in &self.operations {
+            for account in op.custom_op_accounts() {
+                let n = per_account.entry(account).or_insert(0);
+                *n += 1;
+                if *n > crate::operations::MAX_CUSTOM_OPS_PER_BLOCK {
+                    return Err(Error::field(format!(
+                        "this transaction carries {n} custom operations for {account}; \
+                         hived allows at most {} per account per block and refuses the \
+                         whole transaction beyond that. Spread them across blocks rather \
+                         than across operations",
+                        crate::operations::MAX_CUSTOM_OPS_PER_BLOCK
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The digest that gets signed: `sha256(chain_id || body)`.
@@ -358,6 +409,109 @@ impl SignedTransaction {
 
 #[cfg(test)]
 mod tests {
+
+    /// One transaction carrying more than the per-block limit for a single account is a
+    /// certain failure, and is refused before anything is signed.
+    #[test]
+    fn too_many_custom_ops_for_one_account_is_refused() {
+        use crate::operations::{CustomJson, MAX_CUSTOM_OPS_PER_BLOCK};
+
+        let op = |i: usize| {
+            Operation::CustomJson(CustomJson {
+                required_auths: vec![],
+                required_posting_auths: vec!["alice".into()],
+                id: "my_app".into(),
+                json: format!(r#"{{"n":{i}}}"#),
+            })
+        };
+        let block_ref =
+            BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd").unwrap();
+
+        let ok = Transaction::new(
+            block_ref,
+            (0..MAX_CUSTOM_OPS_PER_BLOCK).map(op).collect(),
+            600,
+        )
+        .unwrap();
+        assert!(
+            ok.body_bytes().is_ok(),
+            "exactly the limit is allowed, not one less"
+        );
+
+        let over = Transaction::new(
+            block_ref,
+            (0..MAX_CUSTOM_OPS_PER_BLOCK + 1).map(op).collect(),
+            600,
+        )
+        .unwrap();
+        let err = over
+            .body_bytes()
+            .expect_err("one past the limit must be refused");
+        let text = err.to_string();
+        assert!(
+            text.contains("alice"),
+            "the error should name the account: {text}"
+        );
+        assert!(
+            text.contains("whole transaction"),
+            "and say the whole transaction goes: {text}"
+        );
+    }
+
+    /// The limit is per account, so spreading the same operations across accounts is
+    /// fine — counting operations rather than accounts would wrongly refuse this.
+    #[test]
+    fn the_custom_op_limit_is_per_account_not_per_transaction() {
+        use crate::operations::{CustomJson, MAX_CUSTOM_OPS_PER_BLOCK};
+
+        let op = |who: &str| {
+            Operation::CustomJson(CustomJson {
+                required_auths: vec![],
+                required_posting_auths: vec![who.to_string()],
+                id: "my_app".into(),
+                json: "{}".into(),
+            })
+        };
+        let block_ref =
+            BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd").unwrap();
+        // Well past the limit in total, but never past it for any one account.
+        let mut ops = Vec::new();
+        for who in ["alice", "bob", "carol"] {
+            for _ in 0..MAX_CUSTOM_OPS_PER_BLOCK {
+                ops.push(op(who));
+            }
+        }
+        let tx = Transaction::new(block_ref, ops, 600).unwrap();
+        assert!(
+            tx.body_bytes().is_ok(),
+            "{} operations across three accounts is within the per-account limit",
+            3 * MAX_CUSTOM_OPS_PER_BLOCK
+        );
+    }
+
+    /// Operations that are not custom ops do not count towards it at all.
+    #[test]
+    fn ordinary_operations_do_not_count_towards_the_custom_op_limit() {
+        use crate::operations::Transfer;
+
+        let block_ref =
+            BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd").unwrap();
+        let ops: Vec<Operation> = (0..50)
+            .map(|i| {
+                Operation::Transfer(Transfer {
+                    from: "alice".into(),
+                    to: "bob".into(),
+                    amount: Amount::parse("1.000 HIVE", Chain::Hive).unwrap(),
+                    memo: format!("m{i}"),
+                })
+            })
+            .collect();
+        let tx = Transaction::new(block_ref, ops, 600).unwrap();
+        assert!(
+            tx.body_bytes().is_ok(),
+            "transfers are not custom operations"
+        );
+    }
     use super::*;
     use crate::asset::Amount;
     use crate::operations::{CustomJson, Vote};
