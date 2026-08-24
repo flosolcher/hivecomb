@@ -275,12 +275,62 @@ from identical inputs. Median of seven one-second windows, because signature gri
 | sign a `transfer` | 116 µs | 275 µs | 2.4× |
 | serialize and digest, no signing | **8.7 µs** | **65 µs** | **7.4×** |
 
-The last row is the honest one, and it is the only one that measures what actually
-differs. Both libraries hand the elliptic curve arithmetic to libsecp256k1, so the
-signature itself costs the same in each; the gap in the signing rows is the work
-*around* it — decoding the WIF, hashing, and grinding for a canonical signature — done
-in Rust rather than in Python. The gap in the last row is serialization alone, with no
-cryptography in it at all, and that is where a compiled core is worth something.
+The last row is the one that measures what actually differs *against Python*. Both
+libraries hand the elliptic curve arithmetic to libsecp256k1, so the signature itself
+costs the same in each; the gap in the signing rows is the work *around* it — decoding
+the WIF, hashing, and grinding for a canonical signature — done in Rust rather than in
+Python. The gap in the last row is serialization alone, with no cryptography in it.
+
+**Do not carry that conclusion to JavaScript. It inverts.** See below.
+
+## The Node comparison: dhive
+
+Measured against [`@hiveio/dhive`](https://github.com/openhive-network/dhive) 1.3.2 on
+Node 22, same process, same key, a real `custom_json` payload. Interleaved A/B windows
+with the payload varied per iteration, so each call grinds a fresh signature, and both
+JITs warmed first. Contributed by an outside evaluator and reproduced here.
+
+|  | hivecomb | dhive 1.3.2 | |
+|---|---|---|---|
+| sign a `custom_json` | 95.9 µs | 125.4 µs | **hivecomb 1.31×** |
+| serialize and digest, no signing | 11.4 µs | 6.2 µs | **dhive 1.86×** |
+
+**hivecomb wins on signing and loses on serialization**, which is the opposite of the
+Python result on the second row. dhive's serializer is already fast JavaScript, and the
+napi boundary — converting a JS operations array into Rust structures — costs more than
+Rust serialization saves.
+
+It is worth being precise about *why*, because the obvious guess is wrong. A fixed
+crossing cost would be amortised by a larger payload, so the gap should close as
+payloads grow. Measured, it widens:
+
+| operations × array items | dhive | hivecomb | |
+|---|---|---|---|
+| 1 × 1 | 14.9 µs | 13.5 µs | hivecomb 1.10× |
+| 1 × 40 | 15.5 µs | 22.7 µs | dhive 1.47× |
+| 1 × 400 | 73.2 µs | 94.9 µs | dhive 1.30× |
+| 10 × 40 | 88.7 µs | 160.6 µs | dhive 1.81× |
+| 50 × 40 | 411.3 µs | 809.0 µs | dhive 1.97× |
+
+The conversion is **per item**: every array element and every string crosses
+individually. So there is no payload size at which serializing in Rust pays for itself
+from Node. For the addon, the win is the grinding loop and nothing else.
+
+### What that means for a JavaScript adopter
+
+Take `hivecomb-node` for a **CPU-bound signing workload** — bulk or batch signing, an
+indexer, a service signing thousands of operations a second — where 30 µs a signature
+compounds.
+
+Do not take it for a **latency-bound** one. The evaluator's own verdict on their
+trading bot was no, and the arithmetic is worth repeating: their path is dominated by a
+mandatory three-block wait, about nine seconds of consensus, plus REST latency. Signing
+is 125 µs of a >9,000 ms path, so saving 30 µs is roughly 0.0003% — unmeasurable. The
+addon is also signing-only with no network layer, so it does not touch the part that
+actually costs them.
+
+That is the honest shape of it: this crate is worth reaching for when signing is your
+bottleneck, and it usually is not.
 
 Before any of it was timed, both were asked for the digest of the same transaction:
 

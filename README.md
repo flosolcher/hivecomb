@@ -357,6 +357,16 @@ The corpus covers varint boundaries, `int16` boundaries, multi-byte UTF-8, empty
 maximum-length `custom_json` ids, unsorted and duplicated auth sets, and amounts on both
 sides of the `2**53` threshold. **It is a floor. Extend it rather than trusting it.**
 
+### Four implementations agree on the digest
+
+`sha256(chain_id || serialized_tx)` for the same transaction, computed independently by
+**hived** (via `condenser_api.get_transaction_hex`), **beem**, **hive-nectar** and
+**dhive** — all four byte-identical to `hivecomb`. Two of those were checked by other
+people on their own inputs, not by this project.
+
+That is worth more than any test count here: a serialization bug that four independent
+implementations share is a specification problem, not a `hivecomb` problem.
+
 ### By someone who is not the author
 
 An outside integrator replaced beem with `hivecomb` in a production application and

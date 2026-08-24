@@ -103,7 +103,7 @@ TypeScript definitions ship with the package. In brief:
 | `BlockRef` | `fromBlockId`, `fromParts` |
 | `TaposCache` | `store`, `storeBlockId`, `blockRef`, `isFresh`, `ageSeconds`, `invalidate` |
 | signing | `signMessage`, `verifyMessage`, `recoverMessage` |
-| transactions | `signTransaction`, `transactionDigest`, `transactionId` |
+| transactions | `signTransaction` (WIF strings or `PrivateKey` instances, or a mix), `transactionDigest`, `transactionId` |
 | memos | `encodeMemo`, `decodeMemo`, `isEncryptedMemo` |
 | keys | `generateMnemonic`, `validateMnemonic` |
 | authorities | `checkAuthority` |
