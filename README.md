@@ -495,11 +495,18 @@ that branches on the version can tell which library it is talking to.
 
 ## Other Rust Hive libraries
 
-`hivecomb` is not the first. [COMPARISON.md](COMPARISON.md) measures it against
-[`hive-xylem`](https://github.com/srbde/hive-xylem) in both directions, records the
-five things `hivecomb` gained from reading it, notes a memo-encryption defect found while
-comparing, and answers the maturity question plainly: **xylem is published and `hivecomb`
-is not**, and on production exposure neither is mature.
+`hivecomb` is not the first. [COMPARISON.md](COMPARISON.md) sets it beside
+[`hive-xylem`](https://github.com/srbde/hive-xylem) in Rust,
+[`hive-nectar`](https://github.com/srbde/hive-nectar) in Python and
+[`dhive`](https://github.com/openhive-network/dhive) in Node. Each section leads with
+what this project **took** from that library — six things from xylem, the disclosure
+route and the signed-message envelope from nectar, the node health tracker's design from
+dhive — then what the measurements show, then where the other one is ahead.
+
+It answers the maturity question plainly rather than burying it: **xylem is published
+and `hivecomb` is not**, nectar is more mature than this project's Python side by every
+measure that can be counted, and on production exposure `hivecomb` is the least proven
+of the four.
 
 ## Licence
 

@@ -231,6 +231,25 @@ def main():
     if not link_problems:
         print(f"  ok  every local link and anchor across {len(DOCS)} documents resolves")
 
+    # README summarises COMPARISON.md's xylem section by counting the things this
+    # project took from it. That count was written as "five" above a list of six for
+    # as long as the section has existed, in both files independently.
+    took = len(re.findall(r"^#### \d+\. ", (ROOT / "COMPARISON.md").read_text(), re.M))
+    words = {4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
+    claimed = re.findall(r"(\w+) things from xylem", (ROOT / "README.md").read_text())
+    if len(claimed) != 1:
+        failures.append(
+            "README.md: expected exactly one 'N things from xylem' claim, found "
+            f"{len(claimed)} — reword the check if the sentence moved."
+        )
+    elif claimed[0] != words.get(took, str(took)):
+        failures.append(
+            f"README.md says '{claimed[0]} things from xylem' but COMPARISON.md lists "
+            f"{took}"
+        )
+    else:
+        print(f"  ok  README's summary of COMPARISON.md's xylem section = {took} items")
+
     table_problems = check_tables_agree()
     for problem in table_problems:
         failures.append(problem)
