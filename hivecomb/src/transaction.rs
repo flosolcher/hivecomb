@@ -149,6 +149,29 @@ impl Transaction {
         Ok(out)
     }
 
+    /// # The one size limit this cannot check
+    ///
+    /// A transaction also has a maximum serialized size, and it is **not** the constant
+    /// it looks like. `HIVE_MAX_TRANSACTION_SIZE` is 65536 and is not what hived
+    /// enforces; `database::process_non_fast_confirm_transaction` computes
+    ///
+    /// ```text
+    /// trx_size_limit = get_dynamic_global_properties().maximum_block_size - 256
+    /// FC_ASSERT( trx_size <= trx_size_limit, "Transaction too large - size = ..." )
+    /// ```
+    ///
+    /// `maximum_block_size` is voted on by witnesses, so the bound moves without a
+    /// hardfork and cannot be compiled in. It was 65536 on 2026-08-24, making the
+    /// effective limit **65280** — close enough to the fixed constant to look like it
+    /// and not be it.
+    ///
+    /// So nothing here rejects an oversized transaction: doing so would need the value
+    /// from a node, and a signing path that cannot work offline is a worse trade than
+    /// letting the node refuse it. A caller batching near the limit should read
+    /// `maximum_block_size` from
+    /// [`dynamic_global_properties`](crate::rpc::NodeClient::dynamic_global_properties)
+    /// rather than assume 65536.
+    ///
     /// Refuse a transaction that is certain to exceed hived's per-block custom-op limit.
     ///
     /// `database::limit_custom_op_count` counts `custom`, `custom_json` and

@@ -32,6 +32,31 @@ use crate::types::{
 /// Maximum length of a `custom_json` id, from hived's `custom_id_type`.
 pub const MAX_CUSTOM_ID_LEN: usize = 32;
 
+/// Longest memo any operation may carry, in bytes.
+///
+/// hived writes this as `validate_string_max_size( memo, HIVE_MAX_MEMO_SIZE - 1, ... )`,
+/// and `validate_string_max_size` asserts `size() <= max`. So the constant is 2048 and
+/// the usable maximum is **2047** — the kind of off-by-one that is invisible unless the
+/// helper is read as well as the call site.
+///
+/// Enforced in `validate()`, so it applies to every transaction unconditionally, on
+/// `transfer`, `transfer_to_savings`, `transfer_from_savings` and `recurrent_transfer`.
+pub const MAX_MEMO_LEN: usize = 2047;
+
+/// Longest comment title, in bytes.
+///
+/// `validate_string_max_size( title, HIVE_COMMENT_TITLE_LIMIT - 1, ... )` against a
+/// constant of 256, so **255**.
+pub const MAX_TITLE_LEN: usize = 255;
+
+/// Longest permlink, in bytes.
+///
+/// `validate_permlink` asserts `permlink.size() < HIVE_MAX_PERMLINK_LENGTH` against a
+/// constant of 256, so **255**. Note the different form: a bare `<` here where the memo
+/// and title use `<= constant - 1`. Both arrive at "one less than the constant", by
+/// different routes, which is why each is derived rather than assumed.
+pub const MAX_PERMLINK_LEN: usize = 255;
+
 /// Custom operations one account may have in a single block.
 ///
 /// hived's `HIVE_CUSTOM_OP_BLOCK_LIMIT`, confirmed against a live node's
@@ -1169,6 +1194,20 @@ pub enum Operation {
     RecurrentTransfer(RecurrentTransfer),
 }
 
+/// Refuse a string longer than hived's `validate()` allows for that field.
+///
+/// One helper for every length bound rather than the check written out at each site,
+/// so the four memo-carrying operations cannot drift apart from one another.
+fn check_len(value: &str, max: usize, what: &str) -> Result<()> {
+    if value.len() > max {
+        return Err(Error::field(format!(
+            "{what} is {} bytes; hived allows at most {max}",
+            value.len()
+        )));
+    }
+    Ok(())
+}
+
 impl Operation {
     /// Accounts this operation counts against, for hived's per-block custom-op limit.
     ///
@@ -1260,6 +1299,13 @@ impl Operation {
                 write_i16(out, o.weight);
             }
             Operation::Comment(o) => {
+                check_len(&o.title, MAX_TITLE_LEN, "comment title")?;
+                check_len(&o.permlink, MAX_PERMLINK_LEN, "comment permlink")?;
+                check_len(
+                    &o.parent_permlink,
+                    MAX_PERMLINK_LEN,
+                    "comment parent_permlink",
+                )?;
                 write_string(out, &o.parent_author)?;
                 write_string(out, &o.parent_permlink)?;
                 write_string(out, &o.author)?;
@@ -1400,6 +1446,7 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::Transfer(o) => {
+                check_len(&o.memo, MAX_MEMO_LEN, "transfer memo")?;
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
                 o.amount.append_to(out)?;
@@ -1530,12 +1577,14 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::TransferToSavings(o) => {
+                check_len(&o.memo, MAX_MEMO_LEN, "transfer_to_savings memo")?;
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
                 o.amount.append_to(out)?;
                 write_string(out, &o.memo)?;
             }
             Operation::TransferFromSavings(o) => {
+                check_len(&o.memo, MAX_MEMO_LEN, "transfer_from_savings memo")?;
                 write_string(out, &o.from)?;
                 write_u32(out, o.request_id);
                 write_string(out, &o.to)?;
@@ -1606,6 +1655,7 @@ impl Operation {
                 o.amount.append_to(out)?;
             }
             Operation::RecurrentTransfer(o) => {
+                check_len(&o.memo, MAX_MEMO_LEN, "recurrent_transfer memo")?;
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
                 o.amount.append_to(out)?;
@@ -2897,6 +2947,109 @@ mod tests {
     fn the_payload_cap_matches_hived() {
         assert_eq!(MAX_CUSTOM_DATA_LEN, 8192);
         assert_eq!(MAX_CUSTOM_ID_LEN, 32);
+    }
+
+    /// Every length bound derived from hived, at its exact boundary.
+    ///
+    /// Each is the constant minus one, and each arrives there by a different route in
+    /// hived — the memo and title via `validate_string_max_size(x, CONST - 1)` where the
+    /// helper is `<=`, the permlink via a bare `size() < CONST`. Assuming either form
+    /// from the other would be wrong by one, so both ends are pinned.
+    #[test]
+    fn the_length_bounds_sit_exactly_where_hived_puts_them() {
+        use crate::Chain;
+
+        let transfer = |memo: &str| {
+            Operation::Transfer(Transfer {
+                from: "alice".into(),
+                to: "bob".into(),
+                amount: Amount::parse("1.000 HIVE", Chain::Hive).unwrap(),
+                memo: memo.into(),
+            })
+        };
+        assert!(transfer(&"m".repeat(MAX_MEMO_LEN)).to_wire().is_ok());
+        assert!(transfer(&"m".repeat(MAX_MEMO_LEN + 1)).to_wire().is_err());
+
+        let comment = |title: &str, permlink: &str| {
+            Operation::Comment(Comment {
+                parent_author: String::new(),
+                parent_permlink: "hive-100".into(),
+                author: "alice".into(),
+                permlink: permlink.into(),
+                title: title.into(),
+                body: "b".into(),
+                json_metadata: "{}".into(),
+            })
+        };
+        let t = "t".repeat(MAX_TITLE_LEN);
+        let p = "p".repeat(MAX_PERMLINK_LEN);
+        assert!(
+            comment(&t, &p).to_wire().is_ok(),
+            "both exactly at the bound"
+        );
+        assert!(comment(&"t".repeat(MAX_TITLE_LEN + 1), &p)
+            .to_wire()
+            .is_err());
+        assert!(comment(&t, &"p".repeat(MAX_PERMLINK_LEN + 1))
+            .to_wire()
+            .is_err());
+    }
+
+    /// The constants are hived's, restated. Pinned so a change has to be deliberate.
+    ///
+    /// Read from `libraries/protocol` at the revision mainnet ran on 2026-08-24
+    /// (`1584099c3054`, blockchain_version 1.28.7), cross-checked against three nodes'
+    /// `database_api.get_config`.
+    #[test]
+    fn the_length_bounds_match_hived() {
+        assert_eq!(MAX_MEMO_LEN, 2048 - 1);
+        assert_eq!(MAX_TITLE_LEN, 256 - 1);
+        assert_eq!(MAX_PERMLINK_LEN, 256 - 1);
+    }
+
+    /// All four memo-carrying operations enforce it, not just `transfer`.
+    #[test]
+    fn every_memo_carrying_operation_is_bounded() {
+        use crate::types::PointInTime;
+        use crate::Chain;
+
+        let big = "m".repeat(MAX_MEMO_LEN + 1);
+        let amount = Amount::parse("1.000 HIVE", Chain::Hive).unwrap();
+        let ops = vec![
+            Operation::Transfer(Transfer {
+                from: "alice".into(),
+                to: "bob".into(),
+                amount,
+                memo: big.clone(),
+            }),
+            Operation::TransferToSavings(TransferToSavings {
+                from: "alice".into(),
+                to: "bob".into(),
+                amount,
+                memo: big.clone(),
+            }),
+            Operation::TransferFromSavings(TransferFromSavings {
+                from: "alice".into(),
+                request_id: 1,
+                to: "bob".into(),
+                amount,
+                memo: big.clone(),
+            }),
+            Operation::RecurrentTransfer(RecurrentTransfer {
+                from: "alice".into(),
+                to: "bob".into(),
+                amount,
+                memo: big,
+                recurrence: 24,
+                executions: 2,
+                extensions: vec![],
+            }),
+        ];
+        let _ = PointInTime::from_unix(0);
+        for op in ops {
+            let name = op.id().name();
+            assert!(op.to_wire().is_err(), "{name} did not bound its memo");
+        }
     }
 
     #[test]
