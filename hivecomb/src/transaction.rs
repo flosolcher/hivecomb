@@ -174,9 +174,29 @@ impl Transaction {
     /// certain failure — which is worth stating plainly, because a check that quietly
     /// implies more than it verifies is worse than no check.
     ///
-    /// This is the failure mode a caller trades into by splitting an oversized payload:
-    /// chunking by bytes with no bound on the number of chunks turns one consensus
-    /// rejection into another.
+    /// # The budget belongs to the account, so the application has to own it
+    ///
+    /// This is the part the check cannot help with, and the part that is easy to read
+    /// past. The limit is per **account per block**, not per transaction and not per
+    /// process. An application with several independent things that broadcast — a
+    /// trading path, a background repricer, a transfer queue, each on its own timer —
+    /// shares one budget of five between all of them, and nothing in a signing library
+    /// can coordinate them. They cannot see each other, and neither can this.
+    ///
+    /// Two consequences worth knowing before relying on the check above:
+    ///
+    /// * **Splitting an oversized payload can make things worse.** Chunking a large
+    ///   `custom_json` into several operations and broadcasting them back to back puts
+    ///   them all in one block and consumes the whole account budget, starving whatever
+    ///   else broadcasts on that account in that block. The obvious remedy for the size
+    ///   limit is a good way to trip the rate limit.
+    /// * **Spread across blocks, not across operations.** Blocks are three seconds; two
+    ///   broadcasters firing on half-second timers can collide without either being
+    ///   wrong on its own.
+    ///
+    /// If the account is shared, the budget needs an owner — a queue, a token bucket,
+    /// anything that all the broadcasters go through. That is an application concern and
+    /// this crate deliberately does not pretend otherwise.
     fn check_custom_op_budget(&self) -> Result<()> {
         use std::collections::HashMap;
 
