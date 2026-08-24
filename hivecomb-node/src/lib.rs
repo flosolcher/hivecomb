@@ -412,7 +412,6 @@ impl TaposCache {
 /// Accepts `["custom_json", {...}]` and `{type, value}`. All 48 signable operations
 /// work, because this is the same decoder the Rust API uses.
 fn operation_from_json(mut value: serde_json::Value) -> Result<RsOperation> {
-
     // hived's `json` and `json_metadata` fields are *strings* holding JSON, not JSON
     // objects. Every Hive client lets a caller pass the object and serializes it, and
     // the separators matter because the string is what gets signed.
@@ -688,7 +687,6 @@ pub fn chain_id(chain: Option<String>) -> Result<String> {
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
-
 
 // ---------------------------------------------------------------------------
 // Rendering a signed transaction back to JavaScript
