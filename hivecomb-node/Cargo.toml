@@ -27,6 +27,7 @@ crate-type = ["cdylib"]
 hivecomb_core = { package = "hivecomb", path = "../hivecomb", version = "0.1.0", default-features = false, features = ["memo", "bip32", "bip38", "wallet"] }
 napi = { version = "3", default-features = false, features = ["napi6", "serde-json"] }
 napi-derive = "3"
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]

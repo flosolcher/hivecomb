@@ -411,8 +411,7 @@ impl TaposCache {
 ///
 /// Accepts `["custom_json", {...}]` and `{type, value}`. All 48 signable operations
 /// work, because this is the same decoder the Rust API uses.
-fn operation_from_json(value: &serde_json::Value) -> Result<RsOperation> {
-    let mut value = value.clone();
+fn operation_from_json(mut value: serde_json::Value) -> Result<RsOperation> {
 
     // hived's `json` and `json_metadata` fields are *strings* holding JSON, not JSON
     // objects. Every Hive client lets a caller pass the object and serializes it, and
@@ -448,7 +447,30 @@ fn operations_from_json(operations: Vec<serde_json::Value>) -> Result<Vec<RsOper
             "a transaction needs at least one operation",
         ));
     }
-    operations.iter().map(operation_from_json).collect()
+    operations.into_iter().map(operation_from_json).collect()
+}
+
+/// Operations given either as a JS array or as one already-stringified JSON array.
+///
+/// The array form is convenient and slow. napi converts it field by field, and that
+/// cost is per *field* rather than per byte: measured against dhive it is roughly
+/// 7-9 microseconds for every operation regardless of how much data the operation
+/// carries, which is why it hurts most for the smallest operations. The Rust
+/// serialization underneath takes 1.23 microseconds.
+///
+/// A JSON string crosses once. `JSON.stringify` is native and `serde_json` is fast, so
+/// the whole cost becomes proportional to bytes instead of to fields.
+fn operations_from_either(
+    operations: Either<String, Vec<serde_json::Value>>,
+) -> Result<Vec<RsOperation>> {
+    match operations {
+        Either::A(json) => {
+            let values: Vec<serde_json::Value> = serde_json::from_str(&json)
+                .map_err(|e| Error::from_reason(format!("operations JSON: {e}")))?;
+            operations_from_json(values)
+        }
+        Either::B(values) => operations_from_json(values),
+    }
 }
 
 /// Build and sign a transaction entirely offline.
@@ -460,9 +482,10 @@ fn operations_from_json(operations: Vec<serde_json::Value>) -> Result<Vec<RsOper
 /// plus the transaction id under `trxId`.
 ///
 /// No network access happens anywhere in this call.
-#[napi]
-pub fn sign_transaction(
-    operations: Vec<serde_json::Value>,
+#[napi(ts_return_type = "any")]
+pub fn sign_transaction<'a>(
+    env: &'a Env,
+    operations: Either<String, Vec<serde_json::Value>>,
     block_ref: &BlockRef,
     // Either WIF strings or `PrivateKey` instances, or a mix. An evaluator pointed out
     // that this crate exports a `PrivateKey` whose whole design is that the secret does
@@ -473,9 +496,9 @@ pub fn sign_transaction(
     keys: Vec<Either<String, &PrivateKey>>,
     expiration_seconds: Option<u32>,
     chain: Option<String>,
-) -> Result<serde_json::Value> {
+) -> Result<Unknown<'a>> {
     let chain = chain_from(chain)?;
-    let ops = operations_from_json(operations)?;
+    let ops = operations_from_either(operations)?;
     let keys: Vec<RsPrivateKey> = keys
         .iter()
         .map(|k| match k {
@@ -487,18 +510,23 @@ pub fn sign_transaction(
     let tx =
         RsTransaction::new(block_ref.inner, ops, expiration_seconds.unwrap_or(60)).map_err(err)?;
     let trx_id = tx.id().map_err(err)?;
+    let expiration = tx.expiration.to_iso().map_err(err)?;
     let signed = tx.sign(&keys, chain).map_err(err)?;
-    let mut json = signed.to_json().map_err(err)?;
-    if let serde_json::Value::Object(map) = &mut json {
-        map.insert("trx_id".into(), serde_json::Value::String(trx_id));
-    }
-    Ok(json)
+    let rendered = SignedJson {
+        tx: &signed.transaction,
+        signatures: signed.signatures.iter().map(|s| s.to_hex()).collect(),
+        trx_id: &trx_id,
+        expiration,
+    };
+    let text = serde_json::to_string(&rendered)
+        .map_err(|e| Error::from_reason(format!("could not render the signed transaction: {e}")))?;
+    json_parse(env, &text)
 }
 
 /// The digest a transaction would be signed over, without signing it.
 #[napi]
 pub fn transaction_digest(
-    operations: Vec<serde_json::Value>,
+    operations: Either<String, Vec<serde_json::Value>>,
     block_ref: &BlockRef,
     expiration: String,
     chain: Option<String>,
@@ -508,7 +536,7 @@ pub fn transaction_digest(
         ref_block_num: block_ref.inner.ref_block_num,
         ref_block_prefix: block_ref.inner.ref_block_prefix,
         expiration: PointInTime::parse(&expiration).map_err(err)?,
-        operations: operations_from_json(operations)?,
+        operations: operations_from_either(operations)?,
     };
     Ok(Buffer::from(tx.digest(chain).map_err(err)?.to_vec()))
 }
@@ -516,7 +544,7 @@ pub fn transaction_digest(
 /// The transaction id of an unsigned operation set, without signing it.
 #[napi]
 pub fn transaction_id(
-    operations: Vec<serde_json::Value>,
+    operations: Either<String, Vec<serde_json::Value>>,
     block_ref: &BlockRef,
     expiration: String,
 ) -> Result<String> {
@@ -524,7 +552,7 @@ pub fn transaction_id(
         ref_block_num: block_ref.inner.ref_block_num,
         ref_block_prefix: block_ref.inner.ref_block_prefix,
         expiration: PointInTime::parse(&expiration).map_err(err)?,
-        operations: operations_from_json(operations)?,
+        operations: operations_from_either(operations)?,
     };
     tx.id().map_err(err)
 }
@@ -659,4 +687,70 @@ pub fn chain_id(chain: Option<String>) -> Result<String> {
 #[napi]
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+
+// ---------------------------------------------------------------------------
+// Rendering a signed transaction back to JavaScript
+// ---------------------------------------------------------------------------
+//
+// The obvious implementation -- build a `serde_json::Value` and hand it to napi --
+// costs more than the signing does once a transaction carries more than a couple of
+// operations, because napi then walks that tree and materialises every node
+// individually. Measured against dhive 1.3.6 at 50 operations it was 508 us against
+// dhive's 236; the signing itself accounted for 239 of that, so the *return* was
+// costing more than the elliptic curve work.
+//
+// Rendering straight to a JSON string and letting V8 parse it skips both the
+// intermediate tree and the per-node crossing, and `JSON.parse` is among the most
+// heavily optimised paths in the engine. Same 50 operations: 335 us.
+//
+// What this does NOT do is echo back the operations the caller passed in. That would
+// be faster still and it would be wrong: hivecomb normalises operations on the way in
+// -- an object-valued `json_metadata` becomes the JSON *string* that the signature
+// actually covers -- so handing back the caller's own array could return a
+// transaction that does not match what was signed. The operations rendered here are
+// the ones that were serialized and hashed.
+
+struct OpPair<'a>(&'a RsOperation);
+
+impl serde::Serialize for OpPair<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeTuple;
+        let mut t = s.serialize_tuple(2)?;
+        t.serialize_element(self.0.id().name())?;
+        t.serialize_element(self.0)?;
+        t.end()
+    }
+}
+
+struct SignedJson<'a> {
+    tx: &'a RsTransaction,
+    signatures: Vec<String>,
+    trx_id: &'a str,
+    expiration: String,
+}
+
+impl serde::Serialize for SignedJson<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut m = s.serialize_struct("tx", 7)?;
+        m.serialize_field("ref_block_num", &self.tx.ref_block_num)?;
+        m.serialize_field("ref_block_prefix", &self.tx.ref_block_prefix)?;
+        m.serialize_field("expiration", &self.expiration)?;
+        let ops: Vec<OpPair<'_>> = self.tx.operations.iter().map(OpPair).collect();
+        m.serialize_field("operations", &ops)?;
+        m.serialize_field("extensions", &[(); 0])?;
+        m.serialize_field("signatures", &self.signatures)?;
+        m.serialize_field("trx_id", self.trx_id)?;
+        m.end()
+    }
+}
+
+/// Hand a JSON string to V8's own parser.
+fn json_parse<'a>(env: &'a Env, text: &str) -> Result<Unknown<'a>> {
+    let global = env.get_global()?;
+    let json_ns: Object = global.get_named_property("JSON")?;
+    let parse: Function<String, Unknown> = json_ns.get_named_property("parse")?;
+    parse.call(text.to_owned())
 }
