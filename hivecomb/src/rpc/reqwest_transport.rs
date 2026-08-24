@@ -30,6 +30,20 @@ impl ReqwestTransport {
 
     /// Wrap an existing client, so an application's own configuration — proxies,
     /// certificates, connection limits — carries over.
+    ///
+    /// # Two timeouts, and the shorter one wins
+    ///
+    /// A timeout configured on `client` stays in force, and this transport *also*
+    /// applies the per-request timeout that [`NodeClient`](super::NodeClient) passes
+    /// down. reqwest enforces both, so the effective limit is whichever is shorter.
+    ///
+    /// That is the safe direction and it is deliberate, but it is worth knowing: setting
+    /// a long timeout here does not widen `with_timeout`, and setting a short one here
+    /// narrows it without the client being aware. A peer found the opposite arrangement
+    /// in another project — one component deciding a node was unacceptable at eight
+    /// seconds while the component actually talking to it waited sixty — where only the
+    /// lenient limit was on the hot path. Checking this crate for the same shape is why
+    /// the interaction is written down.
     pub fn from_client(client: reqwest::Client) -> Self {
         ReqwestTransport { client }
     }
