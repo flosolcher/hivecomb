@@ -48,6 +48,7 @@
 //! ids, and both can land. [`AsyncNodeClient::broadcast_raced`] takes one already-signed
 //! transaction for exactly that reason.
 
+use super::health::{head_block_of, HealthPolicy, HealthTracker, NodeHealth};
 use super::types::{DynamicGlobalProperties, RpcRequest, RpcResponse};
 use crate::error::{Error, Result};
 use crate::transaction::{BlockRef, SignedTransaction};
@@ -86,7 +87,6 @@ pub trait AsyncTransport: Send + Sync + std::fmt::Debug {
 }
 
 /// An async client over a list of Hive nodes.
-#[derive(Clone)]
 pub struct AsyncNodeClient<T: AsyncTransport> {
     transport: Arc<T>,
     nodes: Vec<String>,
@@ -95,6 +95,31 @@ pub struct AsyncNodeClient<T: AsyncTransport> {
     initial_backoff: Duration,
     sleeper: Option<Sleeper>,
     next_id: Arc<AtomicU64>,
+    /// Shared, not per-clone: `AsyncNodeClient` is `Clone`, and a tracker that did not
+    /// survive cloning would have every clone re-learn each dead node separately —
+    /// which looks like it works and does nothing.
+    health: Option<Arc<HealthTracker>>,
+}
+
+// Written out rather than derived. `#[derive(Clone)]` on a generic struct adds a
+// `T: Clone` bound whether or not the fields need one, and here they do not: the
+// transport is behind an `Arc` precisely so that cloning the client shares one
+// transport instead of duplicating it. The derived bound made the client cloneable only
+// for transports that happened to be `Clone`, which is the opposite of the intent and
+// left a caller with an ordinary connection-pool transport unable to clone at all.
+impl<T: AsyncTransport> Clone for AsyncNodeClient<T> {
+    fn clone(&self) -> Self {
+        AsyncNodeClient {
+            transport: Arc::clone(&self.transport),
+            nodes: self.nodes.clone(),
+            timeout: self.timeout,
+            passes: self.passes,
+            initial_backoff: self.initial_backoff,
+            sleeper: self.sleeper.clone(),
+            next_id: Arc::clone(&self.next_id),
+            health: self.health.clone(),
+        }
+    }
 }
 
 impl<T: AsyncTransport> std::fmt::Debug for AsyncNodeClient<T> {
@@ -122,6 +147,7 @@ impl<T: AsyncTransport> AsyncNodeClient<T> {
             initial_backoff: Duration::from_millis(250),
             sleeper: None,
             next_id: Arc::new(AtomicU64::new(1)),
+            health: None,
         })
     }
 
@@ -129,6 +155,48 @@ impl<T: AsyncTransport> AsyncNodeClient<T> {
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
+    }
+
+    /// Remember which nodes are failing, and try them last.
+    ///
+    /// Off by default. See [`NodeClient::with_health_tracking`](super::NodeClient::with_health_tracking)
+    /// for what is tracked and why; the behaviour is identical here, and additionally
+    /// [`Self::race`] picks the healthiest `width` nodes rather than the first `width`.
+    ///
+    /// The tracker is shared across clones of this client, so a pool of clones learns
+    /// once rather than each discovering the same dead node separately.
+    pub fn with_health_tracking(mut self, policy: HealthPolicy) -> Self {
+        self.health = Some(Arc::new(HealthTracker::new(self.nodes.len(), policy)));
+        self
+    }
+
+    /// What the health tracker believes about each node, in node-list order.
+    ///
+    /// `None` when health tracking is off.
+    pub fn health(&self) -> Option<Vec<NodeHealth>> {
+        self.health.as_ref().map(|h| h.snapshot())
+    }
+
+    /// The order to try nodes in. Without health tracking this is the configured order.
+    fn call_order(&self, method: &str) -> Vec<usize> {
+        match &self.health {
+            Some(health) => health.order(method),
+            None => (0..self.nodes.len()).collect(),
+        }
+    }
+
+    /// Record the outcome of one attempt, if health tracking is on.
+    fn note(&self, index: usize, method: &str, outcome: &Result<serde_json::Value>) {
+        let Some(health) = &self.health else { return };
+        match outcome {
+            Ok(value) => {
+                health.record_success(index, method);
+                if let Some(head) = head_block_of(value) {
+                    health.observe_head_block(index, head);
+                }
+            }
+            Err(_) => health.record_failure(index, method),
+        }
     }
 
     /// Retry the whole node list this many times, waiting via `sleep` between passes.
@@ -187,8 +255,11 @@ impl<T: AsyncTransport> AsyncNodeClient<T> {
                     failures.push(format!("(retry pass {} after {:?})", pass + 1, wait));
                 }
             }
-            for node in &self.nodes {
-                match self.try_node(node, &body).await {
+            for index in self.call_order(method) {
+                let node = &self.nodes[index];
+                let outcome = self.try_node(node, &body).await;
+                self.note(index, method, &outcome);
+                match outcome {
                     Ok(value) => return Ok(value),
                     Err(e) => failures.push(format!("{node}: {e}")),
                 }
@@ -223,11 +294,15 @@ impl<T: AsyncTransport> AsyncNodeClient<T> {
         let width = width.clamp(1, self.nodes.len());
         let body = self.request_body(method, params)?;
 
+        // The healthiest `width` nodes rather than the first `width`. Racing a node
+        // known to be down wastes one of the slots that make racing worth doing.
         let mut inflight = FuturesUnordered::new();
-        for node in self.nodes.iter().take(width) {
+        for index in self.call_order(method).into_iter().take(width) {
+            let node = &self.nodes[index];
             let body = body.clone();
             inflight.push(async move {
                 let result = self.try_node(node, &body).await;
+                self.note(index, method, &result);
                 (node.clone(), result)
             });
         }
@@ -514,6 +589,115 @@ mod tests {
     }
 
     const OK: &str = r#"{"result":42}"#;
+
+    fn quick_policy() -> HealthPolicy {
+        HealthPolicy {
+            failures_before_cooldown: 2,
+            api_failures_before_cooldown: 2,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn health_is_shared_across_clones() {
+        // The reason the tracker is behind an Arc. If a clone carried its own copy,
+        // every clone in a pool would rediscover the same dead node, and this test
+        // would see node a tried again by the clone.
+        let client = AsyncNodeClient::new(
+            FakeTransport::new(vec![
+                ("https://a", Duration::ZERO, Err(Error::Rpc("down".into()))),
+                ("https://b", Duration::ZERO, Ok(OK.into())),
+                ("https://c", Duration::ZERO, Ok(OK.into())),
+            ]),
+            nodes(),
+        )
+        .unwrap()
+        .with_health_tracking(quick_policy());
+
+        // Teach the original that node a is down.
+        client.call("x", serde_json::json!({})).await.unwrap();
+        client.call("x", serde_json::json!({})).await.unwrap();
+
+        let clone = client.clone();
+        let before = clone.transport.call_count();
+        clone.call("x", serde_json::json!({})).await.unwrap();
+
+        assert_eq!(
+            clone.transport.call_count() - before,
+            1,
+            "the clone must go straight to a healthy node, not rediscover the dead one"
+        );
+        assert!(
+            clone.health().unwrap()[0]
+                .cooling_methods
+                .contains(&"x".to_string()),
+            "the clone must see what the original learned"
+        );
+    }
+
+    #[tokio::test]
+    async fn race_prefers_healthy_nodes_over_the_first_ones() {
+        // Racing width 2 over [a, b, c] normally picks a and b. With a known bad, the
+        // slots should go to b and c instead -- a wasted slot is the one thing racing
+        // cannot afford.
+        let client = AsyncNodeClient::new(
+            FakeTransport::new(vec![
+                ("https://a", Duration::ZERO, Err(Error::Rpc("down".into()))),
+                // A delay, so both survivors are actually polled: with an instant
+                // answer the first future polled wins before the second is ever
+                // started, and the race would not be a race.
+                ("https://b", Duration::from_millis(5), Ok(OK.into())),
+                ("https://c", Duration::from_millis(5), Ok(OK.into())),
+            ]),
+            nodes(),
+        )
+        .unwrap()
+        .with_health_tracking(quick_policy());
+
+        client.call("x", serde_json::json!({})).await.unwrap();
+        client.call("x", serde_json::json!({})).await.unwrap();
+        client.transport.calls.lock().unwrap().clear();
+
+        client.race("x", serde_json::json!({}), 2).await.unwrap();
+        let raced = client.transport.calls.lock().unwrap().clone();
+        assert!(
+            !raced.contains(&"https://a".to_string()),
+            "the known-bad node must not take a race slot: {raced:?}"
+        );
+        assert_eq!(
+            raced.len(),
+            2,
+            "still races the requested width -- the healthy pair, not one of them: {raced:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_health_tracking_the_async_client_is_unchanged() {
+        let client = AsyncNodeClient::new(
+            FakeTransport::new(vec![
+                ("https://a", Duration::ZERO, Err(Error::Rpc("down".into()))),
+                ("https://b", Duration::ZERO, Ok(OK.into())),
+            ]),
+            nodes(),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            client.call("x", serde_json::json!({})).await.unwrap();
+        }
+        assert!(client.health().is_none());
+        assert_eq!(
+            client
+                .transport
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|u| *u == "https://a")
+                .count(),
+            3,
+            "the default must keep trying the dead node first"
+        );
+    }
 
     #[tokio::test]
     async fn an_empty_node_list_is_refused() {

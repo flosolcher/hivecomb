@@ -13,20 +13,31 @@
 //!
 //! # Failover
 //!
-//! [`NodeClient`] tries nodes in order and moves on when one fails. It does **not**
-//! rank nodes by health, size waves, or manage retry budgets — an application that
-//! cares about tail latency will already have policy of its own, and a library that
-//! imposes its own would fight it. What this provides is the mechanism: an ordered
+//! [`NodeClient`] tries nodes in order and moves on when one fails. By default it does
+//! **not** rank nodes by health, size waves, or manage retry budgets — an application
+//! that cares about tail latency will already have policy of its own, and a library
+//! that imposes its own would fight it. What this provides is the mechanism: an ordered
 //! list, a per-node timeout, and an error that names every node that failed.
+//!
+//! That default has one sharp edge in a long-running process, though: walking the list
+//! from the front every time means a dead first node costs its full timeout on *every*
+//! call, forever. [`NodeClient::with_health_tracking`] is the opt-in answer — it
+//! remembers which nodes and which node-and-method pairs are failing, notices nodes
+//! that answer promptly with stale data, and sorts accordingly. It only ever reorders
+//! the list; no node is excluded, so it cannot turn a partial outage into a total one.
+//! Applications with their own policy are unaffected, because it stays off unless
+//! asked for.
 
 #[cfg(feature = "async")]
 mod async_client;
 mod client;
+mod health;
 mod types;
 
 #[cfg(feature = "async")]
 pub use async_client::{AsyncNodeClient, AsyncTransport, SleepFuture, Sleeper};
 pub use client::{BlockOperation, BlockStream, NodeClient, StreamMode, Transport};
+pub use health::{HealthPolicy, HealthTracker, NodeHealth};
 pub use types::{DynamicGlobalProperties, RpcRequest, RpcResponse};
 
 #[cfg(feature = "reqwest-transport")]

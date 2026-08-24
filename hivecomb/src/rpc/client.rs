@@ -1,5 +1,6 @@
 //! The node client: an ordered node list with failover.
 
+use super::health::{head_block_of, HealthPolicy, HealthTracker, NodeHealth};
 use super::types::{DynamicGlobalProperties, RpcRequest, RpcResponse};
 use crate::chains::Chain;
 use crate::error::{Error, Result};
@@ -29,6 +30,7 @@ pub struct NodeClient<T: Transport> {
     passes: u32,
     initial_backoff: Duration,
     next_id: AtomicU64,
+    health: Option<HealthTracker>,
 }
 
 impl<T: Transport> NodeClient<T> {
@@ -44,6 +46,7 @@ impl<T: Transport> NodeClient<T> {
             passes: 1,
             initial_backoff: Duration::from_millis(250),
             next_id: AtomicU64::new(1),
+            health: None,
         })
     }
 
@@ -64,6 +67,40 @@ impl<T: Transport> NodeClient<T> {
         self.passes = passes.max(1);
         self.initial_backoff = initial_backoff;
         self
+    }
+
+    /// Remember which nodes are failing, and try them last.
+    ///
+    /// Off by default, and deliberately so: without it this client walks the node list
+    /// from the front every time, which is predictable and is the right mechanism for
+    /// an application that has failover policy of its own.
+    ///
+    /// Turn it on for a **long-running process**, where the default has one sharp edge:
+    /// if the first node is down, every call pays its full timeout before reaching a
+    /// node that answers. A ten-second timeout and a node that stays down makes every
+    /// request a ten-second request.
+    ///
+    /// Health only ever reorders the list. No node is excluded, so a period in which
+    /// every node is unwell still tries every node — see [`HealthTracker::order`].
+    ///
+    /// ```no_run
+    /// # use hivecomb::rpc::{HealthPolicy, NodeClient, UreqTransport, DEFAULT_NODES};
+    /// let nodes = DEFAULT_NODES.iter().map(|s| s.to_string()).collect();
+    /// let client = NodeClient::new(UreqTransport::default(), nodes)?
+    ///     .with_health_tracking(HealthPolicy::default());
+    /// # Ok::<(), hivecomb::Error>(())
+    /// ```
+    pub fn with_health_tracking(mut self, policy: HealthPolicy) -> Self {
+        self.health = Some(HealthTracker::new(self.nodes.len(), policy));
+        self
+    }
+
+    /// What the health tracker believes about each node, in node-list order.
+    ///
+    /// `None` when health tracking is off. Pair it with [`NodeClient::nodes`], which is
+    /// in the same order.
+    pub fn health(&self) -> Option<Vec<NodeHealth>> {
+        self.health.as_ref().map(HealthTracker::snapshot)
     }
 
     /// The configured nodes.
@@ -94,10 +131,27 @@ impl<T: Transport> NodeClient<T> {
                 std::thread::sleep(wait);
                 failures.push(format!("(retry pass {} after {:?})", pass + 1, wait));
             }
-            for node in &self.nodes {
+            for index in self.call_order(method) {
+                let node = &self.nodes[index];
                 match self.try_node(node, &body) {
-                    Ok(value) => return Ok(value),
-                    Err(e) => failures.push(format!("{node}: {e}")),
+                    Ok(value) => {
+                        if let Some(health) = &self.health {
+                            health.record_success(index, method);
+                            // Staleness is observed from responses that happen to carry
+                            // a head block rather than probed for, so tracking it costs
+                            // the caller no extra request.
+                            if let Some(head) = head_block_of(&value) {
+                                health.observe_head_block(index, head);
+                            }
+                        }
+                        return Ok(value);
+                    }
+                    Err(e) => {
+                        if let Some(health) = &self.health {
+                            health.record_failure(index, method);
+                        }
+                        failures.push(format!("{node}: {e}"));
+                    }
                 }
             }
         }
@@ -107,6 +161,15 @@ impl<T: Transport> NodeClient<T> {
             self.passes,
             failures.join("; ")
         )))
+    }
+
+    /// The order to try nodes in. Without health tracking this is the configured
+    /// order, which is what the module documentation promises.
+    fn call_order(&self, method: &str) -> Vec<usize> {
+        match &self.health {
+            Some(health) => health.order(method),
+            None => (0..self.nodes.len()).collect(),
+        }
     }
 
     fn try_node(&self, node: &str, body: &str) -> Result<serde_json::Value> {
@@ -564,6 +627,204 @@ mod tests {
 
     fn nodes() -> Vec<String> {
         vec!["https://a".into(), "https://b".into(), "https://c".into()]
+    }
+
+    /// A transport that fails for a named set of hosts and answers for the rest,
+    /// recording every URL it was asked for. Unlike `FakeTransport` this is keyed on
+    /// the node rather than on call order, which is what a health test needs.
+    #[derive(Debug)]
+    struct PerNodeTransport {
+        dead: Vec<String>,
+        calls: Mutex<Vec<String>>,
+        body: String,
+    }
+
+    impl PerNodeTransport {
+        fn new(dead: &[&str]) -> Self {
+            PerNodeTransport {
+                dead: dead.iter().map(|s| s.to_string()).collect(),
+                calls: Mutex::new(Vec::new()),
+                body: r#"{"result":{"ok":true}}"#.to_string(),
+            }
+        }
+        fn seen(&self) -> Vec<String> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl Transport for PerNodeTransport {
+        fn post_json(&self, url: &str, _body: &str, _timeout: Duration) -> Result<String> {
+            self.calls.lock().unwrap().push(url.to_string());
+            if self.dead.iter().any(|d| d == url) {
+                return Err(Error::Rpc("refused".into()));
+            }
+            Ok(self.body.clone())
+        }
+    }
+
+    /// Two failures is the default threshold's worth for our purposes; the default
+    /// policy needs three, so tests that want a cooldown say so explicitly.
+    fn quick_policy() -> HealthPolicy {
+        HealthPolicy {
+            failures_before_cooldown: 2,
+            api_failures_before_cooldown: 2,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn without_health_tracking_a_dead_first_node_is_retried_every_call() {
+        // The documented default, and the behaviour the health tracker exists to
+        // offer an alternative to. If this ever stops holding, the opt-in is no
+        // longer opt-in.
+        let client = NodeClient::new(PerNodeTransport::new(&["https://a"]), nodes()).unwrap();
+        for _ in 0..3 {
+            client.call("x", serde_json::json!({})).unwrap();
+        }
+        let seen = client.transport.seen();
+        assert_eq!(
+            seen.iter().filter(|u| *u == "https://a").count(),
+            3,
+            "the dead node must be tried on every call: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn with_health_tracking_a_dead_first_node_stops_being_tried_first() {
+        let client = NodeClient::new(PerNodeTransport::new(&["https://a"]), nodes())
+            .unwrap()
+            .with_health_tracking(quick_policy());
+
+        // Two calls to cross the failure threshold, then three more that should not
+        // touch the dead node at all.
+        for _ in 0..5 {
+            client.call("x", serde_json::json!({})).unwrap();
+        }
+
+        // Call 1 and 2 each try a (failing) then b. That is two failures on this
+        // method, which cools the pair, so calls 3 to 5 go straight to b.
+        assert_eq!(
+            client.transport.seen(),
+            [
+                "https://a",
+                "https://b", // call 1
+                "https://a",
+                "https://b", // call 2
+                "https://b", // call 3
+                "https://b", // call 4
+                "https://b", // call 5
+            ]
+        );
+    }
+
+    #[test]
+    fn health_tracking_still_tries_every_node_when_all_of_them_are_dead() {
+        // The safety property at the client level: reordering must never shrink the
+        // set of nodes tried, or a total outage becomes unrecoverable.
+        let client = NodeClient::new(
+            PerNodeTransport::new(&["https://a", "https://b", "https://c"]),
+            nodes(),
+        )
+        .unwrap()
+        .with_health_tracking(quick_policy());
+
+        for _ in 0..3 {
+            assert!(client.call("x", serde_json::json!({})).is_err());
+        }
+        let seen = client.transport.seen();
+        assert_eq!(seen.len(), 9, "every call must try all three: {seen:?}");
+        for node in ["https://a", "https://b", "https://c"] {
+            assert_eq!(
+                seen.iter().filter(|u| *u == node).count(),
+                3,
+                "{node} must still be tried on every call: {seen:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_node_failing_one_method_is_still_first_choice_for_another() {
+        #[derive(Debug)]
+        struct MethodTransport {
+            calls: Mutex<Vec<String>>,
+        }
+        impl Transport for MethodTransport {
+            fn post_json(&self, url: &str, body: &str, _t: Duration) -> Result<String> {
+                self.calls.lock().unwrap().push(url.to_string());
+                // Node a serves everything except account_history_api, which is what a
+                // partial node looks like from outside.
+                if url == "https://a" && body.contains("account_history_api") {
+                    return Err(Error::Rpc("no such api".into()));
+                }
+                Ok(r#"{"result":1}"#.to_string())
+            }
+        }
+
+        let client = NodeClient::new(
+            MethodTransport {
+                calls: Mutex::new(Vec::new()),
+            },
+            nodes(),
+        )
+        .unwrap()
+        .with_health_tracking(quick_policy());
+
+        for _ in 0..3 {
+            client
+                .call(
+                    "account_history_api.get_ops_in_block",
+                    serde_json::json!({}),
+                )
+                .unwrap();
+        }
+        client
+            .call("database_api.get_accounts", serde_json::json!({}))
+            .unwrap();
+
+        let seen = client.transport.calls.lock().unwrap().clone();
+        assert_eq!(
+            seen.last().unwrap(),
+            "https://a",
+            "the working method must still go to node a first: {seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_head_block_in_a_response_is_observed() {
+        #[derive(Debug)]
+        struct HeadTransport;
+        impl Transport for HeadTransport {
+            fn post_json(&self, url: &str, _b: &str, _t: Duration) -> Result<String> {
+                // Node a is a thousand blocks behind and answers perfectly, which is
+                // the case failure counting alone can never notice.
+                let head = if url == "https://a" { 1_000 } else { 2_000 };
+                Ok(format!(r#"{{"result":{{"head_block_number":{head}}}}}"#))
+            }
+        }
+        let client = NodeClient::new(HeadTransport, nodes())
+            .unwrap()
+            .with_health_tracking(quick_policy());
+
+        // One call reaches only node a, so only a's head is known and nothing can be
+        // judged stale yet.
+        client.call("x", serde_json::json!({})).unwrap();
+        assert_eq!(client.health().unwrap()[0].head_block, Some(1_000));
+        assert!(
+            !client.health().unwrap()[0].stale,
+            "nothing to compare against"
+        );
+
+        // Teach it what b reports, and a becomes measurably behind.
+        client.health.as_ref().unwrap().observe_head_block(1, 2_000);
+        let report = client.health().unwrap();
+        assert!(report[0].stale, "node a is 1000 blocks behind: {report:?}");
+        assert!(!report[1].stale);
+    }
+
+    #[test]
+    fn health_is_none_unless_it_was_asked_for() {
+        let client = NodeClient::new(FakeTransport::new(vec![]), nodes()).unwrap();
+        assert!(client.health().is_none());
     }
 
     #[test]
