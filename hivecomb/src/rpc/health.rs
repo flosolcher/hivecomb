@@ -37,12 +37,26 @@
 //!   everything else.
 //! # What bounds the staleness check
 //!
-//! Two nodes do not read the chain at the same instant even when asked at the same
-//! instant. One answering in 60 ms and one answering in 700 ms report heads computed
-//! most of a block apart, so their raw numbers differ while both are perfectly current.
-//! No choice of timestamp fixes that — the difference is in the *readings*, not in when
-//! they were recorded — and stamping at send rather than at arrival was tried and makes
-//! it marginally worse.
+//! Two effects, on opposite sides of one dividing line, and it is worth keeping them
+//! apart
+//! because the fix for one does nothing for the other.
+//!
+//! **Below a block of spread** — two nodes answering 60 ms and 700 ms apart — the raw
+//! numbers differ while both are current, and no ageing cancels it: the difference is in
+//! the *readings*, not in when they were recorded. Stamping at send rather than arrival
+//! was tried and makes it marginally worse, so arrival plus ageing is the combination
+//! that works. What contains this regime is the threshold, below.
+//!
+//! **Above a block of spread** — readings taken tens of blocks apart, which is what a
+//! long interval between calls produces — ageing is not cosmetic, it is the entire fix.
+//! Forty blocks of drift cannot be rounded away; only crediting the elapsed blocks
+//! removes it. This is the regime that produced the bug this module was corrected for,
+//! and the adversarial case worth benchmarking (a node answering just inside a 7-second
+//! timeout, 2.3 blocks) sits in it too.
+//!
+//! The split was measured by a peer against both regimes after I described ageing as
+//! cosmetic on the strength of the sub-block case alone. It is cosmetic there and
+//! load-bearing above, and this crate's own worst case is the second one.
 //!
 //! What bounds it is the threshold. The artefact is the observation spread divided by
 //! the block interval: a 700 ms spread is 0.2 blocks, and a pathological nine-second
@@ -213,6 +227,18 @@ impl NodeState {
         if age > ttl {
             return None;
         }
+        // Truncating, deliberately, and not rounding. The reference this is compared
+        // against is a *maximum* over projections, so over-crediting an old reading
+        // demotes the freshest one: a node observed 0.6 blocks ago at head 100 projects
+        // to 101 under rounding, which puts a node that reported 100 a moment ago one
+        // block "behind" while both are current. Truncation cannot do that — it never
+        // credits a block that has not certainly passed, so the newest reading, which
+        // needs no adjustment at all, can never be beaten by an artefact.
+        //
+        // A peer reached the opposite conclusion for their own selector and is right
+        // there: their gap is measured against one reference with a sub-block-sensitive
+        // threshold, where truncation systematically forgives real lag. Whether to round
+        // or truncate follows from what the reference is, not from which is tidier.
         let interval = interval.as_secs_f64();
         let advanced = if interval > 0.0 {
             (age.as_secs_f64() / interval) as u64
@@ -463,6 +489,63 @@ mod tests {
             t.order("database_api.get_accounts"),
             vec![0, 1, 2],
             "the working pair must be untouched"
+        );
+    }
+
+    #[test]
+    fn the_freshest_reading_is_never_demoted_by_the_projection() {
+        // The sub-block edge, which nothing in this suite previously sat on. Two nodes
+        // reporting the same head, one observed a fraction of a block ago and one just
+        // now, with the chain not having advanced: neither is behind and the projection
+        // must not invent a gap.
+        //
+        // This is the test that distinguishes truncating from rounding. Rounding gives
+        // the older reading a whole block it has not earned, that becomes the maximum,
+        // and the *newest* reading -- the one that needed no adjustment and is the most
+        // trustworthy thing here -- comes out a block behind.
+        let t = HealthTracker::new(
+            2,
+            HealthPolicy {
+                stale_block_threshold: 0,
+                block_interval: Duration::from_millis(10),
+                head_block_ttl: Duration::from_secs(10),
+                ..Default::default()
+            },
+        );
+        t.observe_head_block(0, 100);
+        std::thread::sleep(Duration::from_millis(6)); // 0.6 of a block
+        t.observe_head_block(1, 100);
+
+        let report = t.snapshot();
+        assert!(
+            !report[1].stale,
+            "the freshest reading must never be the stale one: {report:?}"
+        );
+        assert!(!report[0].stale, "and neither node is behind: {report:?}");
+        assert_eq!(t.order("x"), vec![0, 1], "so the order is untouched");
+    }
+
+    #[test]
+    fn a_whole_block_of_elapsed_time_is_credited() {
+        // The other side of truncation: it must still credit blocks that certainly did
+        // pass, or the compensation does nothing and the bug it was written for returns.
+        let t = HealthTracker::new(
+            2,
+            HealthPolicy {
+                stale_block_threshold: 0,
+                block_interval: Duration::from_millis(10),
+                head_block_ttl: Duration::from_secs(10),
+                ..Default::default()
+            },
+        );
+        t.observe_head_block(0, 100);
+        std::thread::sleep(Duration::from_millis(35)); // 3.5 blocks
+        t.observe_head_block(1, 103);
+
+        let report = t.snapshot();
+        assert!(
+            !report[0].stale,
+            "three whole blocks passed and must be credited: {report:?}"
         );
     }
 

@@ -721,6 +721,28 @@ def _health_age_compensation():
     assert report[0]["head_block"] == 100, report
 
 
+@check("health: the freshest reading is never demoted by the projection")
+def _health_freshest_not_demoted():
+    # The sub-block edge. Two nodes on the same head, one read a fraction of a block
+    # ago and one just now, chain not advanced. Rounding the projection up would give
+    # the older reading a block it has not earned, make that the reference, and leave
+    # the newest reading looking behind.
+    import time as _t
+
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(2, HealthPolicy(stale_block_threshold=0, block_interval=0.010,
+                                      head_block_ttl=10.0))
+    t.observe_head_block(0, 100)
+    _t.sleep(0.006)                # 0.6 of a block
+    t.observe_head_block(1, 100)
+
+    report = t.snapshot()
+    assert not report[1]["stale"], f"freshest must not be stale: {report}"
+    assert not report[0]["stale"], report
+    assert t.order("x") == [0, 1]
+
+
 @check("health: a node genuinely behind is still caught, even with an old reading")
 def _health_age_compensation_is_not_a_blanket_excuse():
     import time as _t

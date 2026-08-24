@@ -173,6 +173,10 @@ class HealthTracker:
             return None
         interval = self.policy.block_interval
         if interval and interval > 0:
+            # int() truncates, deliberately. The reference is a maximum over
+            # projections, so crediting an old reading a block it has not certainly
+            # earned would demote the freshest reading instead -- and the freshest
+            # reading needs no adjustment and is the most trustworthy one here.
             return head + int((now - state.head_seen_at) / interval)
         return head
 
