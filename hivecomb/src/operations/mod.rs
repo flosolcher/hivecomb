@@ -32,6 +32,47 @@ use crate::types::{
 /// Maximum length of a `custom_json` id, from hived's `custom_id_type`.
 pub const MAX_CUSTOM_ID_LEN: usize = 32;
 
+/// Entries an [`crate::authority::Authority`] may hold in total.
+///
+/// hived's `HIVE_MAX_AUTHORITY_MEMBERSHIP`. `validate_auth_size` asserts
+/// `account_auths.size() + key_auths.size() <= HIVE_MAX_AUTHORITY_MEMBERSHIP`, so the
+/// two kinds share one budget of 40 rather than having 40 each.
+///
+/// The same constant separately bounds the auth lists on the three custom operations,
+/// where it is `required_auths.size() + required_posting_auths.size()`.
+pub const MAX_AUTHORITY_MEMBERSHIP: usize = 40;
+
+/// Beneficiaries a comment may name.
+///
+/// hived asserts `beneficiaries.size() < HIVE_BENEFICIARY_LIMIT` against a constant of
+/// 128, so the usable maximum is **127** — and the comment beside it explains why the
+/// bound exists at all: "Require size serialization fits in one byte."
+///
+/// Note this is **not** `HIVE_MAX_COMMENT_BENEFICIARIES`, which is 8 and which
+/// `comment_payout_beneficiaries::validate` does not use. A constant that looks like the
+/// limit and is not; the transaction size limit has the same trap.
+pub const MAX_BENEFICIARIES: usize = 127;
+
+/// Longest proposal subject, in bytes.
+///
+/// `validate_string_max_size( subject, HIVE_PROPOSAL_SUBJECT_MAX_LENGTH, ... )` with
+/// **no `- 1`**, and that helper is `<=`, so the bound is the constant itself. Unlike
+/// the memo and title, which subtract one. Derived rather than assumed for that reason.
+pub const MAX_PROPOSAL_SUBJECT_LEN: usize = 80;
+
+/// Proposal ids one `update_proposal_votes` or `remove_proposal` may carry.
+///
+/// `proposal_ids.size() <= HIVE_PROPOSAL_MAX_IDS_NUMBER`, and separately the list must
+/// not be empty.
+pub const MAX_PROPOSAL_IDS: usize = 5;
+
+/// Longest witness URL, in bytes.
+///
+/// `validate_string_max_size( url, HIVE_MAX_WITNESS_URL_LENGTH, ... )` — again with no
+/// `- 1`, so the bound is the constant. Applies to `witness_update` and
+/// `witness_set_properties`.
+pub const MAX_WITNESS_URL_LEN: usize = 2048;
+
 /// Longest memo any operation may carry, in bytes.
 ///
 /// hived writes this as `validate_string_max_size( memo, HIVE_MAX_MEMO_SIZE - 1, ... )`,
@@ -130,6 +171,15 @@ impl GrapheneSerialize for CommentOptionsExtension {
     fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
         match self {
             CommentOptionsExtension::Beneficiaries(list) => {
+                if list.is_empty() {
+                    return Err(Error::field("beneficiaries must name at least one account"));
+                }
+                if list.len() > MAX_BENEFICIARIES {
+                    return Err(Error::field(format!(
+                        "{} beneficiaries; hived allows at most {MAX_BENEFICIARIES}",
+                        list.len()
+                    )));
+                }
                 let total: u32 = list.iter().map(|b| u32::from(b.weight)).sum();
                 if total > 10_000 {
                     return Err(Error::field(format!(
@@ -1333,6 +1383,7 @@ impl Operation {
                 write_string(out, &o.json_metadata)?;
             }
             Operation::WitnessUpdate(o) => {
+                check_len(&o.url, MAX_WITNESS_URL_LEN, "witness_update url")?;
                 write_string(out, &o.owner)?;
                 write_string(out, &o.url)?;
                 o.block_signing_key.append_to(out)?;
@@ -1522,6 +1573,16 @@ impl Operation {
                         o.json.len()
                     )));
                 }
+                if o.required_auths.len() + o.required_posting_auths.len()
+                    > MAX_AUTHORITY_MEMBERSHIP
+                {
+                    return Err(Error::field(format!(
+                        "custom_json names {} accounts across required_auths and \
+                         required_posting_auths; hived allows at most \
+                         {MAX_AUTHORITY_MEMBERSHIP} between them",
+                        o.required_auths.len() + o.required_posting_auths.len()
+                    )));
+                }
                 if o.required_auths.is_empty() && o.required_posting_auths.is_empty() {
                     return Err(Error::field(
                         "custom_json needs at least one required_auths or required_posting_auths entry",
@@ -1621,6 +1682,12 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::CreateProposal(o) => {
+                check_len(
+                    &o.subject,
+                    MAX_PROPOSAL_SUBJECT_LEN,
+                    "create_proposal subject",
+                )?;
+                check_len(&o.permlink, MAX_PERMLINK_LEN, "create_proposal permlink")?;
                 write_string(out, &o.creator)?;
                 write_string(out, &o.receiver)?;
                 o.start_date.append_to(out)?;
@@ -1642,6 +1709,12 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::UpdateProposal(o) => {
+                check_len(
+                    &o.subject,
+                    MAX_PROPOSAL_SUBJECT_LEN,
+                    "update_proposal subject",
+                )?;
+                check_len(&o.permlink, MAX_PERMLINK_LEN, "update_proposal permlink")?;
                 write_u64(out, o.proposal_id);
                 write_string(out, &o.creator)?;
                 o.daily_pay.append_to(out)?;
@@ -1695,6 +1768,12 @@ fn write_sorted_proposal_ids(out: &mut Vec<u8>, ids: &[u64]) -> Result<()> {
     }
     if sorted.is_empty() {
         return Err(Error::field("proposal_ids is empty"));
+    }
+    if sorted.len() > MAX_PROPOSAL_IDS {
+        return Err(Error::field(format!(
+            "proposal_ids has {} entries; hived allows at most {MAX_PROPOSAL_IDS}",
+            sorted.len()
+        )));
     }
     write_array(out, &sorted)?;
     Ok(())
@@ -3050,6 +3129,92 @@ mod tests {
             let name = op.id().name();
             assert!(op.to_wire().is_err(), "{name} did not bound its memo");
         }
+    }
+
+    /// The remaining bounds hived's `validate()` applies, each at its exact boundary.
+    ///
+    /// Each was read from hived rather than inferred, because the forms differ: the
+    /// proposal subject and witness URL use `validate_string_max_size(x, CONST)` with no
+    /// subtraction, where the memo and title use `CONST - 1`. Assuming one from the
+    /// other is wrong by one in whichever direction you guess.
+    #[test]
+    fn the_remaining_bounds_sit_exactly_where_hived_puts_them() {
+        use crate::types::PointInTime;
+        use crate::Chain;
+
+        let proposal = |subject: &str, permlink: &str| {
+            Operation::CreateProposal(CreateProposal {
+                creator: "alice".into(),
+                receiver: "bob".into(),
+                start_date: PointInTime::from_unix(1_893_456_000).unwrap(),
+                end_date: PointInTime::from_unix(1_927_756_800).unwrap(),
+                daily_pay: Amount::parse("1.000 HBD", Chain::Hive).unwrap(),
+                subject: subject.into(),
+                permlink: permlink.into(),
+                extensions: NoExtensions,
+            })
+        };
+        let subj = "s".repeat(MAX_PROPOSAL_SUBJECT_LEN);
+        assert!(
+            proposal(&subj, "p").to_wire().is_ok(),
+            "exactly 80 is allowed"
+        );
+        assert!(proposal(&"s".repeat(MAX_PROPOSAL_SUBJECT_LEN + 1), "p")
+            .to_wire()
+            .is_err());
+        assert!(proposal(&subj, &"p".repeat(MAX_PERMLINK_LEN + 1))
+            .to_wire()
+            .is_err());
+
+        let witness = |url: &str| {
+            Operation::WitnessUpdate(WitnessUpdate {
+                owner: "alice".into(),
+                url: url.into(),
+                block_signing_key: PublicKey::from_prefixed_any(
+                    "STM6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV",
+                )
+                .unwrap(),
+                props: ChainProperties {
+                    account_creation_fee: Amount::parse("3.000 HIVE", Chain::Hive).unwrap(),
+                    maximum_block_size: 65_536,
+                    hbd_interest_rate: 0,
+                },
+                fee: Amount::parse("0.000 HIVE", Chain::Hive).unwrap(),
+            })
+        };
+        assert!(
+            witness(&"u".repeat(MAX_WITNESS_URL_LEN)).to_wire().is_ok(),
+            "2048 allowed"
+        );
+        assert!(witness(&"u".repeat(MAX_WITNESS_URL_LEN + 1))
+            .to_wire()
+            .is_err());
+    }
+
+    /// Proposal id lists are bounded at both ends.
+    #[test]
+    fn proposal_id_lists_are_bounded() {
+        let votes = |n: u64| {
+            Operation::UpdateProposalVotes(UpdateProposalVotes {
+                voter: "alice".into(),
+                proposal_ids: (0..n).collect(),
+                approve: true,
+                extensions: NoExtensions,
+            })
+        };
+        assert!(votes(0).to_wire().is_err(), "empty is refused");
+        assert!(votes(MAX_PROPOSAL_IDS as u64).to_wire().is_ok());
+        assert!(votes(MAX_PROPOSAL_IDS as u64 + 1).to_wire().is_err());
+    }
+
+    /// The constants are hived's, restated. Pinned so a change has to be deliberate.
+    #[test]
+    fn the_remaining_bounds_match_hived() {
+        assert_eq!(MAX_AUTHORITY_MEMBERSHIP, 40);
+        assert_eq!(MAX_BENEFICIARIES, 128 - 1);
+        assert_eq!(MAX_PROPOSAL_SUBJECT_LEN, 80);
+        assert_eq!(MAX_PROPOSAL_IDS, 5);
+        assert_eq!(MAX_WITNESS_URL_LEN, 2048);
     }
 
     #[test]

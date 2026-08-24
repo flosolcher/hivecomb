@@ -202,6 +202,21 @@ impl Authority {
 
 impl GrapheneSerialize for Authority {
     fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+        // hived's `validate_auth_size` sums the two lists against one budget:
+        //
+        //     size = a.account_auths.size() + a.key_auths.size();
+        //     assert( size <= HIVE_MAX_AUTHORITY_MEMBERSHIP );
+        //
+        // One budget of forty between them, not forty each — which is the reading a
+        // caller is most likely to get wrong, since the two lists are separate fields.
+        let entries = self.account_auths.len() + self.key_auths.len();
+        if entries > crate::operations::MAX_AUTHORITY_MEMBERSHIP {
+            return Err(Error::field(format!(
+                "authority names {entries} entries across account_auths and key_auths; \
+                 hived allows at most {} between them",
+                crate::operations::MAX_AUTHORITY_MEMBERSHIP
+            )));
+        }
         write_u32(out, self.weight_threshold);
         write_array(out, &self.account_auths)?;
         write_array(out, &self.key_auths)?;
@@ -307,6 +322,46 @@ impl AuthorityCheck {
 
 #[cfg(test)]
 mod tests {
+
+    /// hived sums `account_auths` and `key_auths` against one budget of forty, not
+    /// forty each — the reading a caller is most likely to get wrong, since they are
+    /// separate fields.
+    #[test]
+    fn the_two_authority_lists_share_one_membership_budget() {
+        use crate::operations::MAX_AUTHORITY_MEMBERSHIP;
+        use crate::types::GrapheneSerialize;
+
+        let accounts = |n: usize| {
+            (0..n)
+                .map(|i| AccountAuth {
+                    account: format!("acct{i:04}"),
+                    weight: 1,
+                })
+                .collect::<Vec<_>>()
+        };
+        let one_key = vec![KeyAuth {
+            key: key(1),
+            weight: 1,
+        }];
+
+        // One short of the budget in accounts, plus one key, is exactly the budget.
+        let at =
+            Authority::new(1, accounts(MAX_AUTHORITY_MEMBERSHIP - 1), one_key.clone()).unwrap();
+        let mut out = Vec::new();
+        assert!(
+            at.append_to(&mut out).is_ok(),
+            "exactly the budget is allowed"
+        );
+
+        // The full budget in accounts *plus* a key is one too many — which it would not
+        // be if each list had its own forty.
+        let over = Authority::new(1, accounts(MAX_AUTHORITY_MEMBERSHIP), one_key).unwrap();
+        let mut out = Vec::new();
+        assert!(
+            over.append_to(&mut out).is_err(),
+            "the two lists share one budget, so this is one past it"
+        );
+    }
     use super::*;
     use crate::keys::PrivateKey;
 
