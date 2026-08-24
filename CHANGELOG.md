@@ -189,7 +189,13 @@ got wrong first:
   node-wide threshold as well and gets cooled entirely, making per-method tracking
   decorative in the case it exists for.
 
-Off by default, so nothing changes for callers who do not ask for it.
+The Python compatibility layer has its own pure-stdlib client rather than a binding to
+the Rust one, and it gained the same feature with the same rules — plus one decision the
+Rust client does not have to make: a JSON-RPC *protocol* error is not counted against the
+node, because the node answered and the request was what was wrong.
+
+Off by default everywhere, so nothing changes for callers who do not ask for it, and
+beem's behaviour is what the default still gives.
 
 ### Fixed — `AsyncNodeClient` was only cloneable for cloneable transports
 

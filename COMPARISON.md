@@ -469,7 +469,8 @@ It failed over correctly and named every node that failed, but it remembered not
 a dead first node cost its full timeout on **every call for the life of the process**.
 
 `NodeClient::with_health_tracking` and `AsyncNodeClient::with_health_tracking` now close
-it, tracking the same three things dhive found worth tracking: consecutive failures per
+it — as does `NodeClient(health=HealthPolicy())` in the Python layer, which has its own
+client rather than a binding to the Rust one — tracking the same three things dhive found worth tracking: consecutive failures per
 node, failures per node *and method*, and head block staleness. It is opt-in, because
 the stateless default is the right mechanism for an application that has failover policy
 of its own, and imposing one would fight it.

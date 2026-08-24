@@ -426,7 +426,43 @@ The Rust side has an async equivalent behind the `async` feature.
 Every chain type carries an `extra` map, so a hardfork that adds a field does not
 silently lose it.
 
-### 4.15 A differential oracle
+### 4.15 Node health tracking
+
+beem walks its node list from the front on every call and remembers nothing, so a
+dead first node costs its full timeout on *every* request for the life of the
+process. In a long-running bot that is the difference between a fast path and a
+ten-second one, repeated forever.
+
+Opt in with a `HealthPolicy`. The default is beem's behaviour, unchanged:
+
+```python
+from hivecomb_compat import HealthPolicy, NodeClient
+
+client = NodeClient(nodes=[...], health=HealthPolicy())
+client.health.snapshot()   # why each node is or is not being skipped
+```
+
+It tracks consecutive failures per node, failures per node *and method* (a node
+serving `database_api` and 404ing on `account_history_api` is a partial node, not a
+broken one), and head block staleness — a node answering promptly with hour-old data
+fails no request, so failure counting alone can never notice it. Head blocks are read
+from responses that already carry one; nothing extra is requested.
+
+Two rules are worth knowing because they bound what it can do to you:
+
+- **It reorders the node list and never removes a node.** If every node is unwell the
+  call still tries all of them. A tracker that can exclude a node can turn a partial
+  outage into a total one.
+- **A whole-node cooldown needs failures across more than one method**, so a node
+  that merely lacks one API stays first choice for everything else.
+
+A JSON-RPC protocol error is not counted against the node — it answered, and the
+request was what was wrong.
+
+`Hive.rpc.race` also spends its slots on the healthiest nodes rather than the first.
+The Rust crate has the same feature on `NodeClient` and `AsyncNodeClient`.
+
+### 4.16 A differential oracle
 
 `tests/differential_beem.py` compares digests against beem byte for byte over a
 generated corpus. `hivecomb/tests/live_fixtures.rs` parses real captured node responses.
