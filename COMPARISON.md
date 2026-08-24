@@ -206,7 +206,7 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 16,889 lines |
+| Rust source | 4,556 lines | 16,915 lines |
 | Tests | 48 | 352 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
@@ -696,6 +696,24 @@ path matters more than the pathological one. Six healthy nodes, minimum of seven
 pinned: **0.20 µs** in Rust and **5.1 µs** in the Python layer for the complete per-call
 overhead — ordering plus recording the success plus noting the head block. Against a
 20 ms RPC round trip that is 0.001% and 0.026%. It is not a consideration.
+
+**It demotes for failing, never for being slow.** Measured with
+`cargo run --release --example bench_health --features rpc`, forty calls over three nodes
+with the first misbehaving and a 200 ms timeout:
+
+| the first node | tracking off | tracking on | |
+|---|---|---|---|
+| refuses immediately | 1.35 µs | 0.76 µs | −0.6 µs |
+| hangs until the timeout | 200,116 µs | 10,006 µs | **20× faster** |
+| answers, but takes 150 ms | 150,204 µs | 150,266 µs | **no change** |
+
+The middle row is what the feature is for and it delivers — the bad node goes from being
+reached on all forty calls to two. The last row is the limitation, stated plainly because
+the intuition runs the other way: **a node that is merely slow is reached on every call
+and costs its full latency every time**, and nothing here notices. A node degrading to
+seconds while still answering is both commoner and more expensive than one that refuses
+outright, so if that is the shape of the problem, cap it with a timeout or rank by
+observed latency — which this deliberately does not do.
 
 **A node one or two blocks behind is not demoted.** The threshold is thirty blocks, about
 ninety seconds of chain, and it is deliberately generous: this only reorders a list, and

@@ -35,6 +35,32 @@
 //!   404 on `account_history_api`, which is common when an operator runs a partial
 //!   node. Cooling that pair, rather than the whole node, keeps the node useful for
 //!   everything else.
+//! # What this does not do: there is no latency signal
+//!
+//! Nodes are demoted for **failing**, never for being slow. A slow success is a success:
+//! it clears the failure count and leaves the node exactly where it was in the order.
+//!
+//! Measured, with `cargo run --release --example bench_health --features rpc`, over forty
+//! calls with the first of three nodes misbehaving and a 200 ms timeout:
+//!
+//! | the first node | tracking off | tracking on | |
+//! |---|---|---|---|
+//! | refuses immediately | 1.35 µs | 0.76 µs | −0.6 µs |
+//! | hangs until the timeout | 200,116 µs | 10,006 µs | **20× faster** |
+//! | answers, but takes 150 ms | 150,204 µs | 150,266 µs | **no change** |
+//!
+//! The middle row is what this feature is for and it delivers: a node that hangs stops
+//! being tried first after two failures, and the bad node goes from being reached on all
+//! forty calls to two. The last row is the limitation, and it is worth stating plainly
+//! because the intuition runs the other way — **a node that is merely slow is reached on
+//! every single call and costs its full latency every time.** Nothing here notices.
+//!
+//! That matters more than the down-node case for anyone on a deadline, because a node
+//! degrading to seconds while still answering is both commoner and more expensive than
+//! one that refuses outright. If that is the shape of your problem, this is not the
+//! mechanism for it — cap it with [`NodeClient::with_timeout`], which does bound the
+//! damage, or rank nodes by observed latency, which this deliberately does not do.
+//!
 //! # What bounds the staleness check
 //!
 //! Two effects, on opposite sides of one dividing line, and it is worth keeping them
