@@ -133,6 +133,36 @@ process-wide context instead, measured through the Python module:
 
 All three bindings share this core, so all three benefit.
 
+**The Node addon was paying more to return a transaction than to sign one.** Measured
+against dhive 1.3.6, `signTransaction` with 50 operations cost 508 µs against dhive's
+236 — and signing accounted for 239 µs of that, so the return path outweighed the
+elliptic curve work. Two causes: `operation_from_json` deep-copied every operation's
+JSON tree on a vector it already owned, and the result was built as a
+`serde_json::Value` that napi then walked node by node. The copy is gone and the result
+is rendered straight to a JSON string for V8's own parser.
+
+Operations may now also be passed as a pre-stringified JSON array (`operations: string
+| Array<any>`) — one string crosses the boundary once, where an array is converted field
+by field. Worth 25–30%.
+
+| `signTransaction`, ops | dhive 1.3.6 | before | after |
+|---|---|---|---|
+| 1 | 123.3 µs | 94.5 µs | **88.5 µs** |
+| 10 | 149.9 µs | 157.1 µs | **133.3 µs** |
+| 50 | 242.1 µs | 449.4 µs | 344.3 µs |
+
+hivecomb now wins signing up to about fifteen operations in one transaction, where it
+previously crossed over at about five. Beyond that dhive still wins, and the reason is
+structural: hivecomb's serializer is only ~1.4× faster than dhive's JavaScript, which is
+not enough headroom to also pay for crossing the boundary. The win at ordinary sizes is
+the curve arithmetic — 71 µs against dhive's 103 for one signature. The public API and
+`index.d.ts` are unchanged.
+
+What this deliberately does *not* do is echo back the caller's own operations array,
+which would be faster still and wrong: hivecomb normalises operations on the way in, so
+the array handed back must be the one that was actually signed.
+
+
 ### Known behaviour worth stating
 
 **Serializing is not the inverse of parsing, for strings carrying control bytes.** A
