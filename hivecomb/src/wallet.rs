@@ -30,7 +30,7 @@
 //!
 //! # What a passphrase buys you
 //!
-//! scrypt at `N = 16384, r = 8, p = 1` costs roughly 16 MB and a few milliseconds per
+//! scrypt at `N = 32768, r = 8, p = 1` costs 32 MiB (`128 * r * N`) and a few milliseconds per
 //! guess. That is a meaningful multiplier, not a substitute for entropy. A six-word
 //! diceware passphrase is fine; a dictionary word is not, whatever the work factor.
 

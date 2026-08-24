@@ -183,11 +183,29 @@ impl PartialEq for PrivateKey {
 impl Eq for PrivateKey {}
 
 impl Drop for PrivateKey {
+    /// Overwrite the key material rather than leaving it in freed memory.
+    ///
+    /// # This was wrong, and the wrong version looked right
+    ///
+    /// The first implementation did:
+    ///
+    /// ```ignore
+    /// let mut bytes = self.inner.secret_bytes();
+    /// bytes.zeroize();
+    /// ```
+    ///
+    /// `secret_bytes()` returns `[u8; 32]` **by value**, so that zeroed a copy which was
+    /// about to be dropped anyway and left the real storage inside `SecretKey`
+    /// untouched. It read as though zeroization were handled, and its comment claimed
+    /// "the storage we own", which was the part that was not true.
+    ///
+    /// `non_secure_erase` operates on the key in place. It writes `1` rather than `0`,
+    /// because an all-zero scalar is not a valid secp256k1 key and the crate keeps the
+    /// type's invariant even while erasing. Its name is the crate's own honesty: nothing
+    /// stops a compiler eliding a write to memory that is never read again, so this is
+    /// best-effort rather than a guarantee.
     fn drop(&mut self) {
-        use zeroize::Zeroize;
-        // `SecretKey` is a newtype over [u8; 32]; overwrite the storage we own.
-        let mut bytes = self.inner.secret_bytes();
-        bytes.zeroize();
+        self.inner.non_secure_erase();
     }
 }
 
@@ -203,6 +221,70 @@ const _: () = assert!(COMPRESSED_PUBKEY_LEN == 33);
 
 #[cfg(test)]
 mod tests {
+
+    /// `Drop` erases in place, asserted against the source because it cannot be run.
+    ///
+    /// The effect of `Drop` is invisible: by the time it has finished, the value is
+    /// gone and the memory is not ours to inspect. So the behavioural tests below cover
+    /// the *primitive*, and reverting `Drop` itself to the broken form — zeroing the
+    /// copy that `secret_bytes()` returns — fails none of them.
+    ///
+    /// A decision that is documented but not asserted is one edit from being silently
+    /// reversed, and this one was already made wrongly once. So this reads the source.
+    /// It is a crude test and it is the only kind available here; the alternative is a
+    /// comment and a hope.
+    #[test]
+    fn drop_erases_in_place_rather_than_zeroing_a_copy() {
+        let source = include_str!("private.rs");
+        let start = source
+            .find("impl Drop for PrivateKey {")
+            .expect("the Drop impl must exist");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}").expect("impl must be closed")];
+        let body = &body[body.find("fn drop").expect("must define drop")..];
+
+        assert!(
+            body.contains("non_secure_erase"),
+            "Drop must erase the key in place"
+        );
+        assert!(
+            !body.contains("secret_bytes"),
+            "secret_bytes() returns [u8; 32] BY VALUE -- zeroing it erases a temporary \
+             and leaves the key in memory. That was the original bug and it read as \
+             though zeroization were handled."
+        );
+    }
+
+    /// The erase actually overwrites the key, rather than a copy of it.
+    ///
+    /// `Drop` cannot be observed from a test — by the time it has run the value is
+    /// gone — so this exercises the primitive `Drop` relies on. That is the part that
+    /// was wrong before: the old implementation called `secret_bytes()`, which returns
+    /// by value, and zeroed a temporary while the real storage survived. A test of the
+    /// mechanism catches that; a test of `Drop` could not have.
+    #[test]
+    fn erasing_a_key_overwrites_the_key_and_not_a_copy() {
+        let key = PrivateKey::from_wif(TEST_WIF).expect("published test key");
+        let before = key.to_wif().as_str().to_owned();
+
+        let mut inner = key.inner;
+        let original = inner.secret_bytes();
+        inner.non_secure_erase();
+        let after = inner.secret_bytes();
+
+        assert_ne!(
+            original, after,
+            "non_secure_erase must change the key material"
+        );
+        assert!(
+            after.iter().all(|b| *b == 1),
+            "secp256k1 erases to 1, since an all-zero scalar is not a valid key: {after:?}"
+        );
+
+        // And erasing that copy left the original untouched, which is what makes the
+        // distinction visible at all.
+        assert_eq!(key.to_wif().as_str(), before);
+    }
     use super::*;
 
     /// A fixed key used throughout these tests.
