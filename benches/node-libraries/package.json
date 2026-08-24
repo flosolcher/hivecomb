@@ -1,0 +1,14 @@
+{
+  "name": "hivecomb-node-comparison",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Measures hivecomb against the other Node Hive libraries, on identical work.",
+  "scripts": { "bench": "./run.sh" },
+  "dependencies": {
+    "@hiveio/dhive": "1.3.6",
+    "@hiveio/hive-js": "2.0.9",
+    "hive-tx": "7.2.1",
+    "hive-pollen": "1.0.0"
+  }
+}
