@@ -21,6 +21,19 @@ pub trait Transport: Send + Sync + std::fmt::Debug {
     fn post_json(&self, url: &str, body: &str, timeout: Duration) -> Result<String>;
 }
 
+/// The per-node timeout a new [`NodeClient`] starts with.
+///
+/// Named rather than written inline because other code depends on it: it bounds the
+/// observation spread the staleness check has to tolerate, and a test asserts the
+/// relationship between the two. A literal here and another in that test would be one
+/// decision in two places, and changing this one would leave the test asserting a margin
+/// that no longer exists.
+///
+/// A free constant rather than an associated one so that referring to it costs nobody a
+/// concrete transport type — the alternative made a test in another module name a
+/// feature-gated transport just to reach a number.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// A client over an ordered list of Hive nodes.
 #[derive(Debug)]
 pub struct NodeClient<T: Transport> {
@@ -42,7 +55,7 @@ impl<T: Transport> NodeClient<T> {
         Ok(NodeClient {
             transport,
             nodes,
-            timeout: Duration::from_secs(10),
+            timeout: DEFAULT_TIMEOUT,
             passes: 1,
             initial_backoff: Duration::from_millis(250),
             next_id: AtomicU64::new(1),

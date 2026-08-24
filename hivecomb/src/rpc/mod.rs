@@ -36,7 +36,7 @@ mod types;
 
 #[cfg(feature = "async")]
 pub use async_client::{AsyncNodeClient, AsyncTransport, SleepFuture, Sleeper};
-pub use client::{BlockOperation, BlockStream, NodeClient, StreamMode, Transport};
+pub use client::{BlockOperation, BlockStream, NodeClient, StreamMode, Transport, DEFAULT_TIMEOUT};
 pub use health::{HealthPolicy, HealthTracker, NodeHealth};
 pub use types::{DynamicGlobalProperties, RpcRequest, RpcResponse};
 

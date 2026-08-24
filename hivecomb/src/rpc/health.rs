@@ -631,14 +631,19 @@ mod tests {
         // Here the latency-proportional part is exactly what ageing cancels, so what
         // survives is one truncation and nothing more — and it does not grow with the
         // latency, which is why the worst case below is at 200 ms and not at ten seconds.
-        let interval = Duration::from_secs(3);
+        // From the policy, not a literal: the block interval is a decision and a copy
+        // of it here would go stale silently if the default ever changed. A peer found
+        // the same shape in their sweep, which hardcoded a module constant that was not
+        // exported.
+        let interval = HealthPolicy::default().block_interval;
+        let interval_ms = interval.as_millis() as u64;
         let mut worst = 0u64;
         // The slow node's whole viable range against a ten-second timeout, and every
         // phase of block production relative to the poll.
         for slow_ms in (200..10_000).step_by(100) {
-            for phase_ms in (0..3_000).step_by(50) {
+            for phase_ms in (0..interval_ms).step_by(50) {
                 let latencies = [60u64, 80, slow_ms];
-                let head_at = |t_ms: u64| (t_ms + phase_ms) / 3_000;
+                let head_at = |t_ms: u64| (t_ms + phase_ms) / interval_ms;
                 let compare_at = *latencies.iter().max().expect("non-empty");
 
                 let projections: Vec<f64> = latencies
@@ -796,7 +801,7 @@ mod tests {
         // margin only matters if that is ever changed back to flooring each projection.
         // It is cheap and it would notice.
         let policy = HealthPolicy::default();
-        let timeout = Duration::from_secs(10); // NodeClient::new's default
+        let timeout = super::super::DEFAULT_TIMEOUT;
         let worst = timeout.as_secs_f64() / policy.block_interval.as_secs_f64();
         let margin = policy.stale_block_threshold as f64 / worst;
         assert!(
