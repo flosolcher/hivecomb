@@ -227,26 +227,53 @@ impl NodeState {
         if age > ttl {
             return None;
         }
-        // Truncating, deliberately, and not rounding. The reference this is compared
-        // against is a *maximum* over projections, so over-crediting an old reading
-        // demotes the freshest one: a node observed 0.6 blocks ago at head 100 projects
-        // to 101 under rounding, which puts a node that reported 100 a moment ago one
-        // block "behind" while both are current. Truncation cannot do that — it never
-        // credits a block that has not certainly passed, so the newest reading, which
-        // needs no adjustment at all, can never be beaten by an artefact.
-        //
-        // A peer reached the opposite conclusion for their own selector and is right
-        // there: their gap is measured against one reference with a sub-block-sensitive
-        // threshold, where truncation systematically forgives real lag. Whether to round
-        // or truncate follows from what the reference is, not from which is tidier.
-        let interval = interval.as_secs_f64();
-        let advanced = if interval > 0.0 {
-            (age.as_secs_f64() / interval) as u64
-        } else {
-            0
-        };
-        Some(block.saturating_add(advanced))
+        Some(project(block, age, interval))
     }
+}
+
+/// Age a head-block reading forward to now, truncating.
+///
+/// A free function because the interesting property here is arithmetic, and testing it
+/// through the tracker would need a controllable clock —
+/// see `the_projection_is_never_more_than_one_block_from_the_truth`.
+///
+/// Truncating, deliberately, and not rounding. The reference a projection is compared
+/// against is a *maximum* over projections, so over-crediting an old reading demotes the
+/// freshest one: a node observed 0.6 blocks ago at head 100 projects to 101 under
+/// rounding, which puts a node that reported 100 a moment ago one block "behind" while
+/// both are current. Truncation cannot do that — it never credits a block that has not
+/// certainly passed, so the newest reading, which needs no adjustment at all, can never
+/// be beaten by an artefact.
+///
+/// A peer reached the opposite conclusion for their own selector, shipped it, then
+/// reproduced this exact failure in their own code and switched. Their reasoning —
+/// truncation systematically forgives real lag — holds where the gap is measured against
+/// a single reference with a sub-block-sensitive threshold. Whether to round or truncate
+/// follows from what the reference *is*.
+///
+/// # The bound this gives
+///
+/// A projection is never more than one block from the truth, whatever the latency.
+/// Writing `B` for the interval, `p` for where the poll falls relative to block
+/// production, `t` for when the reading was taken and `T` for now:
+///
+/// ```text
+/// projection = floor((t + p)/B) + floor((T - t)/B)
+/// truth      = floor((T + p)/B)
+/// ```
+///
+/// Since `floor(x) + floor(y) <= floor(x + y) <= floor(x) + floor(y) + 1`, the
+/// projection is either the truth or one less. Two nodes genuinely in sync can therefore
+/// appear at most one block apart — and that does **not** grow with latency: ageing
+/// cancels the latency-proportional part exactly, and what remains is a single
+/// truncation. Against the thirty-block default threshold that is thirty times the
+/// margin, and it is a bound rather than a measurement.
+fn project(head: u64, age: Duration, interval: Duration) -> u64 {
+    let interval = interval.as_secs_f64();
+    if interval <= 0.0 {
+        return head;
+    }
+    head.saturating_add((age.as_secs_f64() / interval) as u64)
 }
 
 /// Per-node health, remembered across calls.
@@ -489,6 +516,54 @@ mod tests {
             t.order("database_api.get_accounts"),
             vec![0, 1, 2],
             "the working pair must be untouched"
+        );
+    }
+
+    #[test]
+    fn the_projection_is_never_more_than_one_block_from_the_truth() {
+        // The bound that makes slow-but-alive nodes a non-event here, swept rather than
+        // sampled. Every node is genuinely in sync; each reads the chain at its own
+        // arrival, and they are compared at the instant the last one lands.
+        //
+        // A peer's finding was that a node answering slowly but successfully is the
+        // dangerous input, because it stays in the reference carrying a reading stale in
+        // proportion to its own latency. True where the threshold is sub-block sensitive.
+        // Here the latency-proportional part is exactly what ageing cancels, so what
+        // survives is one truncation and nothing more — and it does not grow with the
+        // latency, which is why the worst case below is at 200 ms and not at ten seconds.
+        let interval = Duration::from_secs(3);
+        let mut worst = 0u64;
+        // The slow node's whole viable range against a ten-second timeout, and every
+        // phase of block production relative to the poll.
+        for slow_ms in (200..10_000).step_by(100) {
+            for phase_ms in (0..3_000).step_by(50) {
+                let latencies = [60u64, 80, slow_ms];
+                let head_at = |t_ms: u64| (t_ms + phase_ms) / 3_000;
+                let compare_at = *latencies.iter().max().expect("non-empty");
+
+                let projections: Vec<u64> = latencies
+                    .iter()
+                    .map(|&at| {
+                        project(
+                            head_at(at),
+                            Duration::from_millis(compare_at - at),
+                            interval,
+                        )
+                    })
+                    .collect();
+
+                let best = *projections.iter().max().expect("non-empty");
+                let gap = best - projections.iter().min().expect("non-empty");
+                worst = worst.max(gap);
+            }
+        }
+        assert_eq!(
+            worst, 1,
+            "in-sync nodes must never appear more than one block apart; saw {worst}"
+        );
+        assert!(
+            worst < HealthPolicy::default().stale_block_threshold,
+            "and that must stay well under the threshold"
         );
     }
 
