@@ -72,6 +72,15 @@ pub struct HealthPolicy {
     /// observation is ignored rather than treated as current — a stale *observation*
     /// is not evidence of a stale *node*.
     pub head_block_ttl: Duration,
+    /// How long the chain takes to produce a block. Hive is three seconds.
+    ///
+    /// Used to age observations forward before comparing them. Two nodes are almost
+    /// never observed at the same instant, and without this the older observation looks
+    /// behind by however many blocks the chain produced in between — so a node that is
+    /// perfectly current gets judged stale for not having been asked recently. With a
+    /// two-minute TTL and three-second blocks that is forty blocks of drift against a
+    /// thirty-block threshold, which is not a corner case.
+    pub block_interval: Duration,
 }
 
 impl Default for HealthPolicy {
@@ -83,6 +92,7 @@ impl Default for HealthPolicy {
             api_failures_before_cooldown: 2,
             stale_block_threshold: 30,
             head_block_ttl: Duration::from_secs(120),
+            block_interval: Duration::from_secs(3),
         }
     }
 }
@@ -136,6 +146,32 @@ impl NodeState {
             .filter(|(_, seen)| now.duration_since(*seen) <= ttl)
             .map(|(block, _)| block)
     }
+
+    /// The same, aged forward to now at the chain's block rate.
+    ///
+    /// Comparing raw observations taken at different moments measures the gap between
+    /// the *observations*, not between the nodes. Aging each one forward by the blocks
+    /// the chain will have produced since removes that, and leaves only a real
+    /// difference in how far behind the nodes are.
+    ///
+    /// The compensation errs toward *not* demoting: a node genuinely behind, last seen
+    /// a while ago, gets credited with blocks it may not have caught up on. That is the
+    /// right direction to be wrong in — this only ever reorders a list, and shuffling a
+    /// usable node backwards on weak evidence costs more than leaving it in place.
+    fn projected_head(&self, now: Instant, ttl: Duration, interval: Duration) -> Option<u64> {
+        let (block, seen) = self.head_block?;
+        let age = now.duration_since(seen);
+        if age > ttl {
+            return None;
+        }
+        let interval = interval.as_secs_f64();
+        let advanced = if interval > 0.0 {
+            (age.as_secs_f64() / interval) as u64
+        } else {
+            0
+        };
+        Some(block.saturating_add(advanced))
+    }
 }
 
 /// Per-node health, remembered across calls.
@@ -182,10 +218,7 @@ impl HealthTracker {
         // The yardstick for staleness is the best head anyone has recently reported.
         // With no fresh observation at all, nothing can be judged stale -- which is
         // the correct answer, not a reason to guess.
-        let best_head = state
-            .iter()
-            .filter_map(|s| s.fresh_head(now, self.policy.head_block_ttl))
-            .max();
+        let best_head = state.iter().filter_map(|s| self.projected(s, now)).max();
 
         let mut tiers: Vec<(u8, usize)> = state
             .iter()
@@ -209,9 +242,13 @@ impl HealthTracker {
         tiers.into_iter().map(|(_, i)| i).collect()
     }
 
+    /// This node's head, aged forward to now, if the observation is still fresh.
+    fn projected(&self, s: &NodeState, now: Instant) -> Option<u64> {
+        s.projected_head(now, self.policy.head_block_ttl, self.policy.block_interval)
+    }
+
     fn is_stale(&self, s: &NodeState, best_head: Option<u64>, now: Instant) -> bool {
-        let (Some(best), Some(mine)) = (best_head, s.fresh_head(now, self.policy.head_block_ttl))
-        else {
+        let (Some(best), Some(mine)) = (best_head, self.projected(s, now)) else {
             return false;
         };
         best.saturating_sub(mine) > self.policy.stale_block_threshold
@@ -282,10 +319,7 @@ impl HealthTracker {
     pub fn snapshot(&self) -> Vec<NodeHealth> {
         let now = Instant::now();
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let best_head = state
-            .iter()
-            .filter_map(|s| s.fresh_head(now, self.policy.head_block_ttl))
-            .max();
+        let best_head = state.iter().filter_map(|s| self.projected(s, now)).max();
 
         state
             .iter()
@@ -391,6 +425,101 @@ mod tests {
         t.observe_head_block(2, 1_100);
         // Node 0 is 100 blocks behind the best known, past the 30-block threshold.
         assert_eq!(t.order("x"), vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn a_node_is_not_stale_merely_for_having_been_asked_earlier() {
+        // The false positive this compensation exists for. Two nodes are essentially
+        // never observed at the same instant, and the chain keeps producing blocks in
+        // between, so comparing raw observations measures the gap between the
+        // *observations* rather than between the nodes.
+        //
+        // Scaled down to keep the test fast: 10ms "blocks", so a 50ms gap is five of
+        // them. Node 0 is observed at 100 and node 1 fifty milliseconds later at 105 --
+        // node 0 is perfectly current, it simply has not been asked since. Comparing
+        // raw heads makes it five blocks behind and, at this threshold, stale.
+        let t = HealthTracker::new(
+            2,
+            HealthPolicy {
+                stale_block_threshold: 2,
+                block_interval: Duration::from_millis(10),
+                head_block_ttl: Duration::from_secs(10),
+                ..Default::default()
+            },
+        );
+        t.observe_head_block(0, 100);
+        std::thread::sleep(Duration::from_millis(50));
+        t.observe_head_block(1, 105);
+
+        let report = t.snapshot();
+        assert!(
+            !report[0].stale,
+            "node 0 is current; it was just observed earlier: {report:?}"
+        );
+        assert_eq!(t.order("x"), vec![0, 1], "and so it keeps its place");
+    }
+
+    #[test]
+    fn a_node_that_is_genuinely_behind_is_still_caught() {
+        // The other side of the same compensation: it must not become a blanket excuse.
+        // Both observed at the same moment, one far behind, and it is still demoted.
+        let t = HealthTracker::new(
+            2,
+            HealthPolicy {
+                stale_block_threshold: 2,
+                block_interval: Duration::from_millis(10),
+                ..Default::default()
+            },
+        );
+        t.observe_head_block(0, 100);
+        t.observe_head_block(1, 500);
+        assert!(t.snapshot()[0].stale, "400 blocks behind is behind");
+        assert_eq!(t.order("x"), vec![1, 0]);
+    }
+
+    #[test]
+    fn a_behind_node_with_an_old_observation_is_still_caught() {
+        // Both halves at once, which is what distinguishes a correct compensation from
+        // one that simply credits every node with enough blocks to look current. The
+        // aged observation gets its five blocks and stays hundreds behind.
+        //
+        // Found by mutating the compensation to multiply by a thousand: the
+        // same-instant test above could not see it, because at zero age there is
+        // nothing to multiply.
+        let t = HealthTracker::new(
+            2,
+            HealthPolicy {
+                stale_block_threshold: 2,
+                block_interval: Duration::from_millis(10),
+                head_block_ttl: Duration::from_secs(10),
+                ..Default::default()
+            },
+        );
+        t.observe_head_block(0, 100);
+        std::thread::sleep(Duration::from_millis(50));
+        t.observe_head_block(1, 500);
+
+        let report = t.snapshot();
+        assert!(
+            report[0].stale,
+            "five blocks of credit does not close a 400-block gap: {report:?}"
+        );
+        assert!(
+            !report[1].stale,
+            "the current node must not be the stale one"
+        );
+        assert_eq!(t.order("x"), vec![1, 0]);
+    }
+
+    #[test]
+    fn the_snapshot_reports_the_head_as_observed_not_as_projected() {
+        // The projection is for comparing nodes to each other. An operator reading the
+        // report wants the number the node actually said, not one adjusted on its
+        // behalf, or the report cannot be checked against the node.
+        let t = HealthTracker::new(1, policy());
+        t.observe_head_block(0, 12_345);
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(t.snapshot()[0].head_block, Some(12_345));
     }
 
     #[test]

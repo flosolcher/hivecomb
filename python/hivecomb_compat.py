@@ -89,6 +89,7 @@ class HealthPolicy:
         api_failures_before_cooldown=2,
         stale_block_threshold=30,
         head_block_ttl=120.0,
+        block_interval=3.0,
     ):
         self.node_cooldown = node_cooldown
         self.api_cooldown = api_cooldown
@@ -96,6 +97,14 @@ class HealthPolicy:
         self.api_failures_before_cooldown = api_failures_before_cooldown
         self.stale_block_threshold = stale_block_threshold
         self.head_block_ttl = head_block_ttl
+        #: Seconds per block; Hive is three. Observations are aged forward at this
+        #: rate before being compared, because two nodes are almost never observed
+        #: at the same instant and the chain keeps producing blocks in between. Without
+        #: it, the older observation looks behind by however many blocks passed, so a
+        #: node that is perfectly current gets judged stale for not having been asked
+        #: recently -- forty blocks of drift inside the default TTL against a
+        #: thirty-block threshold.
+        self.block_interval = block_interval
 
 
 class _NodeState:
@@ -140,17 +149,38 @@ class HealthTracker:
         self._lock = threading.Lock()
 
     def _fresh_head(self, state, now):
+        """The head this node reported, if the observation is still worth believing."""
         if state.head_block is None:
             return None
         if now - state.head_seen_at > self.policy.head_block_ttl:
             return None
         return state.head_block
 
+    def _projected_head(self, state, now):
+        """The same, aged forward to now at the chain's block rate.
+
+        Comparing raw observations taken at different moments measures the gap
+        between the *observations*, not between the nodes.
+
+        The compensation errs toward *not* demoting: a node genuinely behind, last
+        seen a while ago, is credited with blocks it may not have caught up on. That
+        is the right direction to be wrong in, because this only reorders a list and
+        shuffling a usable node backwards on weak evidence costs more than leaving
+        it in place.
+        """
+        head = self._fresh_head(state, now)
+        if head is None:
+            return None
+        interval = self.policy.block_interval
+        if interval and interval > 0:
+            return head + int((now - state.head_seen_at) / interval)
+        return head
+
     def order(self, method):
         """Indices to try, best first. Always every index, exactly once."""
         now = time.monotonic()
         with self._lock:
-            heads = [self._fresh_head(s, now) for s in self._state]
+            heads = [self._projected_head(s, now) for s in self._state]
             best = max([h for h in heads if h is not None], default=None)
             tiers = []
             for i, state in enumerate(self._state):
@@ -212,8 +242,11 @@ class HealthTracker:
         """What is believed about each node, in node-list order."""
         now = time.monotonic()
         with self._lock:
+            # Projected for comparison, observed for reporting: an operator reading
+            # the snapshot wants the number the node actually said.
+            projected = [self._projected_head(s, now) for s in self._state]
             heads = [self._fresh_head(s, now) for s in self._state]
-            best = max([h for h in heads if h is not None], default=None)
+            best = max([h for h in projected if h is not None], default=None)
             return [
                 {
                     "consecutive_failures": s.consecutive_failures,
@@ -224,8 +257,8 @@ class HealthTracker:
                     "head_block": heads[i],
                     "stale": (
                         best is not None
-                        and heads[i] is not None
-                        and best - heads[i] > self.policy.stale_block_threshold
+                        and projected[i] is not None
+                        and best - projected[i] > self.policy.stale_block_threshold
                     ),
                 }
                 for i, s in enumerate(self._state)

@@ -206,8 +206,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 16,319 lines |
-| Tests | 48 | 339 |
+| Rust source | 4,556 lines | 16,451 lines |
+| Tests | 48 | 343 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |
@@ -451,7 +451,18 @@ Two things are checked before anything is timed: that both produce the same dige
 that **dhive itself recovers the correct public key from hivecomb's signature**. The two
 do *not* produce identical signature bytes, and that is correct rather than a defect —
 any canonical signature over the digest is valid and the two grind to different ones, so
-byte-equality would be the wrong test.
+byte-equality would be the wrong test. Each library is individually deterministic, which
+makes the difference look like a bug until you check where it comes from; an evaluator
+confirmed it independently, over an identical digest, with both signatures recovering the
+same key.
+
+That is the level a gate belongs at. **Recovery is the property with teeth** — it is what
+makes a signature interoperable — and equality is strictly stronger than correctness here,
+so a gate built on it fires on two correct implementations. Three separate false alarms
+across these runs all came from comparing unequal inputs (a differing expiration, a
+`signMessage` that hashes its argument where the comparison did not) and every one of them
+looked exactly like an interop failure. Aligning the inputs before believing the output is
+the whole discipline.
 
 ### What hivecomb took from dhive
 
@@ -523,10 +534,16 @@ POST, so dhive pays for its own `JSON.stringify` exactly as a real caller would:
 | 50 | 254.8 µs | 342.0 µs | 273.7 µs | dhive 1.07× |
 | 200 | 650.9 µs | 1097.3 µs | 861.7 µs | dhive 1.32× |
 
-On the task that actually gets performed, **the crossover moves from about fifteen
-operations to about thirty-five to forty**, and fifty operations goes from a 1.34× loss to
-a near-tie. Reach for `signTransactionJson` when the result is going on the wire, and
+On the task that actually gets performed, **the crossover moves out to somewhere between
+twenty and forty operations** — 35–40 on this machine, 20–30 on the evaluator's, the same
+hardware spread as the object API — and fifty operations goes from a 1.34× loss to a
+near-tie. Reach for `signTransactionJson` when the result is going on the wire, and
 `signTransaction` when you need to inspect or modify it.
+
+The improvement itself is not machine-dependent: both runs found the text form faster at
+every size measured, including at one operation, where there is almost nothing to marshal
+and the saving is the object allocation and the caller's `JSON.stringify` rather than
+anything proportional.
 
 What the text form deliberately does *not* do is echo back the caller's own operations
 array, which would be faster still and wrong: hivecomb normalises operations on the way in,
@@ -549,6 +566,8 @@ hivecomb wins:
 
 The margin *grows* with the signature count, toward the 1.67× floor below, because each
 extra signature adds curve arithmetic and nothing else. There is no crossover on this axis.
+Independently reproduced: 1.48× at one key, 1.66× at three, 1.55× at eight — landing just
+under the floor, which is the consistency check you would want on the whole model.
 
 Reproduce with the harnesses named in
 [How the measurements were taken](#how-the-measurements-were-taken); every one checks that
@@ -671,6 +690,26 @@ Two differences from dhive are deliberate:
   entirely. That makes per-API tracking decorative in the exact case it exists for — a
   partial node, which is a normal thing for an operator to run. Here, failing broadly
   marks a node broken and failing narrowly marks a method unavailable there.
+
+**What it costs when nothing is wrong.** The reordering runs on every call, so the happy
+path matters more than the pathological one. Six healthy nodes, minimum of seven windows,
+pinned: **0.20 µs** in Rust and **5.1 µs** in the Python layer for the complete per-call
+overhead — ordering plus recording the success plus noting the head block. Against a
+20 ms RPC round trip that is 0.001% and 0.026%. It is not a consideration.
+
+**A node one or two blocks behind is not demoted.** The threshold is thirty blocks, about
+ninety seconds of chain, and it is deliberately generous: this only reorders a list, and
+shuffling a usable node backwards on weak evidence costs more than leaving it alone. Raise
+`stale_block_threshold` to disable the check in practice if even that is too eager.
+
+Observations are also **aged forward at the block rate before being compared**. Two nodes
+are essentially never observed at the same instant, and the chain keeps producing blocks in
+between, so comparing raw numbers measures the gap between the *observations* rather than
+between the nodes. Without that correction a node that is perfectly current gets judged
+stale for not having been asked recently — forty blocks of drift inside the default
+two-minute window, against a thirty-block threshold, which is not a corner case. The
+correction errs toward not demoting, and there is a test for each direction: a current node
+with an old reading stays put, and a node hundreds of blocks behind is still caught.
 
 Staleness is observed from responses that already carry a head block rather than probed
 for. A library that issues its own health checks is spending the caller's rate limit on

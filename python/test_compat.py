@@ -699,6 +699,46 @@ def _health_stale():
     assert t.snapshot()[0]["stale"] and not t.snapshot()[1]["stale"]
 
 
+@check("health: a node is not stale merely for having been asked earlier")
+def _health_age_compensation():
+    # Two nodes are essentially never observed at the same instant, and the chain
+    # keeps producing blocks in between, so comparing raw observations measures the
+    # gap between the observations rather than between the nodes.
+    import time as _t
+
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(2, HealthPolicy(stale_block_threshold=2, block_interval=0.010,
+                                      head_block_ttl=10.0))
+    t.observe_head_block(0, 100)
+    _t.sleep(0.05)                 # five 10ms "blocks"
+    t.observe_head_block(1, 105)   # node 0 is current, just observed earlier
+
+    report = t.snapshot()
+    assert not report[0]["stale"], report
+    assert t.order("x") == [0, 1], t.order("x")
+    # and the report shows what the node said, not an adjusted figure
+    assert report[0]["head_block"] == 100, report
+
+
+@check("health: a node genuinely behind is still caught, even with an old reading")
+def _health_age_compensation_is_not_a_blanket_excuse():
+    import time as _t
+
+    from hivecomb_compat import HealthPolicy, HealthTracker
+
+    t = HealthTracker(2, HealthPolicy(stale_block_threshold=2, block_interval=0.010,
+                                      head_block_ttl=10.0))
+    t.observe_head_block(0, 100)
+    _t.sleep(0.05)
+    t.observe_head_block(1, 500)
+
+    report = t.snapshot()
+    assert report[0]["stale"], "five blocks of credit does not close 400"
+    assert not report[1]["stale"], report
+    assert t.order("x") == [1, 0]
+
+
 @check("health: reordering never drops a node")
 def _health_never_drops():
     # The safety property. If every node is unwell the call must still try every
