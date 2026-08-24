@@ -32,6 +32,26 @@ use crate::types::{
 /// Maximum length of a `custom_json` id, from hived's `custom_id_type`.
 pub const MAX_CUSTOM_ID_LEN: usize = 32;
 
+/// Maximum payload of a `custom_json` or `custom` operation, in bytes.
+///
+/// hived's `HIVE_CUSTOM_OP_DATA_MAX_LENGTH`, confirmed against a live node's
+/// `database_api.get_config`.
+///
+/// # Where this is enforced, which is not where you would look
+///
+/// Not in `validate()`. `custom_json_operation::validate` checks the *id* length and the
+/// JSON's syntax and says nothing about its size; the size is checked in
+/// `custom_json_evaluator::do_apply`, behind `has_hardfork(
+/// HIVE_HARDFORK_1_26_SOLIDIFY_OLD_SOFTFORKS )`, as is `custom_operation`'s `data`. So it
+/// is a consensus rule rather than a shape rule, and it has applied since HF26.
+///
+/// That distinction matters because it means **nothing upstream will warn a caller**.
+/// `condenser_api.get_transaction_hex` is a pure serializer: asked for a `custom_json`
+/// carrying 20,000 bytes it returns valid-looking hex without complaint. A library that
+/// does not check produces a signable, broadcastable transaction that the chain then
+/// refuses **in its entirety** — every operation in it, not merely the oversized one.
+pub const MAX_CUSTOM_DATA_LEN: usize = 8192;
+
 /// A price, as used by `feed_publish` and `limit_order_create2`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Price {
@@ -1002,6 +1022,13 @@ op_struct! {
 op_struct! {
     /// `custom_binary_operation` (id 35).
     ///
+    /// **The chain refuses this operation outright.** `custom_binary_evaluator::do_apply`
+    /// is a single unconditional assert — `"custom_binary_operation is disallowed"` —
+    /// so a transaction containing one can be built and signed and will never apply. It
+    /// is modelled here because it exists in the operation table and has to round-trip
+    /// when reading history, not because it can be broadcast. Verified against hived at
+    /// the revision mainnet runs.
+    ///
     /// **beem serializes two of these six fields** (`id` and `data`) and types `id` as
     /// a `Uint16`, where hived uses a `custom_id_type` string. Its output cannot be
     /// deserialized as this operation at all.
@@ -1381,6 +1408,12 @@ impl Operation {
                 write_string(out, &o.proxy)?;
             }
             Operation::Custom(o) => {
+                if o.data.0.len() > MAX_CUSTOM_DATA_LEN {
+                    return Err(Error::field(format!(
+                        "custom data is {} bytes; hived allows at most {MAX_CUSTOM_DATA_LEN}",
+                        o.data.0.len()
+                    )));
+                }
                 write_sorted_account_set(out, &o.required_auths, "required_auths")?;
                 write_u16(out, o.id);
                 o.data.append_to(out)?;
@@ -1394,6 +1427,15 @@ impl Operation {
                     return Err(Error::field(format!(
                         "custom_json id is {} bytes; hived allows at most {MAX_CUSTOM_ID_LEN}",
                         o.id.len()
+                    )));
+                }
+                if o.json.len() > MAX_CUSTOM_DATA_LEN {
+                    return Err(Error::field(format!(
+                        "custom_json json is {} bytes; hived allows at most \
+                         {MAX_CUSTOM_DATA_LEN}. The whole transaction would be rejected, \
+                         not just this operation, so batch the payload into several \
+                         operations instead",
+                        o.json.len()
                     )));
                 }
                 if o.required_auths.is_empty() && o.required_posting_auths.is_empty() {
@@ -2757,6 +2799,67 @@ mod tests {
         assert_eq!(wire[0], 28);
         assert!(wire.windows(5).any(|w| w == b"carol"));
         assert_eq!(&wire[wire.len() - 4..], &7u32.to_le_bytes());
+    }
+
+    /// hived caps a `custom_json` payload at 8192 bytes, and the boundary is exact.
+    ///
+    /// Sat on deliberately, because nothing in this suite previously did: a test that
+    /// only ever uses small payloads cannot notice the check being removed, and one
+    /// that only ever uses enormous ones cannot notice an off-by-one.
+    #[test]
+    fn a_custom_json_payload_is_capped_at_the_boundary() {
+        let at_limit = |n: usize| {
+            Operation::CustomJson(CustomJson {
+                required_auths: vec![],
+                required_posting_auths: vec!["alice".into()],
+                id: "my_app".into(),
+                json: "x".repeat(n),
+            })
+        };
+        assert!(
+            at_limit(MAX_CUSTOM_DATA_LEN).to_wire().is_ok(),
+            "exactly {MAX_CUSTOM_DATA_LEN} bytes is within the limit, not past it"
+        );
+        let err = at_limit(MAX_CUSTOM_DATA_LEN + 1)
+            .to_wire()
+            .expect_err("one byte over must be refused");
+        let text = err.to_string();
+        assert!(
+            text.contains("8193"),
+            "the error should say how big it was: {text}"
+        );
+        // The message has to explain the blast radius, because the failure mode is
+        // counter-intuitive: the chain rejects the entire transaction, so every other
+        // operation batched alongside it is lost too.
+        assert!(
+            text.contains("whole transaction"),
+            "the error should say the whole transaction is rejected: {text}"
+        );
+    }
+
+    /// The same cap applies to `custom`, whose payload is binary rather than JSON.
+    #[test]
+    fn a_custom_binary_payload_is_capped_at_the_boundary() {
+        let op = |n: usize| {
+            Operation::Custom(Custom {
+                required_auths: vec!["alice".into()],
+                id: 7,
+                data: HexBytes(vec![0x5a; n]),
+            })
+        };
+        assert!(op(MAX_CUSTOM_DATA_LEN).to_wire().is_ok());
+        assert!(op(MAX_CUSTOM_DATA_LEN + 1).to_wire().is_err());
+    }
+
+    /// The cap is hived's, not this crate's invention.
+    ///
+    /// `HIVE_CUSTOM_OP_DATA_MAX_LENGTH`, read from a live node's
+    /// `database_api.get_config` on 2026-08-24. Pinned so that changing the constant
+    /// here requires deciding to, rather than happening.
+    #[test]
+    fn the_payload_cap_matches_hived() {
+        assert_eq!(MAX_CUSTOM_DATA_LEN, 8192);
+        assert_eq!(MAX_CUSTOM_ID_LEN, 32);
     }
 
     #[test]
