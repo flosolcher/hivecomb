@@ -35,6 +35,23 @@
 //!   404 on `account_history_api`, which is common when an operator runs a partial
 //!   node. Cooling that pair, rather than the whole node, keeps the node useful for
 //!   everything else.
+//! # Recovery is expiry, not a state machine
+//!
+//! There is no demotion list, no probation and no half-open state. A cooldown is one
+//! instant per node; once it is past, the node sorts where it always did and is simply
+//! tried again. One success clears the failure count outright — a node that answers is
+//! healthy, whatever it did before — so nothing lingers.
+//!
+//! That is worth stating because the obvious way to build this is "demote, then schedule
+//! a re-check", which buys a state machine and every bug that comes with one. A peer
+//! solving the same problem by ranking periodically reached the property from the other
+//! direction: their ranking is stateless per round and rebuilt from the full configured
+//! list, so a demoted node is never re-tested as a special case because nothing ever
+//! removed it from the input. Both routes avoid the state machine.
+//!
+//! `a_recovered_node_comes_back_into_service_on_its_own` holds it end to end, and fails
+//! if cooldowns ever stop expiring.
+//!
 //! # What this does not do: there is no latency signal
 //!
 //! Nodes are demoted for **failing**, never for being slow. A slow success is a success:

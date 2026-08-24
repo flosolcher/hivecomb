@@ -206,8 +206,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 16,929 lines |
-| Tests | 48 | 352 |
+| Rust source | 4,556 lines | 17,024 lines |
+| Tests | 48 | 353 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |

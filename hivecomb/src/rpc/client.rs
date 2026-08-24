@@ -896,6 +896,84 @@ mod tests {
     }
 
     #[test]
+    fn a_recovered_node_comes_back_into_service_on_its_own() {
+        // The property, end to end: a node that fails is demoted, and when it starts
+        // answering again it returns to the front without anything having scheduled a
+        // re-check.
+        //
+        // It comes from cooldowns *expiring*, not from recovery logic. There is
+        // deliberately no demotion list, no probation and no half-open state to get
+        // wrong -- the cooldown is one instant per node, and once it is past the node
+        // simply sorts where it always did. A peer building the same feature by ranking
+        // periodically got the property a different way, by recomputing the whole order
+        // from scratch each round so nothing is ever removed from the input; their point
+        // was that "demote, then schedule a re-check" buys a state machine and every bug
+        // that comes with one. Both routes avoid that. This test is here so a future
+        // edit cannot introduce one without noticing.
+        #[derive(Debug)]
+        struct Recovering {
+            fail_until: usize,
+            seen: Mutex<Vec<String>>,
+        }
+        impl Transport for Recovering {
+            fn post_json(&self, url: &str, _b: &str, _t: Duration) -> Result<String> {
+                let mut seen = self.seen.lock().unwrap();
+                seen.push(url.to_string());
+                let calls_to_bad = seen.iter().filter(|u| *u == "https://a").count();
+                if url == "https://a" && calls_to_bad <= self.fail_until {
+                    return Err(Error::Rpc("still down".into()));
+                }
+                Ok(r#"{"result":1}"#.to_string())
+            }
+        }
+
+        let client = NodeClient::new(
+            Recovering {
+                fail_until: 2,
+                seen: Mutex::new(Vec::new()),
+            },
+            nodes(),
+        )
+        .unwrap()
+        .with_health_tracking(HealthPolicy {
+            failures_before_cooldown: 2,
+            api_failures_before_cooldown: 2,
+            api_cooldown: Duration::from_millis(30),
+            node_cooldown: Duration::from_millis(30),
+            ..Default::default()
+        });
+
+        // Two calls demote it.
+        client.call("x", serde_json::json!({})).unwrap();
+        client.call("x", serde_json::json!({})).unwrap();
+        assert_eq!(client.call_order("x"), vec![1, 2, 0], "demoted");
+
+        // While cooling, it is not tried first.
+        client.call("x", serde_json::json!({})).unwrap();
+        let during = client.transport.seen.lock().unwrap().len();
+
+        // The cooldown lapses and it is simply tried again -- and by now it answers.
+        std::thread::sleep(Duration::from_millis(60));
+        client.call("x", serde_json::json!({})).unwrap();
+
+        let seen = client.transport.seen.lock().unwrap().clone();
+        assert_eq!(
+            seen.len(),
+            during + 1,
+            "the recovered node should answer on the first attempt: {seen:?}"
+        );
+        assert_eq!(seen.last().unwrap(), "https://a");
+        assert_eq!(
+            client.call_order("x"),
+            vec![0, 1, 2],
+            "and one success restores it fully, with no lingering probation"
+        );
+        let report = client.health().unwrap();
+        assert_eq!(report[0].consecutive_failures, 0, "{report:?}");
+        assert!(report[0].cooling_methods.is_empty(), "{report:?}");
+    }
+
+    #[test]
     fn health_is_none_unless_it_was_asked_for() {
         let client = NodeClient::new(FakeTransport::new(vec![]), nodes()).unwrap();
         assert!(client.health().is_none());
