@@ -298,10 +298,14 @@ a strawman; it is what an install gets today.
 has not existed since 2020. The benchmark passes the real chain id explicitly, exactly
 as [the differential oracle](tests/differential_beem.py) does.
 
-Reproduce with [`tests/bench_vs_beem.py`](tests/bench_vs_beem.py). There is also
-[`tests/bench_vs_nectar.py`](tests/bench_vs_nectar.py) against beem's maintained
-successor, where the gap is much smaller — 2–7× — because nectar hands its curve
-arithmetic to the same C library this crate does.
+Reproduce with [`tests/bench_vs_beem.py`](tests/bench_vs_beem.py).
+
+**beem is not the only library measured, and it is the least favourable comparison of the
+set** — it is unmaintained, so a current install falls back to a pure-Python ECDSA path,
+and that is most of the ratio above. [COMPARISON.md](COMPARISON.md) has the full picture:
+every Rust, Python and Node Hive library this project names, measured in one run each with
+versions printed, digests checked to agree before anything is timed, and the places where
+another library is ahead shown as plainly as the places it is not.
 
 ## Verification
 

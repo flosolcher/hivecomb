@@ -35,6 +35,11 @@ one-second windows, beem 0.24.26 on the `ecdsa` backend a default install select
 | sign a `transfer` | 90.1 µs | 26.5 ms | ~294× |
 | serialize and digest, no signing | **9.8 µs** | **65.2 µs** | **~6.6×** |
 
+beem is the least favourable comparison in the set, because it is unmaintained; the
+project's [COMPARISON.md](https://github.com/flosolcher/hivecomb/blob/main/COMPARISON.md)
+measures every Python, Rust and Node Hive library it names, including
+[hive-nectar](https://github.com/srbde/hive-nectar), where the gap is far smaller.
+
 The signing rows are that wide because of *which* backend beem ends up on, not because
 Python is slow. beem prefers `secp256k1` and falls back to `cryptography`, and on the
 fallback it derives each signature's recovery parameter by recovering the public key in

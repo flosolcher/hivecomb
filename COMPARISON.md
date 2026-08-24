@@ -90,8 +90,10 @@ For a long time this document carried timings for the Python and Node libraries 
 for the Rust ones, which is not a fair way to present a comparison whatever the intent.
 These are the Rust numbers, for everything named above.
 
-Same machine, same task, pinned to one core and run under a memory cap. Minimum of
-fifteen interleaved windows — each library gets a window in turn, rather than all of one
+Same machine, same task, pinned to one core and run under a memory cap. Every version
+below is **read from the installed package at run time and printed with the results**,
+never written into this table by hand — a table naming a version it did not measure is
+worse than one with no version at all. Minimum of fifteen interleaved windows — each library gets a window in turn, rather than all of one
 library's windows and then the next, because this machine's governor ramps the clock
 during a run and whoever went first would be measured cold. The payload varies every
 iteration. Reproduce with [`benches/rust-libraries`](benches/rust-libraries).
@@ -351,6 +353,65 @@ platform, exactly as `hivecomb` is. "No toolchain needed" is true of neither.
 These are **alternatives, not rivals**. The real distinction is where the protocol
 logic lives — readable and patchable in place in nectar, faster and memory-safe in
 `hivecomb` — and which of those matters more depends on who is holding it.
+
+### Measured, against the Python libraries
+
+Same method, one interpreter, `custom_json` operations. Reproduce with
+[`benches/python-libraries`](benches/python-libraries).
+
+All three produce the same digest, at one operation and at ten, before anything is timed.
+
+| microseconds | hivecomb 0.1.0 | beem 0.24.26 | hive-nectar 1.0.7 | spread |
+|---|---|---|---|---|
+| serialize + digest, 1 op | 10.16 | 66.60 | 68.06 | 3% |
+| serialize + digest, 10 ops | 84.60 | 312.04 | 309.08 | 8% |
+| sign, 1 op | 89.74 | 21,678 | 261.50 | 7% |
+| sign, 10 ops | 191.61 | 19,460 | 509.21 | 8% |
+
+beem and hive-nectar build and serialize in Python where this crate does it in Rust, so
+the digest rows measure that and little else. The signing rows are about the ECDSA
+backend rather than the language: hive-nectar reaches libsecp256k1 through `coincurve`
+and hivecomb through Rust, and they are within 3× of each other. beem's figure is its
+pure-Python fallback, which is what a current install gets because the binding it prefers
+no longer matches the API it was written against — the gap there is a consequence of the
+library being unmaintained since 2021, not of Python.
+
+beem is handed the real chain id explicitly, because its own `known_chains["HIVE"]` is
+the pre-hardfork-24 all-zero value; without that it would be signing against a different
+chain and the comparison would measure different work.
+
+[`lighthive`](https://pypi.org/project/lighthive/) 0.4.3 is named here without a row. It
+serializes by asking a Hive node for the transaction hex and signs what comes back, so it
+has no local serializer to measure and does not sign offline. That is a deliberate design
+— it keeps the library small and defers to the node, which is authoritative about the
+wire format — and it puts lighthive on a different axis rather than below anything.
+
+### Measured, against the Node libraries
+
+Reproduce with [`benches/node-libraries`](benches/node-libraries). All four that expose a
+digest produce the same one. `@hiveio/hive-js` has no digest entry point, so it is gated
+differently: its signature is recovered under another library and must yield the right
+public key, which it does.
+
+| microseconds | hivecomb 0.1.0 | dhive 1.3.6 | hive-tx 7.2.1 | hive-pollen 1.0.0 | hive-js 2.0.9 | spread |
+|---|---|---|---|---|---|---|
+| serialize + digest, 1 op | 9.28 | 8.70 | 43.80 | 10.53 | — | 9% |
+| serialize + digest, 10 ops | 43.36 | 21.81 | 255.58 | 42.61 | — | 6% |
+| sign, 1 op | 85.40 | 124.48 | 779.72 | 1,534.89 | 136,004 | 7% |
+| sign, 10 ops | 126.36 | 152.95 | 961.65 | 1,612.96 | 117,195 | 7% |
+
+**The signing spread is a design choice, not a quality difference,** and reading it
+without that is misleading. These libraries obtain secp256k1 differently:
+`@hiveio/dhive` binds the native `secp256k1` package; `hivecomb` links libsecp256k1
+through Rust; `hive-pollen` uses `@noble/curves`, an audited pure-JavaScript library;
+`hive-tx` has **no runtime dependencies at all** and inlines its crypto, which is exactly
+what lets it run unchanged in browsers, workers and serverless runtimes; `@hiveio/hive-js`
+uses `ecurve`/`bigi` bigint arithmetic. A library that chooses portability over a native
+binding pays for it in a microbenchmark, and that is the choice working as intended.
+
+The digest rows are the honest comparison of the serializers, and dhive is ahead of this
+crate at ten operations — the same structural result described in [the Node section
+below](#node-dhive), where it is measured in more detail.
 
 ### What hivecomb took from nectar
 
