@@ -163,6 +163,41 @@ which would be faster still and wrong: hivecomb normalises operations on the way
 the array handed back must be the one that was actually signed.
 
 
+### Added — opt-in node health tracking
+
+`NodeClient::with_health_tracking` and `AsyncNodeClient::with_health_tracking`. Both
+clients walk their node list from the front on every call, which is predictable and is
+the right mechanism for an application with failover policy of its own — but in a
+long-running process a dead first node then costs its full timeout on *every* call,
+forever.
+
+With health tracking on, the client remembers consecutive failures per node, failures
+per node *and method*, and head block staleness, and sorts the list accordingly. Head
+blocks are read from responses that already carry one; no extra request is issued, since
+a library that health-checks on its own initiative is spending the caller's rate limit
+on a decision the caller did not ask for. `AsyncNodeClient::race` spends its slots on
+the healthiest nodes rather than the first ones.
+
+Two properties are worth stating because they are easy to get wrong, and one of them was
+got wrong first:
+
+- **Health reorders the node list and never removes a node.** When every node is
+  cooling, the call still tries all of them. A tracker that can exclude a node can turn
+  a partial outage into a total one.
+- **A whole-node cooldown requires failures across more than one method.** Otherwise a
+  node that merely lacks one API — a partial node, which operators do run — crosses the
+  node-wide threshold as well and gets cooled entirely, making per-method tracking
+  decorative in the case it exists for.
+
+Off by default, so nothing changes for callers who do not ask for it.
+
+### Fixed — `AsyncNodeClient` was only cloneable for cloneable transports
+
+It holds its transport behind an `Arc` precisely so that cloning shares one transport,
+but `#[derive(Clone)]` adds a `T: Clone` bound regardless. A caller whose transport was
+not itself `Clone` — an ordinary connection-pool wrapper, say — could not clone the
+client at all. The impl is now written out by hand without the bound.
+
 ### Known behaviour worth stating
 
 **Serializing is not the inverse of parsing, for strings carrying control bytes.** A

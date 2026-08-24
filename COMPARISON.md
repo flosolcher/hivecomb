@@ -440,34 +440,56 @@ irreversible-by-default choice. hivecomb additionally has `transaction_status`,
 local `Authority::check` that answers "will these keys satisfy this account" without a
 round trip.
 
-Four real gaps, listed in the order they are worth caring about:
+Three real gaps remain. A fourth — stateful node health tracking — is what this
+comparison was worth doing for, and it has since been implemented; see below.
 
-**1. Stateful node health tracking.** dhive's `NodeHealthTracker` remembers which nodes
-failed and for which API, puts a failing node in cooldown (30 s node-wide, 60 s for the
-specific API, after 3 consecutive failures), and deprioritises nodes more than 30 blocks
-behind the best known head. hivecomb's failover is *stateless*: `call` walks
-`for node in &self.nodes` from the front on every request. It fails over correctly and
-reports every node that failed, but it does not remember. A dead first node therefore
-costs its full timeout on every single call for the life of the process. This is the one
-gap with a concrete operational cost, and it is squarely inside what this crate already
-does.
-
-**2. The Hivemind/bridge API.** `getRankedPosts`, `getAccountPosts`, `getCommunity`,
+**1. The Hivemind/bridge API.** `getRankedPosts`, `getAccountPosts`, `getCommunity`,
 `listCommunities`, `listAllSubscriptions`, `getAccountNotifications` — the social and
 community layer. hivecomb has none of it. This is a scope decision rather than an
 oversight: `bridge` is the API a content application needs, and this crate is a keys,
 serialization and signing core. It is recorded here so nobody has to discover it.
 
-**3. Two database calls.** `get_vesting_delegations` and `get_chain_properties` have no
+**2. Two database calls.** `get_vesting_delegations` and `get_chain_properties` have no
 wrapper, though `call` reaches both. `verify_authority` also has none, which is
 deliberate — `Authority::check` answers the same question locally.
 
-**4. `hivecomb-node` is signing-only.** dhive ships a `Client`, failover, streaming and
+**3. `hivecomb-node` is signing-only.** dhive ships a `Client`, failover, streaming and
 per-operation broadcast helpers (`vote`, `transfer`, `comment`, `json`,
 `delegateVestingShares`). The Node addon deliberately exposes none of that; the Rust
 crate and the Python layer do. A JavaScript caller replacing dhive wholesale needs an
 RPC client from somewhere else, and that is the single biggest practical reason not to
 reach for the addon.
+
+### The gap that was worth closing: node health
+
+dhive's `NodeHealthTracker` remembers which nodes failed and for which API, cools a
+failing node down, and deprioritises nodes behind the best-known head. hivecomb's
+failover was *stateless* — `call` walked the node list from the front on every request.
+It failed over correctly and named every node that failed, but it remembered nothing, so
+a dead first node cost its full timeout on **every call for the life of the process**.
+
+`NodeClient::with_health_tracking` and `AsyncNodeClient::with_health_tracking` now close
+it, tracking the same three things dhive found worth tracking: consecutive failures per
+node, failures per node *and method*, and head block staleness. It is opt-in, because
+the stateless default is the right mechanism for an application that has failover policy
+of its own, and imposing one would fight it.
+
+Two differences from dhive are deliberate:
+
+* **Health reorders the node list; it never removes a node.** When every node is
+  cooling, the call still tries every node, in the order least likely to waste time. A
+  tracker that can exclude a node is a tracker that can turn a partial outage into a
+  total one.
+* **A whole-node cooldown requires failures across more than one method.** dhive counts
+  consecutive failures regardless of which API they came from, which means a node that
+  is merely missing one API crosses the node-wide threshold too and gets cooled
+  entirely. That makes per-API tracking decorative in the exact case it exists for — a
+  partial node, which is a normal thing for an operator to run. Here, failing broadly
+  marks a node broken and failing narrowly marks a method unavailable there.
+
+Staleness is observed from responses that already carry a head block rather than probed
+for. A library that issues its own health checks is spending the caller's rate limit on
+a decision the caller did not ask for.
 
 ### What that means for a JavaScript adopter
 
