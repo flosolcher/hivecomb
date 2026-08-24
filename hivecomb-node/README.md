@@ -40,6 +40,25 @@ const tx = signTransaction(
 ## What this is, and is not
 
 It is the **signing and serialization core** — the part that has to be exactly right.
+### Staying inside hived's limits
+
+Exceeding a consensus limit gets the **whole transaction** refused, not the offending
+operation — so a batch that overflows loses everything sent with it. `signTransaction`
+enforces every limit before signing, and `limits()` reports them for callers who need to
+stay inside one while *building*:
+
+```js
+const { limits } = require('hivecomb')
+const cap = limits().maxCustomDataLen        // 8192, inclusive
+```
+
+Two are worth reading rather than assuming. `maxCustomDataLen` is **inclusive** — hived's
+own error says "must be less than 8192 bytes" over code that is `<=`, so chunking to
+"less than 8192" quietly costs a byte. And `maxCustomOpsPerBlock` is per **account per
+block**, shared by everything that broadcasts on that account: splitting an oversized
+payload into chunks and sending them back to back spends the whole budget in one block,
+which is a good way to trade one refusal for another.
+
 ### Going straight on the wire
 
 `signTransaction` returns a JavaScript object. If the next thing you do is put it in an
@@ -122,6 +141,7 @@ TypeScript definitions ship with the package. In brief:
 | `TaposCache` | `store`, `storeBlockId`, `blockRef`, `isFresh`, `ageSeconds`, `invalidate` |
 | signing | `signMessage`, `verifyMessage`, `recoverMessage` |
 | transactions | `signTransaction` (WIF strings or `PrivateKey` instances, or a mix), `signTransactionJson`, `transactionDigest`, `transactionId` |
+| protocol limits | `limits()` — hived's consensus bounds, so a caller building a payload reads them rather than restating them |
 | memos | `encodeMemo`, `decodeMemo`, `isEncryptedMemo` |
 | keys | `generateMnemonic`, `validateMnemonic` |
 | authorities | `checkAuthority` |

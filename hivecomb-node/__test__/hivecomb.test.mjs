@@ -7,7 +7,7 @@ import {
   signMessage, verifyMessage, recoverMessage,
   signTransaction, signTransactionJson, transactionDigest, transactionId,
   encodeMemo, decodeMemo, isEncryptedMemo,
-  generateMnemonic, validateMnemonic, checkAuthority, chainId, version,
+  generateMnemonic, validateMnemonic, checkAuthority, chainId, version, limits,
 } from '../index.js'
 
 // A fixed test key, published on purpose. Checked against
@@ -403,4 +403,45 @@ test('signTransactionJson refuses what signTransaction refuses', () => {
     assert.throws(() => signTransaction(bad, ref, [WIF], 600),
       undefined, `signTransaction accepted ${inspect(bad)}`)
   }
+})
+
+// --- protocol limits ----------------------------------------------------------
+// Exported so a JS caller building a payload reads them rather than restating them.
+// The addon enforces every one before signing; these are for staying inside a limit
+// while constructing, which is where a caller would otherwise hard-code a number.
+
+test('limits() reports hived\'s protocol bounds', () => {
+  const l = limits()
+  assert.equal(l.maxCustomDataLen, 8192, 'inclusive: hived is <=, despite its message')
+  assert.equal(l.maxCustomOpsPerBlock, 5)
+  assert.equal(l.maxCustomIdLen, 32)
+  assert.equal(l.maxMemoLen, 2047)
+  assert.equal(l.maxTitleLen, 255)
+  assert.equal(l.maxPermlinkLen, 255)
+  assert.equal(l.maxAuthorityMembership, 40)
+  assert.equal(l.maxBeneficiaries, 127)
+  assert.equal(l.maxProposalSubjectLen, 80)
+  assert.equal(l.maxProposalIds, 5)
+  assert.equal(l.maxWitnessUrlLen, 2048)
+})
+
+test('the limits reported are the limits enforced', () => {
+  // The point of exporting them: a caller that chunks to `maxCustomDataLen` must not
+  // then be refused by the signer. If these two ever disagree the export is worse than
+  // useless, because it would be actively misleading.
+  const l = limits()
+  const ref = BlockRef.fromBlockId(BLOCK_ID)
+  const op = (n) => [['custom_json', {
+    required_auths: [], required_posting_auths: ['alice'],
+    id: 'my_app', json: 'x'.repeat(n),
+  }]]
+
+  assert.doesNotThrow(() => signTransaction(op(l.maxCustomDataLen), ref, [WIF], 600),
+    'exactly the reported limit must sign')
+  assert.throws(() => signTransaction(op(l.maxCustomDataLen + 1), ref, [WIF], 600),
+    undefined, 'one past it must not')
+
+  const many = Array.from({ length: l.maxCustomOpsPerBlock + 1 }, () => op(4)[0])
+  assert.throws(() => signTransaction(many, ref, [WIF], 600),
+    undefined, 'one past the per-block budget must not sign')
 })

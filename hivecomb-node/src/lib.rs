@@ -736,6 +736,75 @@ pub fn chain_id(chain: Option<String>) -> Result<String> {
 }
 
 /// The library version.
+/// hived's protocol limits, exported so a caller reads them rather than restating them.
+///
+/// These are consensus rules, not this addon's policy: exceeding one gets the **whole
+/// transaction** refused, not the offending operation. `signTransaction` already
+/// enforces every limit below before signing, so they are here for callers who need to
+/// stay inside a limit while *building* — chunking a large `custom_json` being the
+/// obvious case.
+///
+/// Two of them are worth reading the values for rather than assuming:
+///
+/// * `maxCustomDataLen` is **8192 inclusive**. hived's own assert message says "must be
+///   less than 8192 bytes" over code that is `<=`, so chunking to "less than 8192"
+///   silently costs a byte of headroom.
+/// * `maxCustomOpsPerBlock` is per **account per block**, not per transaction, and it is
+///   shared by everything that broadcasts on that account. Splitting an oversized
+///   payload into chunks and sending them back to back spends the whole budget in one
+///   block — the fix for one limit is a good way to trip the other.
+///
+/// ```js
+/// const { limits } = require('hivecomb')
+/// // chunk by measured bytes, not by item count: the ceiling is a property of your
+/// // encoding, not of the protocol, and it moves when the encoding does.
+/// if (Buffer.byteLength(json) > limits.maxCustomDataLen) { /* split */ }
+/// ```
+#[napi(object)]
+pub struct Limits {
+    /// Longest `custom_json` id, in bytes.
+    pub max_custom_id_len: u32,
+    /// Longest `custom_json` payload or `custom` data, in bytes. Inclusive.
+    pub max_custom_data_len: u32,
+    /// Custom operations one **account** may have in a single **block**.
+    pub max_custom_ops_per_block: u32,
+    /// Longest memo, in bytes.
+    pub max_memo_len: u32,
+    /// Longest comment title, in bytes.
+    pub max_title_len: u32,
+    /// Longest permlink, in bytes.
+    pub max_permlink_len: u32,
+    /// Entries an authority may hold across `account_auths` and `key_auths` together.
+    pub max_authority_membership: u32,
+    /// Beneficiaries a comment may name.
+    pub max_beneficiaries: u32,
+    /// Longest proposal subject, in bytes.
+    pub max_proposal_subject_len: u32,
+    /// Proposal ids one vote or removal may carry.
+    pub max_proposal_ids: u32,
+    /// Longest witness URL, in bytes.
+    pub max_witness_url_len: u32,
+}
+
+/// hived's protocol limits. See [`Limits`].
+#[napi]
+pub fn limits() -> Limits {
+    use hivecomb_core::operations as ops;
+    Limits {
+        max_custom_id_len: ops::MAX_CUSTOM_ID_LEN as u32,
+        max_custom_data_len: ops::MAX_CUSTOM_DATA_LEN as u32,
+        max_custom_ops_per_block: ops::MAX_CUSTOM_OPS_PER_BLOCK as u32,
+        max_memo_len: ops::MAX_MEMO_LEN as u32,
+        max_title_len: ops::MAX_TITLE_LEN as u32,
+        max_permlink_len: ops::MAX_PERMLINK_LEN as u32,
+        max_authority_membership: ops::MAX_AUTHORITY_MEMBERSHIP as u32,
+        max_beneficiaries: ops::MAX_BENEFICIARIES as u32,
+        max_proposal_subject_len: ops::MAX_PROPOSAL_SUBJECT_LEN as u32,
+        max_proposal_ids: ops::MAX_PROPOSAL_IDS as u32,
+        max_witness_url_len: ops::MAX_WITNESS_URL_LEN as u32,
+    }
+}
+
 #[napi]
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
