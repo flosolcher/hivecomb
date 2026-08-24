@@ -35,6 +35,55 @@
 //!   404 on `account_history_api`, which is common when an operator runs a partial
 //!   node. Cooling that pair, rather than the whole node, keeps the node useful for
 //!   everything else.
+//! # What bounds the staleness check
+//!
+//! Two nodes do not read the chain at the same instant even when asked at the same
+//! instant. One answering in 60 ms and one answering in 700 ms report heads computed
+//! most of a block apart, so their raw numbers differ while both are perfectly current.
+//! No choice of timestamp fixes that — the difference is in the *readings*, not in when
+//! they were recorded — and stamping at send rather than at arrival was tried and makes
+//! it marginally worse.
+//!
+//! What bounds it is the threshold. The artefact is the observation spread divided by
+//! the block interval: a 700 ms spread is 0.2 blocks, and a pathological nine-second
+//! spread is three, against a default threshold of thirty. Roughly two orders of
+//! magnitude of margin, and two tests pin it — one asserting three blocks of apparent
+//! gap changes nothing, one asserting the same readings *do* demote at a one-block
+//! threshold, so the margin is explicit and a future edit that tightens it cannot do so
+//! silently.
+//!
+//! What bounds the spread is the **per-node timeout**, and that is worth being precise
+//! about. A node that exceeds it fails, and a failed node reports no head block, so it
+//! never enters the reference at all. The spread among nodes that *answered* is
+//! therefore at most one timeout:
+//!
+//! | timeout | blocks of artefact | threshold | margin |
+//! |---|---|---|---|
+//! | 10 s (default) | 3.3 | 30 | 9× |
+//! | 30 s | 10 | 30 | 3× |
+//! | 90 s | 30 | 30 | **none** |
+//!
+//! So the default is safe with an order of magnitude to spare, and it stops being safe
+//! if the timeout is raised toward ninety seconds or the threshold cut toward three
+//! blocks. That relationship has a test, because it is the kind of thing a later edit
+//! to an unrelated default would break silently.
+//!
+//! That failure mode is not hypothetical. A peer found it live in a Hive node selector
+//! scoring one block as 1000 points against one millisecond as 1 — an effective
+//! threshold under a single block — where it demoted precisely the low-latency nodes the
+//! selector existed to prefer. Their measured exposure was 0.22 blocks with zero
+//! misrankings; they initially described that as structurally bounded and then corrected
+//! it, because in their design nothing enforced the clustering — one node degrading to
+//! three seconds while still answering would have taken them to a full block. The
+//! correction is why the bound here is stated against the timeout, which *is* enforced,
+//! rather than against how fast nodes happen to be.
+//!
+//! Also worth knowing, from the same source: **a node that is fully down is the safe
+//! case.** It returns no head block, so it never enters the reference at all. The node
+//! that can corrupt a staleness comparison is the one answering *slowly but
+//! successfully*, because it stays in the reference carrying a reading that is stale in
+//! proportion to its own latency.
+//!
 //! * **Head block staleness.** A node that answers promptly with data an hour old is
 //!   worse than one that is merely slow, and it fails no request, so failure counting
 //!   alone will never notice it. Head block numbers are observed from any response that
@@ -415,6 +464,142 @@ mod tests {
             vec![0, 1, 2],
             "the working pair must be untouched"
         );
+    }
+
+    #[test]
+    fn the_staleness_boundary_is_exact() {
+        // Exactly at the threshold is not stale; one block past it is. Written after
+        // mutating `>` to `>=` in `is_stale` and finding that twenty-five tests all
+        // still passed -- every one of them sat comfortably on one side of the boundary
+        // or the other, so the boundary itself was unguarded.
+        //
+        // Which matters less for correctness than for what it says about the suite: a
+        // test that never sits on an edge cannot detect a move of one.
+        let t = HealthTracker::new(3, HealthPolicy::default());
+        let threshold = HealthPolicy::default().stale_block_threshold;
+        t.observe_head_block(0, 1_000);
+        t.observe_head_block(1, 1_000 + threshold); // exactly at the limit
+        t.observe_head_block(2, 1_000 + threshold + 1);
+
+        let report = t.snapshot();
+        // Node 2 defines the reference. Node 1 is one block behind it, node 0 is
+        // threshold+1 behind.
+        assert!(
+            report[0].stale,
+            "{} blocks behind must be stale: {report:?}",
+            threshold + 1
+        );
+        assert!(!report[1].stale, "1 block behind must not be: {report:?}");
+        assert!(!report[2].stale, "the leader is never stale");
+
+        // And the exact edge, with the reference exactly `threshold` ahead.
+        let edge = HealthTracker::new(2, HealthPolicy::default());
+        edge.observe_head_block(0, 1_000);
+        edge.observe_head_block(1, 1_000 + threshold);
+        assert!(
+            !edge.snapshot()[0].stale,
+            "exactly at the threshold is within it, not past it"
+        );
+
+        let past = HealthTracker::new(2, HealthPolicy::default());
+        past.observe_head_block(0, 1_000);
+        past.observe_head_block(1, 1_000 + threshold + 1);
+        assert!(past.snapshot()[0].stale, "one past the threshold is stale");
+    }
+
+    #[test]
+    fn a_latency_spread_cannot_demote_a_node() {
+        // Nodes do not read the chain at the same instant even when asked at the same
+        // instant: a node answering in 60 ms and one answering in 700 ms report heads
+        // computed most of a block apart, so their raw numbers differ by a block while
+        // both are perfectly current. No choice of timestamp removes that -- the
+        // difference is in the readings, not in when they were recorded -- so what has
+        // to bound it is the threshold.
+        //
+        // Three blocks of apparent gap here, which would take a nine-second read
+        // spread, far beyond any per-node timeout. The default threshold is thirty.
+        let t = HealthTracker::new(2, HealthPolicy::default());
+        t.observe_head_block(0, 100);
+        t.observe_head_block(1, 103);
+        let report = t.snapshot();
+        assert!(!report[0].stale, "3 blocks is nowhere near 30: {report:?}");
+        assert_eq!(t.order("x"), vec![0, 1], "and the order is untouched");
+    }
+
+    #[test]
+    fn the_timeout_bounds_the_artefact_below_the_threshold() {
+        // The invariant that makes the staleness check safe, asserted rather than
+        // assumed: the observation spread among nodes that answered cannot exceed one
+        // per-node timeout, because a node that overruns it fails and reports no head
+        // block at all. So the worst artefact is timeout / block_interval blocks, and
+        // that must stay comfortably under the threshold.
+        //
+        // A peer measured their own exposure at 0.22 blocks and first called it
+        // structurally bounded, then corrected it: nothing in their design enforced it.
+        // Here the timeout does, which is why the margin is checked against the timeout
+        // rather than against observed latencies.
+        let policy = HealthPolicy::default();
+        let timeout = Duration::from_secs(10); // NodeClient::new's default
+        let worst = timeout.as_secs_f64() / policy.block_interval.as_secs_f64();
+        let margin = policy.stale_block_threshold as f64 / worst;
+        assert!(
+            margin >= 3.0,
+            "the default timeout admits {worst:.1} blocks of artefact against a \
+             {}-block threshold, a margin of only {margin:.1}x. Either raise \
+             stale_block_threshold or lower the default timeout.",
+            policy.stale_block_threshold
+        );
+    }
+
+    #[test]
+    fn the_threshold_is_what_bounds_the_latency_artefact_not_the_arithmetic() {
+        // The same readings, with the threshold set to one block, do demote. Stated as
+        // a test so the margin is explicit rather than incidental: this mechanism is
+        // safe because thirty blocks is ~100x the artefact, and a future edit that
+        // tightens the threshold toward a block would make latency spread significant.
+        //
+        // A peer found exactly this live in a node selector that scored one block as
+        // 1000 points against one millisecond as 1 -- an effective threshold under a
+        // block -- where it demoted precisely the low-latency nodes the selector
+        // existed to prefer.
+        let tight = HealthTracker::new(
+            2,
+            HealthPolicy {
+                stale_block_threshold: 1,
+                ..Default::default()
+            },
+        );
+        tight.observe_head_block(0, 100);
+        tight.observe_head_block(1, 103);
+        assert!(
+            tight.snapshot()[0].stale,
+            "at a one-block threshold the artefact does bite"
+        );
+    }
+
+    #[test]
+    fn the_leading_node_is_never_stale_against_its_own_reading() {
+        // A peer's suggested invariant: a node's own reading should not contribute to
+        // the reference it is judged against. Checked rather than assumed -- here it is
+        // already satisfied, because the reference is a maximum and `saturating_sub`
+        // floors the leader's gap at zero either way. Recorded so that if the reference
+        // ever becomes a mean or a median, where a node *can* drag its own yardstick,
+        // this stops passing.
+        let t = HealthTracker::new(3, HealthPolicy::default());
+        t.observe_head_block(0, 5_000);
+        t.observe_head_block(1, 10);
+        t.observe_head_block(2, 20);
+        let report = t.snapshot();
+        assert!(!report[0].stale, "the leader cannot be behind itself");
+        assert!(
+            report[1].stale && report[2].stale,
+            "the laggards are: {report:?}"
+        );
+
+        // And a single node with a reading is never stale, having nothing to lag.
+        let solo = HealthTracker::new(1, HealthPolicy::default());
+        solo.observe_head_block(0, 1);
+        assert!(!solo.snapshot()[0].stale);
     }
 
     #[test]

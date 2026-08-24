@@ -200,7 +200,7 @@ CREDITS.md           upstream authorship
 ## Building
 
 ```bash
-cargo test --all-features                  # 328 unit tests + 10 live-node fixtures
+cargo test --all-features                  # 333 unit tests + 10 live-node fixtures
 cargo build -p hivecomb --no-default-features  # signing only: no network, no cipher, no scrypt
 ```
 
