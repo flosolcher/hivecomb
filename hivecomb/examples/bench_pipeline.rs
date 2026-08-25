@@ -309,6 +309,110 @@ fn main() {
         black_box(authority.check(&[public]));
     });
 
+    println!("\n  --- base58 and key text ------------------------------------");
+    let pub_text = public.to_prefixed("STM");
+    bench(
+        "PublicKey::to_prefixed (encode + checksum)",
+        warm,
+        window,
+        rounds,
+        |_| {
+            black_box(public.to_prefixed("STM"));
+        },
+    );
+    bench("PublicKey::from_prefixed_any", warm, window, rounds, |_| {
+        black_box(hivecomb::PublicKey::from_prefixed_any(&pub_text).expect("valid"));
+    });
+    let raw = [0x80u8; 37];
+    bench(
+        "base58 encode_check, 37 bytes",
+        warm,
+        window,
+        rounds,
+        |_| {
+            black_box(hivecomb::base58::encode_check(&raw));
+        },
+    );
+    let encoded58 = hivecomb::base58::encode_check(&raw);
+    bench(
+        "base58 decode_check, 37 bytes",
+        warm,
+        window,
+        rounds,
+        |_| {
+            black_box(hivecomb::base58::decode_check(&encoded58).expect("valid"));
+        },
+    );
+
+    println!("\n  --- wallet -------------------------------------------------");
+    // scrypt is deliberately expensive: it is what stands between a stolen wallet file
+    // and the keys inside it. It is paid once per unlock, not per key or per signature,
+    // so it is reported here to be sure that stays true rather than to be optimised.
+    let dir = std::env::temp_dir().join("hivecomb-bench-wallet");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let path = dir.join("wallet.json");
+    let mut wallet = hivecomb::wallet::Wallet::create(&path, "correct horse").expect("creates");
+    wallet.unlock("correct horse").expect("unlocks");
+    for n in 0..64 {
+        wallet
+            .add_key(
+                &key,
+                Some(&format!("acct{n}")),
+                Some(hivecomb::keys::Role::Posting),
+            )
+            .expect("adds");
+    }
+    bench("Wallet::unlock (scrypt N=2^15)", warm, window, 3, |_| {
+        let mut w = hivecomb::wallet::Wallet::open(&path).expect("opens");
+        w.unlock("correct horse").expect("unlocks");
+        black_box(w);
+    });
+    bench(
+        "key_for_role, 64 keys, last one",
+        warm,
+        window,
+        rounds,
+        |_| {
+            black_box(
+                wallet
+                    .key_for_role("acct63", hivecomb::keys::Role::Posting)
+                    .expect("found"),
+            );
+        },
+    );
+    bench("key_for_public, 64 keys", warm, window, rounds, |_| {
+        black_box(wallet.key_for_public(&public).expect("found"));
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+
+    println!("\n  --- rpc, no network ----------------------------------------");
+    let signed = tx1.clone().sign(&keys, Chain::Hive).expect("signs");
+    bench("SignedTransaction::to_json", warm, window, rounds, |_| {
+        black_box(signed.to_json().expect("serializes"));
+    });
+    let params = serde_json::json!([signed.to_json().expect("serializes")]);
+    bench("build broadcast request body", warm, window, rounds, |_| {
+        let req = hivecomb::rpc::RpcRequest::new(
+            "network_broadcast_api.broadcast_transaction",
+            params.clone(),
+            1,
+        );
+        black_box(serde_json::to_string(&req).expect("serializes"));
+    });
+    let gdp = r#"{"jsonrpc":"2.0","id":1,"result":{"head_block_number":94000000,
+        "head_block_id":"059a53800000000000000000000000000000abcd",
+        "time":"2026-08-25T00:00:00","last_irreversible_block_num":93999950}}"#;
+    bench(
+        "parse a global-properties response",
+        warm,
+        window,
+        rounds,
+        |_| {
+            black_box(serde_json::from_str::<hivecomb::rpc::RpcResponse>(gdp).expect("parses"));
+        },
+    );
+
     grind_distribution(&key);
 
     println!("\n  Read the grind table first. Every attempt past the first is a whole");
@@ -316,4 +420,10 @@ fn main() {
     println!("  It is inherent to Graphene's compact format rather than a choice this");
     println!("  crate makes: a signature whose r or s has the top bit set is rejected,");
     println!("  so every Hive library grinds. What is worth watching is the mean.");
+    println!();
+    println!("  Two rows here are slow on purpose and must stay that way. scrypt is what");
+    println!("  stands between a stolen wallet file and the keys in it, and PBKDF2's 2048");
+    println!("  rounds are fixed by BIP-39. Both are paid once, at unlock and at import,");
+    println!("  never per transaction. Nothing else on this list is a password hash, so");
+    println!("  anything else that grows is a regression.");
 }

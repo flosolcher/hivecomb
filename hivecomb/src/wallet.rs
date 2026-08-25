@@ -30,9 +30,16 @@
 //!
 //! # What a passphrase buys you
 //!
-//! scrypt at `N = 32768, r = 8, p = 1` costs 32 MiB (`128 * r * N`) and a few milliseconds per
-//! guess. That is a meaningful multiplier, not a substitute for entropy. A six-word
-//! diceware passphrase is fine; a dictionary word is not, whatever the work factor.
+//! scrypt at `N = 32768, r = 8, p = 1` costs 32 MiB (`128 * r * N`) and, measured on a
+//! 2.4 GHz i9-10885H, about **70 milliseconds** per guess. That is a meaningful
+//! multiplier, not a substitute for entropy. A six-word diceware passphrase is fine; a
+//! dictionary word is not, whatever the work factor.
+//!
+//! That cost is paid **once, by [`Wallet::unlock`]**, and never again: unlocking caches
+//! the derived cipher, so fetching a key afterwards is a string comparison and one
+//! AES-GCM decryption -- microseconds. Unlock once and keep the wallet unlocked. A
+//! program that unlocked per transaction would add ~70 ms to a path where signing itself
+//! costs ~70 *micro*seconds, which is a thousandfold penalty for no security gain.
 
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey, Role};
