@@ -22,6 +22,9 @@
 // clock during a run and whoever went first would be measured cold. The payload varies
 // every iteration. Pinned to one core under a memory cap; see run.sh.
 //
+// Timing is process CPU time, not wall-clock, so the numbers hold on a machine that is
+// doing other work — see the note on `cpuMs` below.
+//
 // The `spread` column is (median − minimum) / minimum across the libraries in that row.
 // A difference smaller than the spread is not a difference.
 
@@ -163,26 +166,33 @@ const stats = (samples) => {
 // ~70 us — and any single iteration count either finishes instantly for one or runs for
 // hours for another. Equal wall-clock per window, with the fast ones simply completing
 // more iterations, is the only way to interleave them fairly.
+// CPU time this process has actually consumed, in milliseconds. Not a wall clock: a
+// neighbour taking the core deschedules us, and time we are not running is not charged
+// here. That is what lets these figures mean something on a machine doing other work.
+const cpuMs = () => {
+  const c = process.cpuUsage()
+  return (c.user + c.system) / 1000
+}
+
 function benchAll(warmMs, windowMs, windows, cases) {
   const names = Object.keys(cases)
-  const elapsedMs = (from) => Number(process.hrtime.bigint() - from) / 1e6
 
   for (const name of names) {
-    const started = process.hrtime.bigint()
+    const started = cpuMs()
     let i = 0
     // At least one call, so a library slower than the whole warmup budget still runs.
     do cases[name](i++)
-    while (elapsedMs(started) < warmMs)
+    while (cpuMs() - started < warmMs)
   }
 
   const samples = Object.fromEntries(names.map((n) => [n, []]))
   for (let w = 0; w < windows; w++) {
     for (const name of names) {
-      const t = process.hrtime.bigint()
+      const t = cpuMs()
       let n = 0
       do cases[name](n++)
-      while (elapsedMs(t) < windowMs)
-      samples[name].push((elapsedMs(t) * 1000) / n)
+      while (cpuMs() - t < windowMs)
+      samples[name].push(((cpuMs() - t) * 1000) / n)
     }
   }
   return Object.fromEntries(names.map((n) => [n, stats(samples[n])]))

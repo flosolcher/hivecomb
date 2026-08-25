@@ -35,7 +35,27 @@
 //! core, under a memory cap — see `run.sh`. The minimum is used because interference can
 //! only ever make a window slower, so the fastest is closest to the true cost.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+/// CPU time consumed by this thread.
+///
+/// Not a wall clock. A neighbour taking the core deschedules this thread, and a thread
+/// CPU clock does not tick while the thread is not running -- so other work on the
+/// machine is subtracted out rather than charged to whichever library happened to be in
+/// its window. `hivecomb/examples/bench_pipeline.rs --verify-under-load` demonstrates
+/// the difference: eight competing threads move the wall clock by ~830% and this by ~1%.
+fn cpu_now() -> Duration {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `clock_gettime` writes a well-formed `timespec` through the pointer it is
+    // given and touches nothing else.
+    unsafe {
+        libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts);
+    }
+    Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+}
 
 use sha2::{Digest, Sha256};
 
@@ -217,9 +237,9 @@ struct Timing {
 /// warmed less than a fast one.
 fn bench_all(warm: Duration, iters: u32, windows: u32, cases: &mut [(&str, &mut dyn FnMut(u32))]) -> Vec<Timing> {
     for (_, f) in cases.iter_mut() {
-        let started = Instant::now();
+        let started = cpu_now();
         let mut i = 0u32;
-        while started.elapsed() < warm {
+        while cpu_now() - started < warm {
             f(i);
             i = i.wrapping_add(1);
         }
@@ -228,11 +248,11 @@ fn bench_all(warm: Duration, iters: u32, windows: u32, cases: &mut [(&str, &mut 
     let mut samples: Vec<Vec<f64>> = vec![Vec::with_capacity(windows as usize); cases.len()];
     for _ in 0..windows {
         for (slot, (_, f)) in cases.iter_mut().enumerate() {
-            let started = Instant::now();
+            let started = cpu_now();
             for i in 0..iters {
                 f(i);
             }
-            samples[slot].push(started.elapsed().as_secs_f64() / f64::from(iters) * 1e6);
+            samples[slot].push((cpu_now() - started).as_secs_f64() / f64::from(iters) * 1e6);
         }
     }
 

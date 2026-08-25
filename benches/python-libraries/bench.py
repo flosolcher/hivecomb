@@ -142,32 +142,36 @@ SIGNERS = {"hivecomb": comb_sign, "beem": beem_sign, "hive-nectar": nectar_sign}
 
 
 def bench_all(warm_s, window_s, windows, cases):
-    """Time-boxed, interleaved windows.
+    """Time-boxed, interleaved windows, on a CPU clock.
 
     Interleaved because this machine's governor ramps the clock during a run, so
     whichever library went first would be measured cold. Time-boxed because these span
     two orders of magnitude and no single iteration count serves both ends.
+
+    `process_time` rather than `perf_counter`: it counts only CPU this process actually
+    got, so a neighbour taking the core is subtracted out instead of being charged to
+    whichever library was unlucky enough to be running.
     """
     for fn in cases.values():
-        started = time.perf_counter()
+        started = time.process_time()
         i = 0
         while True:
             fn(i)
             i += 1
-            if time.perf_counter() - started >= warm_s:
+            if time.process_time() - started >= warm_s:
                 break
 
     samples = {name: [] for name in cases}
     for _ in range(windows):
         for name, fn in cases.items():
-            started = time.perf_counter()
+            started = time.process_time()
             n = 0
             while True:
                 fn(n)
                 n += 1
-                if time.perf_counter() - started >= window_s:
+                if time.process_time() - started >= window_s:
                     break
-            samples[name].append((time.perf_counter() - started) / n * 1e6)
+            samples[name].append((time.process_time() - started) / n * 1e6)
 
     out = {}
     for name, s in samples.items():

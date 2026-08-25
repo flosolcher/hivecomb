@@ -70,6 +70,103 @@ fn bench(
     best
 }
 
+/// A hardware cycle counter for this process, when the kernel will give us one.
+///
+/// The thread CPU clock removes time spent descheduled, but it cannot remove *frequency*:
+/// under all-core load an i9-10885H drops from 5.3 GHz towards 2.4, and the same work
+/// then costs more CPU-microseconds without a single instruction changing. Cycles do not
+/// move with frequency, so cycles per operation is the one absolute figure here that a
+/// busy machine cannot distort.
+///
+/// Needs `perf_event_paranoid <= 2`, which is the common default. Returns `None` rather
+/// than failing when the counter is unavailable, and the caller falls back to time.
+struct Cycles(std::os::fd::OwnedFd);
+
+impl Cycles {
+    fn open() -> Option<Self> {
+        use std::os::fd::FromRawFd;
+
+        // `perf_event_attr` as of PERF_ATTR_SIZE_VER7. Only the leading fields are named;
+        // the tail is zeroed padding, which is what the kernel expects for `size = 128`.
+        #[repr(C)]
+        struct Attr {
+            type_: u32,
+            size: u32,
+            config: u64,
+            sample_period: u64,
+            sample_type: u64,
+            read_format: u64,
+            flags: u64,
+            tail: [u8; 80],
+        }
+        const PERF_TYPE_HARDWARE: u32 = 0;
+        const PERF_COUNT_HW_CPU_CYCLES: u64 = 0;
+        // bit 5 = exclude_kernel, bit 6 = exclude_hv: count only this program's own work.
+        const EXCLUDE_KERNEL_AND_HV: u64 = (1 << 5) | (1 << 6);
+
+        let attr = Attr {
+            type_: PERF_TYPE_HARDWARE,
+            size: std::mem::size_of::<Attr>() as u32,
+            config: PERF_COUNT_HW_CPU_CYCLES,
+            sample_period: 0,
+            sample_type: 0,
+            read_format: 0,
+            flags: EXCLUDE_KERNEL_AND_HV,
+            tail: [0; 80],
+        };
+        // SAFETY: `perf_event_open` reads `size` bytes through the pointer and returns a
+        // file descriptor or -1. pid 0 / cpu -1 means "this process, whichever core".
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_perf_event_open,
+                &attr as *const Attr,
+                0,
+                -1,
+                -1,
+                0u64,
+            )
+        };
+        if fd < 0 {
+            return None;
+        }
+        // SAFETY: `fd` is a fresh descriptor the kernel just handed us and nothing else
+        // owns it.
+        Some(Cycles(unsafe {
+            std::os::fd::OwnedFd::from_raw_fd(fd as i32)
+        }))
+    }
+
+    fn read(&self) -> u64 {
+        use std::os::fd::AsRawFd;
+        let mut buf = 0u64;
+        // SAFETY: reading 8 bytes into an 8-byte destination from a counter descriptor.
+        let n = unsafe {
+            libc::read(
+                self.0.as_raw_fd(),
+                (&mut buf as *mut u64).cast::<libc::c_void>(),
+                8,
+            )
+        };
+        if n == 8 {
+            buf
+        } else {
+            0
+        }
+    }
+
+    /// Cycles per call, averaged over a fixed number of iterations.
+    fn per_op(&self, iters: u32, f: &mut impl FnMut(u32)) -> f64 {
+        for i in 0..iters.min(1000) {
+            f(i);
+        }
+        let before = self.read();
+        for i in 0..iters {
+            f(i);
+        }
+        (self.read() - before) as f64 / f64::from(iters)
+    }
+}
+
 /// Wall-clock time since the process started, in the same shape as [`cpu_now`], so the
 /// two can be swapped in the timing loop and compared.
 fn wall_now() -> Duration {
@@ -186,32 +283,59 @@ fn grind_distribution(key: &PrivateKey) {
     );
 }
 
-/// Prove on this machine that the thread clock is what makes the figures trustworthy.
+/// Prove on this machine which clock survives a busy machine, rather than asserting it.
 ///
-/// Measures the same signature twice -- once as the machine is, once with every core
-/// saturated -- on both clocks. The wall clock is expected to blow up and the thread
-/// clock to hold. If the thread clock moved as much as the wall clock, the timing here
-/// would be worth no more than a wall-clock benchmark and this would say so.
+/// Measures the same signature as the machine is, then again with every core saturated,
+/// on all three clocks. Two distinct things go wrong under load and they need separate
+/// answers: being descheduled (the thread CPU clock removes it) and the CPU dropping
+/// frequency (only cycles are immune -- this part is 5.3 GHz down towards 2.4 under
+/// all-core load, and the same instructions then cost more microseconds).
+///
+/// The spinners deliberately clear their CPU affinity. Inheriting this process's pinning
+/// would put them all on one core, which tests descheduling but never provokes a turbo
+/// drop -- an easier test that a thread clock passes while still leaving the figures
+/// wrong. Ask the harder question.
 fn verify_under_load(key: &PrivateKey, digests: &[[u8; 32]]) {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     let warm = Duration::from_millis(200);
     let window = Duration::from_millis(120);
+    let iters = 3_000u32;
     let mut sign = |i: u32| {
         black_box(hivecomb::sign::sign_digest(&digests[(i as usize) & 255], key).expect("signs"));
     };
+    let cycles = Cycles::open();
 
-    let cpu_quiet = measure_using(cpu_now, warm, window, 5, &mut sign);
-    let wall_quiet = measure_using(wall_now, warm, window, 5, &mut sign);
+    let quiet = (
+        measure_using(wall_now, warm, window, 5, &mut sign),
+        measure_using(cpu_now, warm, window, 5, &mut sign),
+        cycles.as_ref().map(|c| c.per_op(iters, &mut sign)),
+    );
 
-    // Spinners inherit this process's CPU affinity, so under `taskset` they pile onto the
-    // same core the benchmark is pinned to. That is the harshest version of the test.
     let stop = Arc::new(AtomicBool::new(false));
-    let threads: Vec<_> = (0..8)
+    // `available_parallelism` reports the *affinity mask*, which under `taskset -c 14` is
+    // one core -- so it would spawn a single spinner and quietly test almost nothing. Ask
+    // the machine how many CPUs it actually has.
+    // SAFETY: `sysconf` takes a name and returns a long; no pointers involved.
+    let cores = match unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) } {
+        n if n > 0 => n as usize,
+        _ => 8,
+    };
+    let threads: Vec<_> = (0..cores)
         .map(|_| {
             let stop = Arc::clone(&stop);
             std::thread::spawn(move || {
+                // Escape any inherited pinning so the load is genuinely all-core.
+                // SAFETY: `cpu_set_t` is zeroed and filled through libc's own helpers
+                // before being handed back to `sched_setaffinity` for this thread.
+                unsafe {
+                    let mut set: libc::cpu_set_t = std::mem::zeroed();
+                    for c in 0..cores {
+                        libc::CPU_SET(c, &mut set);
+                    }
+                    libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set);
+                }
                 let mut x = 0u64;
                 while !stop.load(Ordering::Relaxed) {
                     x = black_box(x.wrapping_mul(6364136223846793005).wrapping_add(1));
@@ -220,8 +344,11 @@ fn verify_under_load(key: &PrivateKey, digests: &[[u8; 32]]) {
         })
         .collect();
 
-    let cpu_loaded = measure_using(cpu_now, warm, window, 5, &mut sign);
-    let wall_loaded = measure_using(wall_now, warm, window, 5, &mut sign);
+    let loaded = (
+        measure_using(wall_now, warm, window, 5, &mut sign),
+        measure_using(cpu_now, warm, window, 5, &mut sign),
+        cycles.as_ref().map(|c| c.per_op(iters, &mut sign)),
+    );
 
     stop.store(true, Ordering::Relaxed);
     for t in threads {
@@ -229,27 +356,58 @@ fn verify_under_load(key: &PrivateKey, digests: &[[u8; 32]]) {
     }
 
     let drift = |a: f64, b: f64| (b - a) / a * 100.0;
-    println!("\n  --- is this measurement load-independent? ------------------");
-    println!("  signing one transfer, 8 extra cores of work added\n");
-    println!("     clock            quiet     loaded     drift");
+    println!("\n  --- which clock survives a busy machine? -------------------");
+    println!("  signing one transfer, {cores} cores of competing work added\n");
+    println!("     clock                 quiet       loaded     drift");
     println!(
-        "     wall        {wall_quiet:9.2} {wall_loaded:9.2} {:8.0}%",
-        drift(wall_quiet, wall_loaded)
+        "     wall           {:11.2} {:12.2} {:8.0}%",
+        quiet.0,
+        loaded.0,
+        drift(quiet.0, loaded.0)
     );
     println!(
-        "     thread cpu  {cpu_quiet:9.2} {cpu_loaded:9.2} {:8.0}%",
-        drift(cpu_quiet, cpu_loaded)
+        "     thread cpu     {:11.2} {:12.2} {:8.0}%",
+        quiet.1,
+        loaded.1,
+        drift(quiet.1, loaded.1)
     );
-    let ok = drift(cpu_quiet, cpu_loaded).abs() < 25.0;
-    println!(
-        "\n  thread-clock drift is {} -- the figures above are {}",
-        if ok { "small" } else { "LARGE" },
-        if ok {
-            "not an artefact of a busy machine"
-        } else {
-            "NOT trustworthy on this machine; find a quiet one"
+    match (quiet.2, loaded.2) {
+        (Some(q), Some(l)) => {
+            println!("     cycles/op      {q:11.0} {l:12.0} {:8.0}%", drift(q, l));
+            let ok = drift(q, l).abs() < 10.0;
+            println!(
+                "\n  wall - thread cpu = time spent descheduled, which the thread clock removes."
+            );
+            println!("  thread cpu - cycles = frequency scaling, which only cycles remove.");
+            println!("  cycles that still move = the same instructions taking more cycles.");
+            println!(
+                "\n  Cycles drifted {:.0}%. {}",
+                drift(q, l).abs(),
+                if ok {
+                    "These counts are a property of the code."
+                } else {
+                    "That is the SMT sibling stealing"
+                }
+            );
+            if !ok {
+                println!("  execution units, and no userspace clock can subtract it out. For");
+                println!("  figures that hold on a saturated machine, a core and its sibling");
+                println!("  have to be taken away from everything else, which needs root:");
+                println!();
+                println!("    sudo systemctl set-property --runtime user.slice \\");
+                println!("        AllowedCPUs=0-5,7-13,15        # and system.slice, init.scope");
+                println!("    taskset -c 14 <the benchmark>      # 6 and 14 are one core");
+                println!();
+                println!("  Without that, compare *ratios* between libraries measured in the");
+                println!("  same run: contention hits both sides and divides out. Absolute");
+                println!("  microseconds from a loaded machine are not worth publishing.");
+            }
         }
-    );
+        _ => println!(
+            "     cycles/op          unavailable (perf_event_open refused; \
+             needs perf_event_paranoid <= 2)"
+        ),
+    }
 }
 
 fn main() {

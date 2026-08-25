@@ -9,6 +9,8 @@ description = "Measures hivecomb against the other Rust Hive libraries, on ident
 # be measured; they have no business in hivecomb's dependency tree, its MSRV job, or its
 # `cargo test --workspace`. Same reasoning as `fuzz/`.
 [dependencies]
+# Timing is CLOCK_THREAD_CPUTIME_ID, so the figures survive a busy machine.
+libc = "0.2"
 hivecomb = { path = "../../hivecomb", features = ["rpc", "memo"] }
 hive-xylem = "0.1.6"
 hive-rs = { version = "0.1.0", default-features = false }
