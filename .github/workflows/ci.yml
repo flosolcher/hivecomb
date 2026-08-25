@@ -195,3 +195,12 @@ jobs:
       - run: cargo package --locked -p hivecomb
       - name: list what would be published
         run: cargo package --locked -p hivecomb --list
+      # The comparison harness lives outside the workspace and keeps its own
+      # lock, so nothing above resolves it. It depends on hivecomb by path,
+      # which means a change to hivecomb's dependencies invalidates this lock
+      # too -- silently, since the harness is never built in CI. `cargo
+      # metadata` resolves without compiling, so this stays cheap: it is a lock
+      # check, not a build of three other people's crates.
+      - name: benchmark harness lock matches its manifest
+        working-directory: benches/rust-libraries
+        run: cargo metadata --locked --format-version 1 > /dev/null
