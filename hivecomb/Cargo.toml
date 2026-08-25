@@ -70,5 +70,8 @@ hex = "0.4"
 # dependencies of this crate, so this adds nothing to a consumer's build.
 secp256k1 = { workspace = true }
 sha2 = { workspace = true }
+# For `examples/bench_pipeline.rs` only: it times with CLOCK_THREAD_CPUTIME_ID rather
+# than a wall clock, so a benchmark stays honest on a machine that is doing other work.
+libc = "0.2"
 # For the async tests only; the library itself pulls in no executor.
 tokio = { version = "1", features = ["rt", "macros", "time", "test-util"] }
