@@ -26,7 +26,11 @@ __pycache__/
 **/*.rs.bk
 # Secrets. Nothing holding a private key may ever be committed — this repo is
 *.so
-/target
+# Any cargo target directory, at any depth. This was `/target`, anchored to the
+# repository root, which missed `benches/rust-libraries/target` -- a second
+# workspace outside this one -- and 1887 build artifacts were committed before
+# anyone noticed.
+target/
 .venv/
 wallet.json
 # whatever is newest and the floor moves on its own.

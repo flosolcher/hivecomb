@@ -191,16 +191,25 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The comparison harness is a second, separate workspace with its own
+          # target directory; without naming it here it would compile from cold
+          # on every run.
+          workspaces: |
+            .
+            benches/rust-libraries
       # Catches a file that only exists locally, or one that should not ship.
       - run: cargo package --locked -p hivecomb
       - name: list what would be published
         run: cargo package --locked -p hivecomb --list
       # The comparison harness lives outside the workspace and keeps its own
-      # lock, so nothing above resolves it. It depends on hivecomb by path,
-      # which means a change to hivecomb's dependencies invalidates this lock
-      # too -- silently, since the harness is never built in CI. `cargo
-      # metadata` resolves without compiling, so this stays cheap: it is a lock
-      # check, not a build of three other people's crates.
-      - name: benchmark harness lock matches its manifest
+      # lock, so nothing above resolves or compiles it. Two different things rot
+      # there unseen: its lock drifts from its manifest (it depends on hivecomb
+      # by path, so a change to hivecomb's dependencies invalidates it), and it
+      # stops compiling when an API it calls changes. `check --locked` catches
+      # both, and the numbers in COMPARISON.md come out of this harness, so a
+      # version of it that no longer builds is a real gap rather than a tidiness
+      # one. ~27 s cold, and the cache above keeps it well under that.
+      - name: benchmark harness compiles against the current API
         working-directory: benches/rust-libraries
-        run: cargo metadata --locked --format-version 1 > /dev/null
+        run: cargo check --locked --all-targets
