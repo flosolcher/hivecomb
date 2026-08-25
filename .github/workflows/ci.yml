@@ -43,10 +43,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.rust }}
+      # `--locked` on every cargo command that resolves dependencies, here and in
+      # each job below. Without it cargo quietly rewrites Cargo.lock to match a
+      # changed manifest and the job passes, so a commit that updates Cargo.toml
+      # and forgets the lock is invisible until someone builds from the packaged
+      # crate. That happened on 2026-08-25. It has to be every command, not just
+      # this one: the first unlocked cargo call in a job repairs the lock and
+      # hides the mismatch from everything after it.
       - name: build
-        run: cargo build --workspace --all-features
+        run: cargo build --locked --workspace --all-features
       - name: test
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-features
 
   features:
     name: feature combinations
@@ -59,20 +66,20 @@ jobs:
       # That property is easy to lose to a stray `use` and invisible in a
       # default build, so it is checked explicitly rather than assumed.
       - name: no default features
-        run: cargo build -p hivecomb --no-default-features
+        run: cargo build --locked -p hivecomb --no-default-features
       - name: each feature alone
         run: |
           for f in rpc ureq-transport memo bip38 bip32 wallet async; do
             echo "::group::$f"
-            cargo build -p hivecomb --no-default-features --features "$f"
+            cargo build --locked -p hivecomb --no-default-features --features "$f"
             echo "::endgroup::"
           done
       - name: async without a bundled transport
-        run: cargo build -p hivecomb --no-default-features --features async
+        run: cargo build --locked -p hivecomb --no-default-features --features async
       - name: reqwest transport
-        run: cargo build -p hivecomb --no-default-features --features reqwest-transport
+        run: cargo build --locked -p hivecomb --no-default-features --features reqwest-transport
       - name: all features
-        run: cargo build -p hivecomb --all-features
+        run: cargo build --locked -p hivecomb --all-features
 
   lint:
     name: fmt and clippy
@@ -84,10 +91,10 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo clippy -p hivecomb --no-default-features -- -D warnings
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked -p hivecomb --no-default-features -- -D warnings
       - name: docs build without warnings
-        run: cargo doc -p hivecomb --all-features --no-deps
+        run: cargo doc --locked -p hivecomb --all-features --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -126,7 +133,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: build the extension module
         run: |
-          cargo build --release -p hivecomb-py
+          cargo build --locked --release -p hivecomb-py
           mkdir -p dist
           cp target/release/libhivecomb.so dist/hivecomb.so
       - name: compatibility suite
@@ -185,6 +192,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Catches a file that only exists locally, or one that should not ship.
-      - run: cargo package -p hivecomb
+      - run: cargo package --locked -p hivecomb
       - name: list what would be published
-        run: cargo package -p hivecomb --list
+        run: cargo package --locked -p hivecomb --list

@@ -168,9 +168,9 @@ jobs:
           # no test instance of crates.io, and publishing there for real while
           # rehearsing PyPI would be a spectacular way to burn a version number.
           if [ "${{ needs.guard.outputs.dry_run }}" = "true" ]; then
-            cargo publish -p hivecomb --dry-run
+            cargo publish --locked -p hivecomb --dry-run
           else
-            cargo publish -p hivecomb
+            cargo publish --locked -p hivecomb
           fi
 
   # ------------------------------------------------------------ python wheels

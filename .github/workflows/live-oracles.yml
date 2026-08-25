@@ -75,7 +75,7 @@ jobs:
       # construction.
       - name: seed the corpus with input the crate produced
         run: |
-          cargo run --release --example emit_fuzz_seeds \
+          cargo run --locked --release --example emit_fuzz_seeds \
             --no-default-features --features memo -- fuzz/corpus
           echo "seeds for ${{ matrix.target }}:"
           ls -la "fuzz/corpus/${{ matrix.target }}" 2>/dev/null || {
@@ -106,7 +106,7 @@ jobs:
 
       - name: build the extension module
         run: |
-          cargo build --release -p hivecomb-py
+          cargo build --locked --release -p hivecomb-py
           mkdir -p dist
           cp target/release/libhivecomb.so dist/hivecomb.so
 
