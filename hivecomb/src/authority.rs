@@ -103,11 +103,24 @@ impl Authority {
         mut account_auths: Vec<AccountAuth>,
         mut key_auths: Vec<KeyAuth>,
     ) -> Result<Self> {
-        account_auths.sort_by(|a, b| a.account.cmp(&b.account));
-        if account_auths
-            .windows(2)
-            .any(|w| w[0].account == w[1].account)
-        {
+        // Ordered by the form the bytes carry, not by the account as given. Every
+        // string goes out through hived's transport form, so a name holding a control
+        // byte is written as `u0000` -- and hived's flat_map is ordered by what is on
+        // the wire. Sorting the names as handed in meant reading this crate's own
+        // output produced a differently ordered authority, so serializing twice gave
+        // two different transactions. `fuzz_targets/reader.rs` found it on a
+        // `request_account_recovery`.
+        //
+        // Duplicates are judged on the same form: two names differing only in a control
+        // byte collide once transported, and hived would see one entry twice.
+        account_auths.sort_by(|a, b| {
+            crate::types::hived_transport_form(&a.account)
+                .cmp(&crate::types::hived_transport_form(&b.account))
+        });
+        if account_auths.windows(2).any(|w| {
+            crate::types::hived_transport_form(&w[0].account)
+                == crate::types::hived_transport_form(&w[1].account)
+        }) {
             return Err(Error::field("authority lists the same account twice"));
         }
 
@@ -119,6 +132,27 @@ impl Authority {
 
         if weight_threshold == 0 {
             return Err(Error::field("authority weight_threshold must be non-zero"));
+        }
+
+        // hived's `validate_auth_size` sums the two lists against one budget:
+        //
+        //     size = a.account_auths.size() + a.key_auths.size();
+        //     assert( size <= HIVE_MAX_AUTHORITY_MEMBERSHIP );
+        //
+        // One budget of forty between them, not forty each -- which is the reading a
+        // caller is most likely to get wrong, since the two lists are separate fields.
+        //
+        // Checked here rather than in `append_to`, where it used to be: an authority
+        // read off the wire with forty-one entries parsed and then refused to serialize
+        // back. Both fields are private and every constructor comes through this
+        // function, so checking once here holds the invariant for the whole type.
+        let entries = account_auths.len() + key_auths.len();
+        if entries > crate::operations::MAX_AUTHORITY_MEMBERSHIP {
+            return Err(Error::field(format!(
+                "authority names {entries} entries across account_auths and key_auths; \
+                 hived allows at most {} between them",
+                crate::operations::MAX_AUTHORITY_MEMBERSHIP
+            )));
         }
 
         Ok(Authority {
@@ -202,21 +236,10 @@ impl Authority {
 
 impl GrapheneSerialize for Authority {
     fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
-        // hived's `validate_auth_size` sums the two lists against one budget:
-        //
-        //     size = a.account_auths.size() + a.key_auths.size();
-        //     assert( size <= HIVE_MAX_AUTHORITY_MEMBERSHIP );
-        //
-        // One budget of forty between them, not forty each — which is the reading a
-        // caller is most likely to get wrong, since the two lists are separate fields.
-        let entries = self.account_auths.len() + self.key_auths.len();
-        if entries > crate::operations::MAX_AUTHORITY_MEMBERSHIP {
-            return Err(Error::field(format!(
-                "authority names {entries} entries across account_auths and key_auths; \
-                 hived allows at most {} between them",
-                crate::operations::MAX_AUTHORITY_MEMBERSHIP
-            )));
-        }
+        // No size check here: `Authority::new` is the only way to build one, both
+        // fields are private, and it applies hived's `validate_auth_size` bound. Doing
+        // it here as well meant an oversized authority could be read and not written
+        // back.
         write_u32(out, self.weight_threshold);
         write_array(out, &self.account_auths)?;
         write_array(out, &self.key_auths)?;
@@ -355,11 +378,16 @@ mod tests {
 
         // The full budget in accounts *plus* a key is one too many — which it would not
         // be if each list had its own forty.
-        let over = Authority::new(1, accounts(MAX_AUTHORITY_MEMBERSHIP), one_key).unwrap();
-        let mut out = Vec::new();
+        //
+        // Refused at construction rather than at serialization. The bound used to live
+        // in `append_to`, which meant an oversized authority could be read off the wire
+        // and then refuse to be written back; both fields are private and every
+        // constructor routes through `new`, so checking once here is enough.
+        let err = Authority::new(1, accounts(MAX_AUTHORITY_MEMBERSHIP), one_key)
+            .expect_err("the two lists share one budget, so this is one past it");
         assert!(
-            over.append_to(&mut out).is_err(),
-            "the two lists share one budget, so this is one past it"
+            err.to_string().contains("between them"),
+            "and the error says the budget is shared: {err}"
         );
     }
     use super::*;

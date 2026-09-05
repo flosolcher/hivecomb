@@ -231,8 +231,13 @@ impl serde::Serialize for CommentOptionsExtension {
         use serde::ser::SerializeTuple;
         match self {
             CommentOptionsExtension::Beneficiaries(list) => {
+                // Same ordering as the binary form -- by the transported account -- so
+                // that a value routed through JSON and then serialized cannot come out
+                // ordered differently from one serialized directly.
                 let mut sorted = list.clone();
-                sorted.sort_by(|a, b| a.account.cmp(&b.account));
+                sorted.sort_by(|a, b| {
+                    hived_transport_form(&a.account).cmp(&hived_transport_form(&b.account))
+                });
                 let mut t = s.serialize_tuple(2)?;
                 t.serialize_element(&0u8)?;
                 t.serialize_element(&serde_json::json!({ "beneficiaries": sorted }))?;

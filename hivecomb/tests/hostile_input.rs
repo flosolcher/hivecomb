@@ -340,3 +340,47 @@ fn a_public_key_keeps_its_prefix_only_when_asked_for_it() {
         "and as mainnet by default, which is the documented choice"
     );
 }
+
+/// An `Authority`'s account map settles too.
+///
+/// `Authority::new` is the single chokepoint — both its lists are private and every
+/// constructor, binary and JSON, routes through it — and it was sorting `account_auths`
+/// by the account as given rather than by the form the bytes carry. So an authority read
+/// off the wire came back in a different order than it went out in, and a
+/// `request_account_recovery` carrying one serialized to two different transactions on
+/// two consecutive passes.
+///
+/// These are the exact bytes `fuzz_targets/reader.rs` and `fuzz_targets/transaction.rs`
+/// reported, on the run after the flat-set ordering was fixed everywhere else. The same
+/// defect had three separate homes; this is the third.
+#[test]
+fn an_authority_account_map_settles_after_one_pass() {
+    let op_bytes: &[u8] = &[
+        0x98, 0x00, 0x00, 0x00, 0x00, 0x2a, 0x00, 0x2b, 0x02, 0x05, 0x05, 0x05, 0x02, 0x00, 0x4d,
+        0x00, 0x00, 0x07, 0x2b, 0x02, 0x05, 0x05, 0x05, 0x02, 0x00, 0x4d, 0x30, 0x00, 0x00, 0x07,
+    ];
+    let mut r = hivecomb::Reader::new(op_bytes, Chain::Hive);
+    let op = Operation::read_from(&mut r).expect("parses");
+    let once = op.to_wire().expect("serializes");
+    let again = {
+        let mut r = hivecomb::Reader::new(&once, Chain::Hive);
+        Operation::read_from(&mut r).expect("our output parses")
+    };
+    assert_eq!(once, again.to_wire().unwrap(), "an authority must settle");
+
+    let tx_bytes: &[u8] = &[
+        0x05, 0x00, 0xaa, 0xbb, 0xcc, 0xdd, 0x74, 0x18, 0x9c, 0x6a, 0x01, 0x2b, 0x05, 0x61, 0x6c,
+        0x69, 0x00, 0x00, 0x01, 0x00, 0x00, 0x16, 0x16, 0x03, 0x03, 0x03, 0x03, 0x16, 0x16, 0x16,
+        0x16, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0x16, 0x16, 0x16, 0x16, 0x16,
+        0x16, 0x16, 0x16, 0x16, 0x2a, 0x16, 0x16, 0x00, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let tx = Transaction::from_body_bytes(tx_bytes, Chain::Hive).expect("parses");
+    let once = tx.body_bytes().expect("serializes");
+    let again = Transaction::from_body_bytes(&once, Chain::Hive).expect("our output parses");
+    assert_eq!(
+        once,
+        again.body_bytes().unwrap(),
+        "and so must a transaction carrying one"
+    );
+}
