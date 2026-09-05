@@ -294,6 +294,10 @@ jobs:
         with:
           packages-dir: dist
           repository-url: ${{ needs.guard.outputs.pypi_url }}
+          # So a re-run after a partial release finishes the job instead of dying
+          # on the files that already landed. PyPI never reuses a filename, so
+          # without this the only way to publish the rest is a version bump.
+          skip-existing: true
       - name: dry run
         if: needs.guard.outputs.upload_pypi != 'true'
         run: |
@@ -333,6 +337,7 @@ jobs:
         with:
           packages-dir: dist-shim
           repository-url: ${{ needs.guard.outputs.pypi_url }}
+          skip-existing: true
       - name: dry run
         if: needs.guard.outputs.upload_pypi != 'true'
         run: |
@@ -435,9 +440,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ "${{ needs.guard.outputs.dry_run }}" = "true" ]; then
-            npx napi pre-publish -t npm --dry-run
+            npx napi pre-publish -t npm --no-gh-release --dry-run
             npm publish --dry-run
           else
-            npx napi pre-publish -t npm
+            npx napi pre-publish -t npm --no-gh-release
             npm publish --access public
           fi
