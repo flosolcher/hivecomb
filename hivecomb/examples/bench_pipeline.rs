@@ -38,6 +38,7 @@ use std::time::Duration;
 /// `Instant::now()` measures how much of the world went by; this measures how much work
 /// the thread actually did. Under contention the two diverge badly, and only the second
 /// is a property of the code being measured.
+#[cfg(target_os = "linux")]
 fn cpu_now() -> Duration {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -49,6 +50,17 @@ fn cpu_now() -> Duration {
         libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts);
     }
     Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+}
+
+/// The same shape, where there is no thread CPU clock to read.
+///
+/// `CLOCK_THREAD_CPUTIME_ID` is not exposed by `libc` on macOS or Windows, so this falls
+/// back to the wall clock and the run says so rather than presenting the two as
+/// equivalent. The measurements still work; they are simply no longer immune to a busy
+/// machine, which is the whole reason the Linux path exists.
+#[cfg(not(target_os = "linux"))]
+fn cpu_now() -> Duration {
+    wall_now()
 }
 
 use hivecomb::operations::{CustomJson, Operation, Transfer};
@@ -80,8 +92,10 @@ fn bench(
 ///
 /// Needs `perf_event_paranoid <= 2`, which is the common default. Returns `None` rather
 /// than failing when the counter is unavailable, and the caller falls back to time.
+#[cfg(target_os = "linux")]
 struct Cycles(std::os::fd::OwnedFd);
 
+#[cfg(target_os = "linux")]
 impl Cycles {
     fn open() -> Option<Self> {
         use std::os::fd::FromRawFd;
@@ -164,6 +178,26 @@ impl Cycles {
             f(i);
         }
         (self.read() - before) as f64 / f64::from(iters)
+    }
+}
+
+/// A cycle counter where `perf_event_open` does not exist.
+///
+/// Always unavailable. `Cycles::open` already returns `Option` because the syscall can be
+/// refused by `perf_event_paranoid`, and the caller prints the same "unavailable" line
+/// either way -- so the platforms without the syscall need no separate path, only an
+/// honest `None`.
+#[cfg(not(target_os = "linux"))]
+struct Cycles(std::convert::Infallible);
+
+#[cfg(not(target_os = "linux"))]
+impl Cycles {
+    fn open() -> Option<Self> {
+        None
+    }
+
+    fn per_op(&self, _iters: u32, _f: &mut impl FnMut(u32)) -> f64 {
+        match self.0 {}
     }
 }
 
@@ -318,17 +352,24 @@ fn verify_under_load(key: &PrivateKey, digests: &[[u8; 32]]) {
     // one core -- so it would spawn a single spinner and quietly test almost nothing. Ask
     // the machine how many CPUs it actually has.
     // SAFETY: `sysconf` takes a name and returns a long; no pointers involved.
+    #[cfg(target_os = "linux")]
     let cores = match unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) } {
         n if n > 0 => n as usize,
         _ => 8,
     };
+    // Elsewhere there is no pinning to see past, so the affinity mask is the machine.
+    #[cfg(not(target_os = "linux"))]
+    let cores = std::thread::available_parallelism().map_or(8, |n| n.get());
     let threads: Vec<_> = (0..cores)
         .map(|_| {
             let stop = Arc::clone(&stop);
             std::thread::spawn(move || {
-                // Escape any inherited pinning so the load is genuinely all-core.
+                // Escape any inherited pinning so the load is genuinely all-core. Only
+                // Linux can: macOS exposes no `sched_setaffinity` equivalent, so a run
+                // under an inherited mask there loads only the cores it was given.
                 // SAFETY: `cpu_set_t` is zeroed and filled through libc's own helpers
                 // before being handed back to `sched_setaffinity` for this thread.
+                #[cfg(target_os = "linux")]
                 unsafe {
                     let mut set: libc::cpu_set_t = std::mem::zeroed();
                     for c in 0..cores {

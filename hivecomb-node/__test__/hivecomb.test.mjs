@@ -514,7 +514,13 @@ test('index.d.ts declares everything the module exports', async () => {
       ...dts.matchAll(/^export (?:interface|type) (\w+)/gm),
     ].map((m) => m[1]),
   )
-  const runtime = Object.keys(mod).filter((n) => n !== 'default' && !n.startsWith('_'))
+  // `default` and `module.exports` are Node's own CJS-to-ESM interop, not exports of
+  // this addon: importing a CommonJS module gives its `module.exports` object under both
+  // names. `module.exports` appeared in the namespace in Node 24 and is absent in 22, so
+  // filtering only `default` made this test pass on one supported version and fail on
+  // the other -- while the addon exported exactly the same thing on both.
+  const INTEROP = new Set(['default', 'module.exports'])
+  const runtime = Object.keys(mod).filter((n) => !INTEROP.has(n) && !n.startsWith('_'))
 
   const undeclared = runtime.filter((n) => !declared.has(n))
   assert.deepEqual(undeclared, [], 'exported at runtime but absent from index.d.ts')
