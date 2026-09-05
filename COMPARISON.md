@@ -129,10 +129,10 @@ for byte, and it is the check that makes the rest of the table meaningful.
 
 | microseconds | hivecomb 0.1.0 | hive-xylem 0.1.6 | hive-rs 0.1.0 | spread |
 |---|---|---|---|---|
-| serialize + digest, 1 transfer | **1.07** | 1.82 | 1.35 | 1% |
-| serialize + digest, 10 `custom_json` | 5.97 | 7.65 | **5.15** | 8% |
-| sign a transfer | 64.58 | 65.11 | 96.58 | 3% |
-| encrypt a memo | 67.59 | `hive_memo` 0.1.2: 145.27 | — | 4% |
+| serialize + digest, 1 transfer | **1.03** | 1.81 | 1.33 | 3% |
+| serialize + digest, 10 `custom_json` | 5.54 | 7.58 | **5.05** | 5% |
+| sign a transfer | 64.65 | 64.89 | 96.51 | 2% |
+| encrypt a memo | 67.75 | `hive_memo` 0.1.2: 144.49 | — | 4% |
 
 **How to read this, because the numbers mislead if taken flat.**
 
@@ -141,9 +141,23 @@ smaller than the spread is not a difference** — so the signing row is a tie be
 hivecomb and `hive-xylem`, not a win for either.
 
 The 10-operation row is not a tie: **`hive-rs` is ahead of this crate there**, by about
-16% against a spread of 8%. It is behind at one operation and ahead at ten, which is a
-different shape of cost rather than a uniformly faster serializer, and at ten operations
-that shape is the one that pays. The row is reported as measured.
+10% against a spread of 5%. The row is reported as measured, and the reason for it is
+worth stating because it is not the serializer. With this crate's per-block custom-operation
+check removed the same row reads 4.93 against `hive-rs`'s 4.89 — a tie — so the whole
+difference is a validity check that `hive-rs` does not perform: hived allows five custom
+operations per account per block and refuses the entire transaction beyond that, and this
+crate refuses it first rather than letting the node do it.
+
+That check is not free but it is nearly so, and only where it can matter. It costs
+nothing at all unless a transaction names more than five accounts across its custom
+operations — below that the budget cannot be breached however the operations are
+distributed, so there is nothing to tally. The benchmark row above is deliberately past
+that threshold: ten `custom_json` for ten distinct accounts, which is not a shape real
+traffic produces. A transaction that carries one to five custom operations pays a single
+counting pass and no allocation.
+
+`hive-rs` is nonetheless genuinely fast here, and on the serializing itself the two are
+level.
 
 Most of the digest rows is work every library does identically. The CPU here has no SHA
 extensions, so SHA-256 runs in software at about 180 MB/s: roughly 1.9 µs of a 344-byte
@@ -153,7 +167,7 @@ their spread suggests. On a CPU with SHA-NI the whole column would move, for all
 
 The signing row is dominated by elliptic curve arithmetic, which all three hand to
 libsecp256k1 — so it is close, and it should be. `hive-xylem`'s API takes the WIF and
-chain id as strings and therefore re-parses both on every call, which is 1.26 µs of its
+chain id as strings and therefore re-parses both on every call, which is 1.27 µs of its
 figure and an API choice rather than an implementation one; it is measured separately in
 the harness so a reader can account for it.
 
@@ -283,8 +297,8 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 17,887 lines |
-| Tests | 48 | 368 |
+| Rust source | 4,556 lines | 17,966 lines |
+| Tests | 48 | 369 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
 | Virtual operations | none modelled | **43** |

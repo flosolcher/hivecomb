@@ -221,12 +221,45 @@ impl Transaction {
     /// anything that all the broadcasters go through. That is an application concern and
     /// this crate deliberately does not pretend otherwise.
     fn check_custom_op_budget(&self) -> Result<()> {
-        use std::collections::HashMap;
+        // This runs inside `body_bytes`, so it is on the signing path of every
+        // transaction. Counting first is a tag comparison per operation and no
+        // allocation, and it answers the question outright in the two cases that cover
+        // very nearly all real traffic.
+        //
+        // No custom operations at all -- a transfer, a vote, a comment -- and there is
+        // nothing to tally. Nor is there if the whole transaction names at most
+        // `MAX_CUSTOM_OPS_PER_BLOCK` accounts across all of them: one account's share of
+        // that total cannot exceed the total, so if the transaction is within the budget
+        // then every account in it is too. Only a transaction that could actually breach
+        // the limit pays for the tally below.
+        //
+        // The bound counts *named accounts*, not operations. A single `custom_json` may
+        // name the same account in both its auth lists, which tallies twice below, so
+        // operations would not be a safe bound -- five of those would short-circuit here
+        // while the tally would have refused them.
+        let named: usize = self
+            .operations
+            .iter()
+            .map(|op| op.custom_op_accounts_iter().count())
+            .sum();
+        if named <= crate::operations::MAX_CUSTOM_OPS_PER_BLOCK {
+            return Ok(());
+        }
 
-        let mut per_account: HashMap<&str, usize> = HashMap::new();
+        // A linear scan rather than a `HashMap`. The budget is five per account, so a
+        // transaction that passes this check has at most a handful of distinct names in
+        // the tally, and comparing short strings that many times costs less than
+        // hashing them -- let alone building the map.
+        let mut per_account: Vec<(&str, usize)> = Vec::new();
         for op in &self.operations {
-            for account in op.custom_op_accounts() {
-                let n = per_account.entry(account).or_insert(0);
+            for account in op.custom_op_accounts_iter() {
+                let n = match per_account.iter_mut().find(|(name, _)| *name == account) {
+                    Some((_, n)) => n,
+                    None => {
+                        per_account.push((account, 0));
+                        &mut per_account.last_mut().expect("just pushed").1
+                    }
+                };
                 *n += 1;
                 if *n > crate::operations::MAX_CUSTOM_OPS_PER_BLOCK {
                     return Err(Error::field(format!(
@@ -455,6 +488,42 @@ mod tests {
 
     /// One transaction carrying more than the per-block limit for a single account is a
     /// certain failure, and is refused before anything is signed.
+    #[test]
+    fn an_account_named_twice_by_one_operation_counts_twice() {
+        use crate::operations::{CustomJson, MAX_CUSTOM_OPS_PER_BLOCK};
+
+        // The budget check short-circuits when the transaction names few enough
+        // accounts to be within the limit whatever their distribution. That bound has
+        // to count *named accounts* rather than operations, because one `custom_json`
+        // can name the same account in both auth lists and so consume two of its five.
+        // Three such operations are only three operations but six of alice's budget,
+        // and the check has to see that.
+        let op = |i: usize| {
+            Operation::CustomJson(CustomJson {
+                required_auths: vec!["alice".into()],
+                required_posting_auths: vec!["alice".into()],
+                id: "my_app".into(),
+                json: format!(r#"{{"n":{i}}}"#),
+            })
+        };
+        let block_ref =
+            BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd").unwrap();
+
+        // The point of the test is that three operations are inside the limit, so a
+        // bound counting operations would wave this through. Asserted at compile time
+        // so that raising the limit cannot quietly turn this into a test of nothing.
+        const _: () = assert!(3 <= MAX_CUSTOM_OPS_PER_BLOCK);
+
+        let over = Transaction::new(block_ref, (0..3).map(op).collect(), 600).unwrap();
+        let err = over
+            .body_bytes()
+            .expect_err("six of alice's five must be refused");
+        assert!(
+            err.to_string().contains("alice"),
+            "the error should name the account: {err}"
+        );
+    }
+
     #[test]
     fn too_many_custom_ops_for_one_account_is_refused() {
         use crate::operations::{CustomJson, MAX_CUSTOM_OPS_PER_BLOCK};

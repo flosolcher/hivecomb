@@ -1266,23 +1266,33 @@ impl Operation {
     /// `operation_get_impacted_accounts` yields for them, and what
     /// `database::limit_custom_op_count` tallies.
     pub fn custom_op_accounts(&self) -> Vec<&str> {
-        match self {
-            Operation::Custom(o) => o.required_auths.iter().map(String::as_str).collect(),
-            Operation::CustomJson(o) => o
-                .required_auths
-                .iter()
-                .chain(o.required_posting_auths.iter())
-                .map(String::as_str)
-                .collect(),
-            Operation::CustomBinary(o) => o
-                .required_owner_auths
-                .iter()
-                .chain(o.required_active_auths.iter())
-                .chain(o.required_posting_auths.iter())
-                .map(String::as_str)
-                .collect(),
-            _ => Vec::new(),
-        }
+        self.custom_op_accounts_iter().collect()
+    }
+
+    /// The same accounts, without allocating.
+    ///
+    /// [`Self::custom_op_accounts`] returns a `Vec` because that is what a caller
+    /// reaching for a public helper wants. The per-block budget check does not: it runs
+    /// inside `body_bytes`, so it is on the signing path, and a ten-operation
+    /// transaction was paying for ten vectors that never outlived the loop that read
+    /// them.
+    pub(crate) fn custom_op_accounts_iter(&self) -> impl Iterator<Item = &str> {
+        const NONE: &[String] = &[];
+        let (a, b, c) = match self {
+            Operation::Custom(o) => (o.required_auths.as_slice(), NONE, NONE),
+            Operation::CustomJson(o) => (
+                o.required_auths.as_slice(),
+                o.required_posting_auths.as_slice(),
+                NONE,
+            ),
+            Operation::CustomBinary(o) => (
+                o.required_owner_auths.as_slice(),
+                o.required_active_auths.as_slice(),
+                o.required_posting_auths.as_slice(),
+            ),
+            _ => (NONE, NONE, NONE),
+        };
+        a.iter().chain(b).chain(c).map(String::as_str)
     }
 
     /// The operation's id in hived's static variant.
