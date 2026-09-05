@@ -1,6 +1,6 @@
 The MIT License (MIT)
 
-comb (Rust port)
+hivecomb (Rust port)
 Copyright (c) 2026 The hivecomb contributors
 
 Derived from beem (Python), python-bitshares and python-graphenelib, whose

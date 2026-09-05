@@ -9,8 +9,18 @@
     "type": "git",
     "url": "git+https://github.com/flosolcher/hivecomb.git"
   },
-  "keywords": ["hive", "blockchain", "graphene", "secp256k1", "signing", "memo", "napi-rs"],
-  "engines": { "node": ">= 22" },
+  "keywords": [
+    "hive",
+    "blockchain",
+    "graphene",
+    "secp256k1",
+    "signing",
+    "memo",
+    "napi-rs"
+  ],
+  "engines": {
+    "node": ">= 22"
+  },
   "napi": {
     "binaryName": "hivecomb",
     "targets": [
@@ -21,7 +31,12 @@
       "x86_64-pc-windows-msvc"
     ]
   },
-  "files": ["index.js", "index.d.ts", "README.md"],
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",

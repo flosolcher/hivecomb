@@ -1,5 +1,0 @@
-beem
-beemapi
-beembase
-beemgraphenebase
-hivecomb_compat

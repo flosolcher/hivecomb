@@ -17,10 +17,18 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 
 ## One-time setup
 
-Status as of 2026-08-23: the `release` environment exists, and both
-`CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` are environment secrets on it. **PyPI is not
-configured**, and no token has been proven to work — the checks that would prove them
-need Actions, which is unavailable (see the note under *Before each release*).
+Status as of 2026-09-05: the repository is public and Actions run. The `release`
+environment exists, and both `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` are environment
+secrets on it. **PyPI is not configured**, and **no token has been proven to work** —
+`npm whoami` has never been run against `NPM_TOKEN`, and trusted publishing cannot be
+exercised at all except through TestPyPI (step 4b).
+
+Until 2026-09-05 Actions could not start a job: every run failed in four seconds with
+*"recent account payments have failed or your spending limit needs to be increased"*.
+Going public fixed it, because Actions is free and unmetered on public repositories.
+The first run that actually executed found six defects — three of them real bugs in the
+library — none of which reproduce on the development machine. That is the argument for
+the checklist at the end of this file rather than local evidence.
 
 Do these in order. Step 1 has to come first because everything else names it.
 
@@ -48,10 +56,12 @@ click.
    **A secret, not a variable.** GitHub environments hold both, and the difference
    matters here: secret values are never returned by the API and are automatically
    masked to `***` in workflow logs. Variable values are returned by the API and are
-   printed verbatim. Once this repository is public its workflow logs are public and
-   permanent, so one `set -x`, one crashing tool that dumps its environment, or one
+   printed verbatim. **This repository is public**, so its workflow logs are public and
+   permanent: one `set -x`, one crashing tool that dumps its environment, or one
    `curl -v` would put a publish token where anyone can read it. Revoking the token
-   afterwards does not remove the log entry.
+   afterwards does not remove the log entry. Confirm both are secrets rather than
+   variables before the first release — the API tells them apart, and a variable is
+   already readable by anyone.
 
    **An environment secret, not a repository secret.** Repository secrets are readable
    by every workflow, including `ci.yml`, which runs on pull requests and has no

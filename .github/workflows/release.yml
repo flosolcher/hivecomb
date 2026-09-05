@@ -266,6 +266,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
+      # Both, not just `id-token`. A job-level permissions block REPLACES the
+      # workflow-level one rather than adding to it, so declaring only `id-token`
+      # leaves the job with no read access -- see `pypi-shim` below, which was
+      # written after that failed there with "Repository not found". This job
+      # happens not to check out today, so it is a trap rather than a break: the
+      # first step that needs the repository would fail with an error naming the
+      # wrong thing.
+      contents: read
       id-token: write        # trusted publishing; no token is stored
     steps:
       - uses: actions/download-artifact@v5

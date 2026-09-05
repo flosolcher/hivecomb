@@ -285,7 +285,7 @@ executor.
 
 **On the one measure that matters most — production exposure — neither is mature, and
 xylem is slightly ahead of hivecomb.** It is published on crates.io with five releases;
-`hivecomb` is not published. 99 downloads is not adoption, but it is more than zero.
+`hivecomb` is not published. 103 downloads (crates.io, 2026-09-05) is not adoption, but it is more than zero.
 
 `hivecomb` has now had a transaction accepted by the Hive network — block
 [109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f), 2026-08-22 — so the signing path is no longer
