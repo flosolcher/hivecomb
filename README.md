@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/flosolcher/hivecomb/main/assets/hivecomb.svg" alt="hivecomb" width="96">
+
 # hivecomb
 
 [![CI](https://github.com/flosolcher/hivecomb/actions/workflows/ci.yml/badge.svg)](https://github.com/flosolcher/hivecomb/actions/workflows/ci.yml)

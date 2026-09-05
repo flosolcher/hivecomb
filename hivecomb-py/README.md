@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/flosolcher/hivecomb/main/assets/hivecomb.svg" alt="hivecomb" width="96">
+
 # hivecomb
 
 Hive blockchain keys, serialization and **offline** transaction signing. A Python

@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/flosolcher/hivecomb/main/assets/hivecomb.svg" alt="hivecomb" width="96">
+
 # hivecomb-beem
 
 A `beem`-compatible API for Hive, implemented on [`hivecomb`](https://github.com/flosolcher/hivecomb).

@@ -1,0 +1,21 @@
+<svg viewBox="0 -32 512 512" width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+  <title>hivecomb</title>
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B" /> <!-- Amber -->
+      <stop offset="100%" stop-color="#EA580C" /> <!-- Orange -->
+    </linearGradient>
+    <linearGradient id="grad2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FBBF24" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+  </defs>
+  <!-- Center Hex -->
+  <polygon points="256,128 366.8,192 366.8,320 256,384 145.2,320 145.2,192" fill="url(#grad1)" />
+  <!-- Top Left Hex -->
+  <polygon points="145.2,64 256,128 256,256 145.2,320 34.4,256 34.4,128" fill="url(#grad2)" opacity="0.9" />
+  <!-- Top Right Hex -->
+  <polygon points="366.8,64 477.6,128 477.6,256 366.8,320 256,256 256,128" fill="url(#grad1)" opacity="0.85" />
+  <!-- White highlight/cutout for modern feel -->
+  <polyline points="256,128 256,256 145.2,320" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.4" />
+</svg>
