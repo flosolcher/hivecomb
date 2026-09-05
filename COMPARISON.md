@@ -26,7 +26,8 @@ against the other library rather than reasoned about.
 
 **Where another project is ahead, it says so.** xylem is published and this crate is not.
 nectar is more mature than this project's Python side by every measure that can be
-counted. dhive beats hivecomb at serializing large batches, and the reason is structural
+counted. `hive-rs` serializes a ten-operation transaction faster than this crate does.
+dhive beats hivecomb at serializing large batches, and the reason there is structural
 rather than fixable. Those are in here as plainly as the rest.
 
 **Feature counts are not maturity.** The tables below count operations, tests and lines,
@@ -57,6 +58,13 @@ Interference can only ever make a window slower, so the fastest is the closest e
 of the true cost. The `spread` column reported beside it is `(median − minimum) /
 minimum` across the libraries in that row, and it is the yardstick for the row: **a
 difference smaller than the spread is not a difference.**
+
+The `spread` column is a *within-run* figure, and it is not the whole uncertainty.
+Repeating a whole run moves the absolute numbers as well: the Rust harness reproduces to
+within about 3%, and the Node one to within about 10%, which is V8 rather than the
+machine. The **ratios** hold much better than the absolutes — the Node ratios move by
+under 4% between runs — because everything in a row shares whatever the run was doing.
+Read the ratios as the result and the microseconds as the evidence for them.
 
 **Do not compare a number from one table against a number from another.** They answer
 the same question on different runtimes, and the language boundary is itself part of
@@ -416,10 +424,10 @@ public key, which it does.
 
 | microseconds | hivecomb 0.1.0 | dhive 1.3.6 | hive-tx 7.2.1 | hive-pollen 1.0.0 | hive-js 2.0.9 | spread |
 |---|---|---|---|---|---|---|
-| serialize + digest, 1 op | 11.11 | 10.01 | 50.28 | 12.94 | — | 11% |
-| serialize + digest, 10 ops | 51.44 | 24.45 | 285.16 | 48.93 | — | 6% |
-| sign, 1 op | 86.47 | 126.55 | 815.09 | 1,613.30 | 124,097 | 12% |
-| sign, 10 ops | 131.26 | 149.83 | 980.19 | 1,473.32 | 107,252 | 10% |
+| serialize + digest, 1 op | 9.97 | 9.34 | 42.80 | 11.07 | — | 8% |
+| serialize + digest, 10 ops | 45.48 | 22.28 | 250.02 | 43.25 | — | 5% |
+| sign, 1 op | 81.72 | 121.94 | 771.72 | 1,490.74 | 118,146 | 7% |
+| sign, 10 ops | 127.47 | 145.37 | 962.54 | 1,385.60 | 103,203 | 5% |
 
 **The signing spread is a design choice, not a quality difference,** and reading it
 without that is misleading. These libraries obtain secp256k1 differently:
