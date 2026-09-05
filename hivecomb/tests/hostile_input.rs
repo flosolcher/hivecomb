@@ -264,3 +264,79 @@ fn parsing_and_serializing_are_inverses_even_for_operations_hived_would_reject()
         "and validity is still refused, just not by the serializer"
     );
 }
+
+/// Serializing settles after one pass, even when a string is rewritten on the way out.
+///
+/// `write_string` puts every string through hived's transport form, so a name holding a
+/// raw control byte goes out as the five characters `u0000`. The `flat_set` and
+/// `flat_map` fields were sorted on the strings *as given*, which is not the order the
+/// bytes ended up in — so parsing this crate's own output and writing it again produced
+/// a different transaction. A re-signed transaction would then cover different bytes
+/// from the one that was read.
+///
+/// Both inputs are the exact bytes `fuzz_targets/transaction.rs` and
+/// `fuzz_targets/reader.rs` reported as "serialization is not idempotent", once the
+/// validation split let them get past the point where they used to stop.
+#[test]
+fn serializing_settles_after_one_pass_when_strings_are_rewritten() {
+    // custom_json whose required_auths contain control bytes, so their transported order
+    // differs from their raw order.
+    let tx_bytes: &[u8] = &[
+        0x05, 0x16, 0xaa, 0xbb, 0xcc, 0xdd, 0x9f, 0x00, 0x00, 0x00, 0x02, 0x12, 0x21, 0x01, 0x24,
+        0x05, 0x22, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let tx = Transaction::from_body_bytes(tx_bytes, Chain::Hive).expect("parses");
+    let once = tx.body_bytes().expect("serializes");
+    let again = Transaction::from_body_bytes(&once, Chain::Hive).expect("our output parses");
+    let twice = again.body_bytes().expect("and serializes");
+    assert_eq!(once, twice, "serialization must settle after one pass");
+    assert_eq!(
+        again.digest(Chain::Hive).unwrap(),
+        Transaction::from_body_bytes(&twice, Chain::Hive)
+            .unwrap()
+            .digest(Chain::Hive)
+            .unwrap(),
+        "so the digest a signature covers stops moving too"
+    );
+
+    // witness_set_properties, whose props are a flat_map with the same problem.
+    let op_bytes: &[u8] = &[
+        0x2a, 0x00, 0x04, 0x01, 0x31, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+    ];
+    let mut r = hivecomb::Reader::new(op_bytes, Chain::Hive);
+    let op = Operation::read_from(&mut r).expect("parses");
+    let once = op.to_wire().expect("serializes");
+    let again = {
+        let mut r = hivecomb::Reader::new(&once, Chain::Hive);
+        Operation::read_from(&mut r).expect("our output parses")
+    };
+    assert_eq!(
+        once,
+        again.to_wire().expect("and serializes"),
+        "a flat_map must settle too"
+    );
+}
+
+/// A public key round-trips under the prefix it arrived with, not under `Display`.
+///
+/// `Display` renders `STM` whatever the key came in as, because a public key is a curve
+/// point and does not carry a chain. That is the intended behaviour and it is asserted
+/// here so that it stays intended rather than being rediscovered as a defect —
+/// `fuzz_targets/keys.rs` reported exactly that against a valid testnet key.
+#[test]
+fn a_public_key_keeps_its_prefix_only_when_asked_for_it() {
+    let testnet = "TST6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV";
+    let key = PublicKey::from_prefixed_any(&format!("  {testnet}   ")).expect("whitespace is fine");
+    assert_eq!(key.to_prefixed("TST"), testnet, "under its own prefix");
+    assert_eq!(
+        key.to_string(),
+        testnet.replacen("TST", "STM", 1),
+        "and as mainnet by default, which is the documented choice"
+    );
+}

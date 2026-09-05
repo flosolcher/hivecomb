@@ -25,8 +25,8 @@ use crate::error::{Error, Result};
 use crate::keys::PublicKey;
 use crate::reader::{GrapheneDeserialize, Reader};
 use crate::types::{
-    write_array, write_bool, write_i16, write_optional, write_string, write_u16, write_u32,
-    write_u64, write_varint32, GrapheneSerialize, PointInTime,
+    hived_transport_form, write_array, write_bool, write_i16, write_optional, write_string,
+    write_u16, write_u32, write_u64, write_varint32, GrapheneSerialize, PointInTime,
 };
 
 /// Maximum length of a `custom_json` id, from hived's `custom_id_type`.
@@ -193,8 +193,12 @@ impl CommentOptionsExtension {
                     )));
                 }
                 let mut sorted = list.clone();
-                sorted.sort_by(|a, b| a.account.cmp(&b.account));
-                if sorted.windows(2).any(|w| w[0].account == w[1].account) {
+                sorted.sort_by(|a, b| {
+                    hived_transport_form(&a.account).cmp(&hived_transport_form(&b.account))
+                });
+                if sorted.windows(2).any(|w| {
+                    hived_transport_form(&w[0].account) == hived_transport_form(&w[1].account)
+                }) {
                     return Err(Error::field("the same beneficiary is listed twice"));
                 }
                 Ok(())
@@ -211,7 +215,9 @@ impl GrapheneSerialize for CommentOptionsExtension {
                 // canonical form rather than validation -- the digest is taken over
                 // these bytes -- so it happens whether or not the rules are enforced.
                 let mut sorted = list.clone();
-                sorted.sort_by(|a, b| a.account.cmp(&b.account));
+                sorted.sort_by(|a, b| {
+                    hived_transport_form(&a.account).cmp(&hived_transport_form(&b.account))
+                });
                 write_varint32(out, 0);
                 write_array(out, &sorted)
             }
@@ -1580,9 +1586,18 @@ impl Operation {
             Operation::WitnessSetProperties(o) => {
                 write_string(out, &o.owner)?;
                 // `props` is a flat_map: sorted by key, unique.
+                // Sorted by the transported key, for the reason in
+                // `write_sorted_account_set`: the wire order is what hived's flat_map is
+                // ordered by, and it is not always the order of the keys as given.
                 let mut props = o.props.clone();
-                props.sort_by(|a, b| a.key.cmp(&b.key));
-                if checks.on() && props.windows(2).any(|w| w[0].key == w[1].key) {
+                props.sort_by(|a, b| {
+                    hived_transport_form(&a.key).cmp(&hived_transport_form(&b.key))
+                });
+                if checks.on()
+                    && props
+                        .windows(2)
+                        .any(|w| hived_transport_form(&w[0].key) == hived_transport_form(&w[1].key))
+                {
                     return Err(Error::field(
                         "witness_set_properties lists the same key twice",
                     ));
@@ -1868,9 +1883,24 @@ fn write_sorted_account_set(
     accounts: &[String],
     what: &str,
 ) -> Result<()> {
+    // Ordered by the form the bytes actually carry, not by the string handed in.
+    //
+    // `write_string` puts every string through hived's transport form, so a name holding
+    // a control byte goes out as the five characters `u0000`. hived's `flat_set` is
+    // ordered by what is on the wire, so sorting the strings as given wrote them in an
+    // order the bytes were not in: parsing our own output and writing it again produced
+    // a *different* transaction, and a re-signed one would cover different bytes.
+    // `fuzz_targets/transaction.rs` found it as "serialization is not idempotent".
+    //
+    // Duplicates are judged on the same form, because two names that differ only in a
+    // control byte can collide once transported, and hived would see one entry twice.
     let mut sorted: Vec<&String> = accounts.iter().collect();
-    sorted.sort();
-    if checks.on() && sorted.windows(2).any(|w| w[0] == w[1]) {
+    sorted.sort_by(|a, b| hived_transport_form(a).cmp(&hived_transport_form(b)));
+    if checks.on()
+        && sorted
+            .windows(2)
+            .any(|w| hived_transport_form(w[0]) == hived_transport_form(w[1]))
+    {
         return Err(Error::field(format!("{what} lists the same account twice")));
     }
     write_array(out, &sorted)?;

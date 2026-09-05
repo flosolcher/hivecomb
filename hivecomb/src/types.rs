@@ -193,7 +193,7 @@ pub fn write_u64(out: &mut Vec<u8>, v: u64) {
 ///
 /// What does hold is that it settles after one pass: `u0000` contains nothing that gets
 /// transformed again. The fuzz targets assert exactly that, and found this asymmetry.
-fn hived_transport_form(s: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn hived_transport_form(s: &str) -> std::borrow::Cow<'_, str> {
     fn affected(c: char) -> bool {
         matches!(c, '\u{00}'..='\u{08}' | '\u{0b}' | '\u{0c}' | '\u{0e}'..='\u{1f}')
     }
