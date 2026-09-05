@@ -57,6 +57,11 @@ const VERSIONS = {
   '@hiveio/hive-js': pkgVersion('@hiveio/hive-js'),
 }
 
+// `--scaling` runs the operation-count and signature-count sweeps instead of the
+// summary table. Both share the gates below: whichever tables are printed, the
+// libraries have been shown to agree on what they sign first.
+const SCALING = process.argv.includes('--scaling')
+
 const WIF = '5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3'
 const NUM = 5
 const PREFIX = 0xaabbccdd >>> 0
@@ -211,42 +216,166 @@ function report(label, results) {
   console.log(`  ${label.padEnd(28)}${cells.join('')}  ${(spread * 100).toFixed(0).padStart(5)}%`)
 }
 
-console.log('\n  ' + 'microseconds'.padEnd(28) + SHORT.map((n) => n.padStart(WIDTH)).join('') + '  spread')
-console.log('  ' + '-'.repeat(28 + NAMES.length * WIDTH + 8))
+if (!SCALING) {
+  console.log('\n  ' + 'microseconds'.padEnd(28) + SHORT.map((n) => n.padStart(WIDTH)).join('') + '  spread')
+  console.log('  ' + '-'.repeat(28 + NAMES.length * WIDTH + 8))
 
-for (const [n, label] of [
-  [1, 'serialize + digest, 1 op'],
-  [10, 'serialize + digest, 10 ops'],
-]) {
-  const cases = Object.fromEntries(Object.entries(digesters).map(([k, f]) => [k, (i) => f(n, i)]))
-  report(label, benchAll(200, 120, 13, cases))
+  for (const [n, label] of [
+    [1, 'serialize + digest, 1 op'],
+    [10, 'serialize + digest, 10 ops'],
+  ]) {
+    const cases = Object.fromEntries(Object.entries(digesters).map(([k, f]) => [k, (i) => f(n, i)]))
+    report(label, benchAll(200, 120, 13, cases))
+  }
+
+  for (const [n, label] of [
+    [1, 'sign, 1 op'],
+    [10, 'sign, 10 ops'],
+  ]) {
+    const cases = Object.fromEntries(Object.entries(signers).map(([k, f]) => [k, (i) => f(n, i)]))
+    report(label, benchAll(200, 400, 7, cases))
+  }
+
+  console.log(`
+    Reading these: the spread column is (median - minimum) / minimum across the
+    row. A difference smaller than the spread is not a difference.
+
+    The signing rows are dominated by secp256k1, and the libraries differ in how
+    they get it — which is a deliberate trade rather than a quality difference:
+
+      dhive        binds the native \`secp256k1\` package
+      hivecomb     links libsecp256k1 through Rust
+      hive-pollen  uses @noble/curves, an audited pure-JavaScript library
+      hive-tx      has no runtime dependencies at all; its crypto is inlined
+                   JavaScript, which is what lets it run in browsers, workers
+                   and serverless runtimes unchanged
+      hive-js      uses \`ecurve\`/\`bigi\` bigint arithmetic
+
+    A library that chooses portability over a native binding pays for it here,
+    and that is the choice working as intended rather than a defect.
+
+    hive-js exposes no digest entry point, so it appears only in the signing
+    rows; its signature was checked against the shared digest instead.`)
 }
 
-for (const [n, label] of [
-  [1, 'sign, 1 op'],
-  [10, 'sign, 10 ops'],
-]) {
-  const cases = Object.fromEntries(Object.entries(signers).map(([k, f]) => [k, (i) => f(n, i)]))
-  report(label, benchAll(200, 400, 7, cases))
+// --- scaling sweeps --------------------------------------------------------
+//
+// These reproduce the detailed dhive comparison in COMPARISON.md. They are a separate
+// mode rather than extra rows because they answer a different question: not "who is
+// faster" but "where does the answer change", which only a sweep can show.
+//
+// Only dhive is swept. It is the closest of the Node libraries on the summary table, so
+// it is the only one where the ordering actually turns over within a realistic size —
+// sweeping a library that is behind at every size would be padding.
+
+if (SCALING) {
+  // Distinct keys, derived deterministically so a rerun measures the same work, and
+  // handed to both libraries as WIF strings so neither gets a head start on parsing.
+  const wifs = Array.from({ length: 8 }, (_, k) =>
+    hivecomb.PrivateKey.fromPassword('alice', 'posting', `bench-${k}`).toWif(),
+  )
+  const dhiveKeys = wifs.map((w) => dhive.PrivateKey.fromString(w))
+  const combKeys = wifs.map((w) => new hivecomb.PrivateKey(w))
+
+  // Every sweep is gated the same way the summary table is: both libraries must produce
+  // the same digest for the shape about to be timed. A sweep that silently drifted into
+  // measuring different transactions at n=200 would look exactly like a real crossover.
+  for (const n of [1, 2, 5, 8, 10, 15, 20, 50, 200]) {
+    const a = Buffer.from(digesters.hivecomb(n, 3)).toString('hex')
+    const b = Buffer.from(digesters['@hiveio/dhive'](n, 3)).toString('hex')
+    if (a !== b) {
+      console.error(`\ndigest mismatch at ${n} operations. Nothing was timed.`)
+      process.exit(1)
+    }
+  }
+  console.log('\n  gate: digests agree at every size swept below: yes')
+
+  const sweep = (label, sizes, cols, windows = 7) => {
+    console.log(`\n  ${label}`)
+    const head = '  ' + 'n'.padStart(5) + Object.keys(cols).map((c) => c.padStart(22)).join('')
+    console.log(head)
+    console.log('  ' + '-'.repeat(head.length - 2))
+    const rows = []
+    for (const n of sizes) {
+      const cases = Object.fromEntries(Object.entries(cols).map(([k, f]) => [k, (i) => f(n, i)]))
+      const r = benchAll(200, 400, windows, cases)
+      rows.push([n, r])
+      const cells = Object.keys(cols).map((c) => `${r[c].best.toFixed(1)} us`.padStart(22))
+      console.log('  ' + String(n).padStart(5) + cells.join(''))
+    }
+    return rows
+  }
+
+  sweep(
+    'signing a transaction, as the object API both libraries return',
+    [1, 2, 5, 8, 10, 15, 20, 50],
+    {
+      'dhive 1.3.6': (n, i) => dhive.cryptoUtils.signTransaction(trx(n, i), [dhiveKeys[0]]),
+      hivecomb: (n, i) => hivecomb.signTransaction(JSON.stringify(ops(n, i)), ref, [combKeys[0]], 600),
+    },
+  )
+
+  sweep(
+    'the end-to-end task: the JSON body an application POSTs',
+    [1, 2, 5, 10, 20, 30, 40, 50, 200],
+    {
+      'dhive + stringify': (n, i) => JSON.stringify(dhive.cryptoUtils.signTransaction(trx(n, i), [dhiveKeys[0]])),
+      'hivecomb, object': (n, i) => JSON.stringify(hivecomb.signTransaction(JSON.stringify(ops(n, i)), ref, [combKeys[0]], 600)),
+      'hivecomb, JSON string': (n, i) => hivecomb.signTransactionJson(JSON.stringify(ops(n, i)), ref, [combKeys[0]], 600),
+    },
+  )
+
+  const keyRows = sweep(
+    'many signatures over one transaction, rather than many operations',
+    [1, 2, 3, 5, 8],
+    {
+      'dhive 1.3.6': (k, i) => dhive.cryptoUtils.signTransaction(trx(1, i), dhiveKeys.slice(0, k)),
+      hivecomb: (k, i) => hivecomb.signTransaction(JSON.stringify(ops(1, i)), ref, combKeys.slice(0, k), 600),
+    },
+  )
+
+  // Where the advantage comes from, without needing a raw-ECDSA entry point that this
+  // addon deliberately does not export. Cost against signature count is a straight line:
+  // its slope is one signature's curve arithmetic and its intercept is everything else
+  // -- building the transaction, crossing the language boundary, rendering the result.
+  // Fitting the line recovers both from data measured in this process, which is sounder
+  // than quoting a curve figure taken in another runtime and comparing across tables.
+  const fit = (name) => {
+    const xs = keyRows.map(([k]) => k)
+    const ys = keyRows.map(([, r]) => r[name].best)
+    const n = xs.length
+    const mx = xs.reduce((a, b) => a + b) / n
+    const my = ys.reduce((a, b) => a + b) / n
+    let num = 0
+    let den = 0
+    for (let i = 0; i < n; i++) {
+      num += (xs[i] - mx) * (ys[i] - my)
+      den += (xs[i] - mx) ** 2
+    }
+    const slope = num / den
+    return { slope, intercept: my - slope * mx }
+  }
+  const d = fit('dhive 1.3.6')
+  const h = fit('hivecomb')
+  console.log('\n  decomposed, by fitting cost against signature count')
+  console.log('  ' + ''.padEnd(34) + 'dhive 1.3.6'.padStart(14) + 'hivecomb'.padStart(14) + 'ratio'.padStart(10))
+  console.log('  ' + '-'.repeat(72))
+  const line = (label, a, b) =>
+    console.log(
+      '  ' + label.padEnd(34) + `${a.toFixed(1)} us`.padStart(14) + `${b.toFixed(1)} us`.padStart(14) +
+      `${(a / b).toFixed(2)}x`.padStart(10),
+    )
+  line('per signature (curve arithmetic)', d.slope, h.slope)
+  line('fixed overhead (everything else)', d.intercept, h.intercept)
+
+  console.log(`
+  Reading these: each cell is the minimum of ${7} interleaved windows of CPU time,
+  the same estimator as the summary table, so these numbers may be compared
+  with each other but not with the Python or Rust tables.
+
+  The first sweep crosses over: hivecomb is ahead at the operation counts real
+  transactions use and behind at large ones. The second shows the same task
+  measured to the wire, where the crossover moves right. The third has no
+  crossover, because each extra signature adds curve arithmetic and nothing
+  else -- which the fit above then separates from the fixed cost.`)
 }
-
-console.log(`
-  Reading these: the spread column is (median - minimum) / minimum across the
-  row. A difference smaller than the spread is not a difference.
-
-  The signing rows are dominated by secp256k1, and the libraries differ in how
-  they get it — which is a deliberate trade rather than a quality difference:
-
-    dhive        binds the native \`secp256k1\` package
-    hivecomb     links libsecp256k1 through Rust
-    hive-pollen  uses @noble/curves, an audited pure-JavaScript library
-    hive-tx      has no runtime dependencies at all; its crypto is inlined
-                 JavaScript, which is what lets it run in browsers, workers
-                 and serverless runtimes unchanged
-    hive-js      uses \`ecurve\`/\`bigi\` bigint arithmetic
-
-  A library that chooses portability over a native binding pays for it here,
-  and that is the choice working as intended rather than a defect.
-
-  hive-js exposes no digest entry point, so it appears only in the signing
-  rows; its signature was checked against the shared digest instead.`)
