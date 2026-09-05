@@ -348,17 +348,16 @@ pub struct HexBytes(pub Vec<u8>);
 impl HexBytes {
     /// Parse a hex string.
     pub fn from_hex(s: &str) -> Result<Self> {
-        let s = s.trim();
-        if !s.len().is_multiple_of(2) {
-            return Err(Error::field("hex buffer has an odd number of characters"));
-        }
-        (0..s.len() / 2)
-            .map(|i| {
-                u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-                    .map_err(|_| Error::field("buffer is not valid hex"))
-            })
-            .collect::<Result<Vec<u8>>>()
+        // Byte-oriented; see `crate::hex`, which exists because slicing a `&str` at
+        // byte offsets panics on any multi-byte character.
+        crate::hex::decode_vec(s.trim())
             .map(HexBytes)
+            .map_err(|e| match e {
+                crate::hex::HexError::Length => {
+                    Error::field("hex buffer has an odd number of characters")
+                }
+                crate::hex::HexError::NotHex => Error::field("buffer is not valid hex"),
+            })
     }
 
     /// Lowercase hex.
@@ -825,10 +824,8 @@ impl BlockId {
             )));
         }
         let mut out = [0u8; 20];
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-                .map_err(|_| Error::field("block id is not valid hex"))?;
-        }
+        crate::hex::decode_exact(s, &mut out)
+            .map_err(|_| Error::field("block id is not valid hex"))?;
         Ok(BlockId(out))
     }
 

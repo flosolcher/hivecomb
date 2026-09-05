@@ -13,7 +13,7 @@
 //! Not a fuzzer. It is a deterministic sweep, cheap enough to run on every commit; a
 //! real fuzzing target would be a good addition and is not here yet.
 
-use hivecomb::operations::Operation;
+use hivecomb::operations::{BlockId, HexBytes, Operation};
 use hivecomb::{BlockRef, Chain, ChainId, PrivateKey, PublicKey, Signature, Transaction};
 
 /// A tiny deterministic PRNG. `rand` is a dependency of the crate, but a fixed
@@ -188,10 +188,14 @@ fn hex_parsers_do_not_panic_on_multibyte_text_of_the_right_byte_length() {
     assert!(PrivateKey::from_hex(&private_key).is_err());
     assert!(BlockRef::from_block_id(&block_id).is_err());
     assert!(PublicKey::from_hex(&public_key).is_err());
+    assert!(BlockId::from_hex(&block_id).is_err());
+    assert!(HexBytes::from_hex(&public_key).is_err());
 
     // And the same parsers still accept what they should, so the above is not a test of
     // five parsers that now reject everything.
     assert!(ChainId::from_hex(&"ab".repeat(32)).is_ok());
     assert!(BlockRef::from_block_id(&"ab".repeat(20)).is_ok());
     assert!(PrivateKey::from_hex(&"11".repeat(32)).is_ok());
+    assert!(BlockId::from_hex(&"ab".repeat(20)).is_ok());
+    assert!(HexBytes::from_hex("00ff").is_ok());
 }
