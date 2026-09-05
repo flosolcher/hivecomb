@@ -58,6 +58,9 @@ pub mod bip39;
 pub mod chain;
 pub mod chains;
 pub mod error;
+
+/// Hex decoding that cannot panic on the text a node or a user hands over.
+mod hex;
 pub mod keys;
 #[cfg(feature = "memo")]
 pub mod memo;

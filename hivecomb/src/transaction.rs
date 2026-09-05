@@ -80,10 +80,8 @@ impl BlockRef {
             )));
         }
         let mut bytes = [0u8; 20];
-        for (i, byte) in bytes.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
-                .map_err(|_| Error::field("block id is not valid hex"))?;
-        }
+        crate::hex::decode_exact(hex, &mut bytes)
+            .map_err(|_| Error::field("block id is not valid hex"))?;
         let block_num = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let ref_block_prefix = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         Ok(BlockRef {

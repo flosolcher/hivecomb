@@ -34,17 +34,15 @@ impl PublicKey {
 
     /// Parse a hex-encoded public key.
     pub fn from_hex(s: &str) -> Result<Self> {
-        let s = s.trim();
-        if !s.len().is_multiple_of(2) {
-            return Err(Error::key("public key hex has an odd number of characters"));
-        }
-        let bytes: Result<Vec<u8>> = (0..s.len() / 2)
-            .map(|i| {
-                u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-                    .map_err(|_| Error::key("public key is not valid hex"))
-            })
-            .collect();
-        Self::from_bytes(&bytes?)
+        // Byte-oriented, because `s.len()` counts bytes while `&s[i..i + 2]` demands
+        // char boundaries -- see `crate::hex`, which exists because this panicked.
+        let bytes = crate::hex::decode_vec(s.trim()).map_err(|e| match e {
+            crate::hex::HexError::Length => {
+                Error::key("public key hex has an odd number of characters")
+            }
+            crate::hex::HexError::NotHex => Error::key("public key is not valid hex"),
+        })?;
+        Self::from_bytes(&bytes)
     }
 
     /// Parse a prefixed, Graphene-checksummed public key such as `STM7...`.

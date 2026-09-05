@@ -67,10 +67,8 @@ impl ChainId {
             )));
         }
         let mut out = [0u8; CHAIN_ID_LEN];
-        for (i, byte) in out.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-                .map_err(|_| Error::Chain("chain id is not valid hex".into()))?;
-        }
+        crate::hex::decode_exact(s, &mut out)
+            .map_err(|_| Error::Chain("chain id is not valid hex".into()))?;
         Ok(ChainId(out))
     }
 

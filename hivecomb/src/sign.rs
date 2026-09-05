@@ -111,10 +111,8 @@ impl Signature {
             )));
         }
         let mut buf = [0u8; SIGNATURE_LEN];
-        for (i, byte) in buf.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-                .map_err(|_| Error::sig("signature is not valid hex"))?;
-        }
+        crate::hex::decode_exact(s, &mut buf)
+            .map_err(|_| Error::sig("signature is not valid hex"))?;
         Self::from_bytes(&buf)
     }
 

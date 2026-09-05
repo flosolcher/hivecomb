@@ -14,7 +14,7 @@
 //! real fuzzing target would be a good addition and is not here yet.
 
 use hivecomb::operations::Operation;
-use hivecomb::{Chain, PrivateKey, PublicKey, Transaction};
+use hivecomb::{BlockRef, Chain, ChainId, PrivateKey, PublicKey, Signature, Transaction};
 
 /// A tiny deterministic PRNG. `rand` is a dependency of the crate, but a fixed
 /// generator keeps a failure reproducible from the seed printed in the message.
@@ -146,4 +146,52 @@ fn truncating_a_valid_transaction_never_panics() {
     // vacuously testing a parser that rejects everything.
     let reparsed = Transaction::from_body_bytes(&full, Chain::Hive).expect("round trip");
     assert_eq!(reparsed, signed.transaction);
+}
+
+/// Every hex parser, fed text whose byte length is right and whose char boundaries are
+/// not.
+///
+/// Each of these checked `s.len()` -- a count of **bytes** -- and then sliced
+/// `&s[i * 2..i * 2 + 2]`, which demands **char boundaries**. One two-byte character in
+/// place of two ASCII ones keeps the byte length correct and puts a slice boundary
+/// inside it, and the slice panicked. Four of the five checked an exact length first,
+/// which is exactly why that check is no protection: 61 ASCII characters plus one
+/// two-byte character is still 64 bytes.
+///
+/// `fuzz/fuzz_targets/keys.rs` found this in `PublicKey::from_hex` on its first real
+/// run. The other four were found by looking for the same shape, and this test is here
+/// so that neither the shape nor the reasoning has to be trusted again.
+#[test]
+fn hex_parsers_do_not_panic_on_multibyte_text_of_the_right_byte_length() {
+    // U+041E is two bytes, so each of these is the exact byte length its parser demands
+    // while being one character short of it.
+    // Bound outside the `format!`: the braces of a `\u{..}` escape would be read as
+    // a placeholder inside one.
+    const TWO_BYTE: char = '\u{041e}';
+    let chain_id = format!("{}{TWO_BYTE}b", "a".repeat(61)); //  64 bytes
+    let signature = format!("{}{TWO_BYTE}b", "a".repeat(127)); // 130 bytes
+    let private_key = format!("{}{TWO_BYTE}b", "a".repeat(61)); //  64 bytes
+    let block_id = format!("{}{TWO_BYTE}b", "a".repeat(37)); //  40 bytes
+    let public_key = format!("{}{TWO_BYTE}b", "a".repeat(63)); //  66 bytes, even
+
+    assert_eq!(
+        chain_id.len(),
+        64,
+        "the byte-length check must be the one that passes"
+    );
+    assert_eq!(signature.len(), 130);
+    assert_eq!(private_key.len(), 64);
+    assert_eq!(block_id.len(), 40);
+
+    assert!(ChainId::from_hex(&chain_id).is_err());
+    assert!(Signature::from_hex(&signature).is_err());
+    assert!(PrivateKey::from_hex(&private_key).is_err());
+    assert!(BlockRef::from_block_id(&block_id).is_err());
+    assert!(PublicKey::from_hex(&public_key).is_err());
+
+    // And the same parsers still accept what they should, so the above is not a test of
+    // five parsers that now reject everything.
+    assert!(ChainId::from_hex(&"ab".repeat(32)).is_ok());
+    assert!(BlockRef::from_block_id(&"ab".repeat(20)).is_ok());
+    assert!(PrivateKey::from_hex(&"11".repeat(32)).is_ok());
 }
