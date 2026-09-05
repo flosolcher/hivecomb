@@ -167,8 +167,14 @@ pub enum CommentOptionsExtension {
     Beneficiaries(Vec<Beneficiary>),
 }
 
-impl GrapheneSerialize for CommentOptionsExtension {
-    fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+impl CommentOptionsExtension {
+    /// hived's `validate()` rules for this extension.
+    ///
+    /// Separate from [`GrapheneSerialize::append_to`] rather than folded into it, so
+    /// that an extension read off the wire can be written back unchanged. `append_to`
+    /// is a trait method and cannot take the [`Checks`] flag the rest of the walk
+    /// threads, so this is the one place the two are split by hand.
+    fn validate(&self) -> Result<()> {
         match self {
             CommentOptionsExtension::Beneficiaries(list) => {
                 if list.is_empty() {
@@ -186,12 +192,26 @@ impl GrapheneSerialize for CommentOptionsExtension {
                         "beneficiary weights total {total} basis points, which exceeds 10000"
                     )));
                 }
-                // hived requires the beneficiary list sorted by account and unique.
                 let mut sorted = list.clone();
                 sorted.sort_by(|a, b| a.account.cmp(&b.account));
                 if sorted.windows(2).any(|w| w[0].account == w[1].account) {
                     return Err(Error::field("the same beneficiary is listed twice"));
                 }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl GrapheneSerialize for CommentOptionsExtension {
+    fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
+        match self {
+            CommentOptionsExtension::Beneficiaries(list) => {
+                // hived requires the beneficiary list sorted by account. Sorting is
+                // canonical form rather than validation -- the digest is taken over
+                // these bytes -- so it happens whether or not the rules are enforced.
+                let mut sorted = list.clone();
+                sorted.sort_by(|a, b| a.account.cmp(&b.account));
                 write_varint32(out, 0);
                 write_array(out, &sorted)
             }
@@ -1245,8 +1265,33 @@ pub enum Operation {
 ///
 /// One helper for every length bound rather than the check written out at each site,
 /// so the four memo-carrying operations cannot drift apart from one another.
-fn check_len(value: &str, max: usize, what: &str) -> Result<()> {
-    if value.len() > max {
+/// Whether a serialization walk is also checking hived's `validate()` rules.
+///
+/// hived keeps these apart: its deserializer is structural, and `validate()` is a
+/// separate step a node runs before accepting a transaction. This crate used to fold
+/// them together in the serializer, which made the reader accept operations the writer
+/// then refused -- a `custom_json` with no auths would parse off the wire and fail to
+/// serialize back, so parse and serialize were not inverses. `fuzz_targets/reader.rs`
+/// and `fuzz_targets/transaction.rs` both found that within a minute of first running.
+///
+/// One walk serves both, rather than a second one written out beside it: a parallel
+/// match over sixty operations would be the same rules twice, free to drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Checks {
+    /// Serialize only. Anything that parsed must come back out.
+    Skip,
+    /// Apply hived's `validate()` rules as well; the bytes are discarded.
+    Enforce,
+}
+
+impl Checks {
+    fn on(self) -> bool {
+        self == Checks::Enforce
+    }
+}
+
+fn check_len(checks: Checks, value: &str, max: usize, what: &str) -> Result<()> {
+    if checks.on() && value.len() > max {
         return Err(Error::field(format!(
             "{what} is {} bytes; hived allows at most {max}",
             value.len()
@@ -1346,8 +1391,34 @@ impl Operation {
         }
     }
 
+    /// Check hived's `validate()` rules, without producing anything.
+    ///
+    /// Separate from serialization on purpose, and this is the shape hived itself has:
+    /// deserializing is structural, and `validate()` is a distinct step a node runs
+    /// before it will accept a transaction. Serializing an operation therefore says
+    /// nothing about whether a node will take it -- [`crate::Transaction::sign`] calls
+    /// this, so the ordinary path is still checked before anything is signed.
+    ///
+    /// It runs the serializer into a buffer it throws away. That costs a serialization
+    /// -- fractions of a microsecond per operation, against the ~70 that signing takes
+    /// -- and buys a single copy of the rules rather than two that can drift.
+    pub fn validate(&self) -> Result<()> {
+        let mut discarded = Vec::new();
+        self.append_body(&mut discarded, Checks::Enforce)?;
+        if let Operation::CommentOptions(o) = self {
+            for extension in &o.extensions {
+                extension.validate()?;
+            }
+        }
+        Ok(())
+    }
+
     /// Serialize just the operation body, without the variant tag.
-    fn append_body(&self, out: &mut Vec<u8>) -> Result<()> {
+    ///
+    /// `checks` decides whether hived's `validate()` rules are applied on the way past;
+    /// see [`Checks`]. Serialization proper passes `Skip`, so that anything the reader
+    /// accepted comes back out.
+    fn append_body(&self, out: &mut Vec<u8>, checks: Checks) -> Result<()> {
         match self {
             Operation::Vote(o) => {
                 write_string(out, &o.voter)?;
@@ -1356,9 +1427,10 @@ impl Operation {
                 write_i16(out, o.weight);
             }
             Operation::Comment(o) => {
-                check_len(&o.title, MAX_TITLE_LEN, "comment title")?;
-                check_len(&o.permlink, MAX_PERMLINK_LEN, "comment permlink")?;
+                check_len(checks, &o.title, MAX_TITLE_LEN, "comment title")?;
+                check_len(checks, &o.permlink, MAX_PERMLINK_LEN, "comment permlink")?;
                 check_len(
+                    checks,
                     &o.parent_permlink,
                     MAX_PERMLINK_LEN,
                     "comment parent_permlink",
@@ -1390,7 +1462,7 @@ impl Operation {
                 write_string(out, &o.json_metadata)?;
             }
             Operation::WitnessUpdate(o) => {
-                check_len(&o.url, MAX_WITNESS_URL_LEN, "witness_update url")?;
+                check_len(checks, &o.url, MAX_WITNESS_URL_LEN, "witness_update url")?;
                 write_string(out, &o.owner)?;
                 write_string(out, &o.url)?;
                 o.block_signing_key.append_to(out)?;
@@ -1453,15 +1525,30 @@ impl Operation {
                 write_bool(out, o.approve);
             }
             Operation::CustomBinary(o) => {
-                if o.id.len() > MAX_CUSTOM_ID_LEN {
+                if checks.on() && o.id.len() > MAX_CUSTOM_ID_LEN {
                     return Err(Error::field(format!(
                         "custom_binary id is {} bytes; hived allows at most {MAX_CUSTOM_ID_LEN}",
                         o.id.len()
                     )));
                 }
-                write_sorted_account_set(out, &o.required_owner_auths, "required_owner_auths")?;
-                write_sorted_account_set(out, &o.required_active_auths, "required_active_auths")?;
-                write_sorted_account_set(out, &o.required_posting_auths, "required_posting_auths")?;
+                write_sorted_account_set(
+                    out,
+                    checks,
+                    &o.required_owner_auths,
+                    "required_owner_auths",
+                )?;
+                write_sorted_account_set(
+                    out,
+                    checks,
+                    &o.required_active_auths,
+                    "required_active_auths",
+                )?;
+                write_sorted_account_set(
+                    out,
+                    checks,
+                    &o.required_posting_auths,
+                    "required_posting_auths",
+                )?;
                 // `required_auths` is a plain vector<authority>, not a flat_set, so it
                 // keeps the caller's order.
                 write_array(out, &o.required_auths)?;
@@ -1495,7 +1582,7 @@ impl Operation {
                 // `props` is a flat_map: sorted by key, unique.
                 let mut props = o.props.clone();
                 props.sort_by(|a, b| a.key.cmp(&b.key));
-                if props.windows(2).any(|w| w[0].key == w[1].key) {
+                if checks.on() && props.windows(2).any(|w| w[0].key == w[1].key) {
                     return Err(Error::field(
                         "witness_set_properties lists the same key twice",
                     ));
@@ -1504,7 +1591,7 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::Transfer(o) => {
-                check_len(&o.memo, MAX_MEMO_LEN, "transfer memo")?;
+                check_len(checks, &o.memo, MAX_MEMO_LEN, "transfer memo")?;
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
                 o.amount.append_to(out)?;
@@ -1550,13 +1637,13 @@ impl Operation {
                 write_string(out, &o.proxy)?;
             }
             Operation::Custom(o) => {
-                if o.data.0.len() > MAX_CUSTOM_DATA_LEN {
+                if checks.on() && o.data.0.len() > MAX_CUSTOM_DATA_LEN {
                     return Err(Error::field(format!(
                         "custom data is {} bytes; hived allows at most {MAX_CUSTOM_DATA_LEN}",
                         o.data.0.len()
                     )));
                 }
-                write_sorted_account_set(out, &o.required_auths, "required_auths")?;
+                write_sorted_account_set(out, checks, &o.required_auths, "required_auths")?;
                 write_u16(out, o.id);
                 o.data.append_to(out)?;
             }
@@ -1565,13 +1652,13 @@ impl Operation {
                 write_string(out, &o.permlink)?;
             }
             Operation::CustomJson(o) => {
-                if o.id.len() > MAX_CUSTOM_ID_LEN {
+                if checks.on() && o.id.len() > MAX_CUSTOM_ID_LEN {
                     return Err(Error::field(format!(
                         "custom_json id is {} bytes; hived allows at most {MAX_CUSTOM_ID_LEN}",
                         o.id.len()
                     )));
                 }
-                if o.json.len() > MAX_CUSTOM_DATA_LEN {
+                if checks.on() && o.json.len() > MAX_CUSTOM_DATA_LEN {
                     return Err(Error::field(format!(
                         "custom_json json is {} bytes; hived allows at most \
                          {MAX_CUSTOM_DATA_LEN}. The whole transaction would be rejected, \
@@ -1580,8 +1667,9 @@ impl Operation {
                         o.json.len()
                     )));
                 }
-                if o.required_auths.len() + o.required_posting_auths.len()
-                    > MAX_AUTHORITY_MEMBERSHIP
+                if checks.on()
+                    && o.required_auths.len() + o.required_posting_auths.len()
+                        > MAX_AUTHORITY_MEMBERSHIP
                 {
                     return Err(Error::field(format!(
                         "custom_json names {} accounts across required_auths and \
@@ -1590,13 +1678,19 @@ impl Operation {
                         o.required_auths.len() + o.required_posting_auths.len()
                     )));
                 }
-                if o.required_auths.is_empty() && o.required_posting_auths.is_empty() {
+                if checks.on() && o.required_auths.is_empty() && o.required_posting_auths.is_empty()
+                {
                     return Err(Error::field(
                         "custom_json needs at least one required_auths or required_posting_auths entry",
                     ));
                 }
-                write_sorted_account_set(out, &o.required_auths, "required_auths")?;
-                write_sorted_account_set(out, &o.required_posting_auths, "required_posting_auths")?;
+                write_sorted_account_set(out, checks, &o.required_auths, "required_auths")?;
+                write_sorted_account_set(
+                    out,
+                    checks,
+                    &o.required_posting_auths,
+                    "required_posting_auths",
+                )?;
                 write_string(out, &o.id)?;
                 write_string(out, &o.json)?;
             }
@@ -1645,14 +1739,14 @@ impl Operation {
                 o.extensions.append_to(out)?;
             }
             Operation::TransferToSavings(o) => {
-                check_len(&o.memo, MAX_MEMO_LEN, "transfer_to_savings memo")?;
+                check_len(checks, &o.memo, MAX_MEMO_LEN, "transfer_to_savings memo")?;
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
                 o.amount.append_to(out)?;
                 write_string(out, &o.memo)?;
             }
             Operation::TransferFromSavings(o) => {
-                check_len(&o.memo, MAX_MEMO_LEN, "transfer_from_savings memo")?;
+                check_len(checks, &o.memo, MAX_MEMO_LEN, "transfer_from_savings memo")?;
                 write_string(out, &o.from)?;
                 write_u32(out, o.request_id);
                 write_string(out, &o.to)?;
@@ -1690,11 +1784,17 @@ impl Operation {
             }
             Operation::CreateProposal(o) => {
                 check_len(
+                    checks,
                     &o.subject,
                     MAX_PROPOSAL_SUBJECT_LEN,
                     "create_proposal subject",
                 )?;
-                check_len(&o.permlink, MAX_PERMLINK_LEN, "create_proposal permlink")?;
+                check_len(
+                    checks,
+                    &o.permlink,
+                    MAX_PERMLINK_LEN,
+                    "create_proposal permlink",
+                )?;
                 write_string(out, &o.creator)?;
                 write_string(out, &o.receiver)?;
                 o.start_date.append_to(out)?;
@@ -1706,22 +1806,28 @@ impl Operation {
             }
             Operation::UpdateProposalVotes(o) => {
                 write_string(out, &o.voter)?;
-                write_sorted_proposal_ids(out, &o.proposal_ids)?;
+                write_sorted_proposal_ids(out, checks, &o.proposal_ids)?;
                 write_bool(out, o.approve);
                 o.extensions.append_to(out)?;
             }
             Operation::RemoveProposal(o) => {
                 write_string(out, &o.proposal_owner)?;
-                write_sorted_proposal_ids(out, &o.proposal_ids)?;
+                write_sorted_proposal_ids(out, checks, &o.proposal_ids)?;
                 o.extensions.append_to(out)?;
             }
             Operation::UpdateProposal(o) => {
                 check_len(
+                    checks,
                     &o.subject,
                     MAX_PROPOSAL_SUBJECT_LEN,
                     "update_proposal subject",
                 )?;
-                check_len(&o.permlink, MAX_PERMLINK_LEN, "update_proposal permlink")?;
+                check_len(
+                    checks,
+                    &o.permlink,
+                    MAX_PERMLINK_LEN,
+                    "update_proposal permlink",
+                )?;
                 write_u64(out, o.proposal_id);
                 write_string(out, &o.creator)?;
                 o.daily_pay.append_to(out)?;
@@ -1735,7 +1841,7 @@ impl Operation {
                 o.amount.append_to(out)?;
             }
             Operation::RecurrentTransfer(o) => {
-                check_len(&o.memo, MAX_MEMO_LEN, "recurrent_transfer memo")?;
+                check_len(checks, &o.memo, MAX_MEMO_LEN, "recurrent_transfer memo")?;
                 write_string(out, &o.from)?;
                 write_string(out, &o.to)?;
                 o.amount.append_to(out)?;
@@ -1756,10 +1862,15 @@ impl Operation {
 /// passed, with no dedup, so a transaction with several auths could go on the wire in
 /// an order hived's deserializer does not produce — the signature then covers bytes
 /// the node will not reconstruct.
-fn write_sorted_account_set(out: &mut Vec<u8>, accounts: &[String], what: &str) -> Result<()> {
+fn write_sorted_account_set(
+    out: &mut Vec<u8>,
+    checks: Checks,
+    accounts: &[String],
+    what: &str,
+) -> Result<()> {
     let mut sorted: Vec<&String> = accounts.iter().collect();
     sorted.sort();
-    if sorted.windows(2).any(|w| w[0] == w[1]) {
+    if checks.on() && sorted.windows(2).any(|w| w[0] == w[1]) {
         return Err(Error::field(format!("{what} lists the same account twice")));
     }
     write_array(out, &sorted)?;
@@ -1767,16 +1878,16 @@ fn write_sorted_account_set(out: &mut Vec<u8>, accounts: &[String], what: &str) 
 }
 
 /// Write a `flat_set<int64_t>` of proposal ids: sorted, unique.
-fn write_sorted_proposal_ids(out: &mut Vec<u8>, ids: &[u64]) -> Result<()> {
+fn write_sorted_proposal_ids(out: &mut Vec<u8>, checks: Checks, ids: &[u64]) -> Result<()> {
     let mut sorted = ids.to_vec();
     sorted.sort_unstable();
-    if sorted.windows(2).any(|w| w[0] == w[1]) {
+    if checks.on() && sorted.windows(2).any(|w| w[0] == w[1]) {
         return Err(Error::field("proposal_ids lists the same id twice"));
     }
-    if sorted.is_empty() {
+    if checks.on() && sorted.is_empty() {
         return Err(Error::field("proposal_ids is empty"));
     }
-    if sorted.len() > MAX_PROPOSAL_IDS {
+    if checks.on() && sorted.len() > MAX_PROPOSAL_IDS {
         return Err(Error::field(format!(
             "proposal_ids has {} entries; hived allows at most {MAX_PROPOSAL_IDS}",
             sorted.len()
@@ -1789,7 +1900,7 @@ fn write_sorted_proposal_ids(out: &mut Vec<u8>, ids: &[u64]) -> Result<()> {
 impl GrapheneSerialize for Operation {
     fn append_to(&self, out: &mut Vec<u8>) -> Result<()> {
         write_varint32(out, self.id().as_u32());
-        self.append_body(out)
+        self.append_body(out, Checks::Skip)
     }
 }
 
@@ -2644,7 +2755,7 @@ mod tests {
             id: "x".into(),
             json: "{}".into(),
         });
-        assert!(dup.to_wire().is_err());
+        assert!(dup.validate().is_err());
     }
 
     #[test]
@@ -2655,7 +2766,7 @@ mod tests {
             id: "x".repeat(33),
             json: "{}".into(),
         });
-        assert!(too_long.to_wire().is_err());
+        assert!(too_long.validate().is_err());
 
         let no_auths = Operation::CustomJson(CustomJson {
             required_auths: vec![],
@@ -2663,7 +2774,7 @@ mod tests {
             id: "x".into(),
             json: "{}".into(),
         });
-        assert!(no_auths.to_wire().is_err());
+        assert!(no_auths.validate().is_err());
     }
 
     #[test]
@@ -2886,7 +2997,7 @@ mod tests {
                 },
             ])],
         });
-        assert!(op.to_wire().is_err(), "11000 basis points must be refused");
+        assert!(op.validate().is_err(), "11000 basis points must be refused");
     }
 
     #[test]
@@ -2908,7 +3019,7 @@ mod tests {
             proposal_ids: vec![3, 3],
             extensions: NoExtensions,
         });
-        assert!(dup.to_wire().is_err());
+        assert!(dup.validate().is_err());
     }
 
     #[test]
@@ -2990,11 +3101,11 @@ mod tests {
             })
         };
         assert!(
-            at_limit(MAX_CUSTOM_DATA_LEN).to_wire().is_ok(),
+            at_limit(MAX_CUSTOM_DATA_LEN).validate().is_ok(),
             "exactly {MAX_CUSTOM_DATA_LEN} bytes is within the limit, not past it"
         );
         let err = at_limit(MAX_CUSTOM_DATA_LEN + 1)
-            .to_wire()
+            .validate()
             .expect_err("one byte over must be refused");
         let text = err.to_string();
         assert!(
@@ -3020,8 +3131,8 @@ mod tests {
                 data: HexBytes(vec![0x5a; n]),
             })
         };
-        assert!(op(MAX_CUSTOM_DATA_LEN).to_wire().is_ok());
-        assert!(op(MAX_CUSTOM_DATA_LEN + 1).to_wire().is_err());
+        assert!(op(MAX_CUSTOM_DATA_LEN).validate().is_ok());
+        assert!(op(MAX_CUSTOM_DATA_LEN + 1).validate().is_err());
     }
 
     /// The cap is hived's, not this crate's invention.
@@ -3053,8 +3164,8 @@ mod tests {
                 memo: memo.into(),
             })
         };
-        assert!(transfer(&"m".repeat(MAX_MEMO_LEN)).to_wire().is_ok());
-        assert!(transfer(&"m".repeat(MAX_MEMO_LEN + 1)).to_wire().is_err());
+        assert!(transfer(&"m".repeat(MAX_MEMO_LEN)).validate().is_ok());
+        assert!(transfer(&"m".repeat(MAX_MEMO_LEN + 1)).validate().is_err());
 
         let comment = |title: &str, permlink: &str| {
             Operation::Comment(Comment {
@@ -3070,14 +3181,14 @@ mod tests {
         let t = "t".repeat(MAX_TITLE_LEN);
         let p = "p".repeat(MAX_PERMLINK_LEN);
         assert!(
-            comment(&t, &p).to_wire().is_ok(),
+            comment(&t, &p).validate().is_ok(),
             "both exactly at the bound"
         );
         assert!(comment(&"t".repeat(MAX_TITLE_LEN + 1), &p)
-            .to_wire()
+            .validate()
             .is_err());
         assert!(comment(&t, &"p".repeat(MAX_PERMLINK_LEN + 1))
-            .to_wire()
+            .validate()
             .is_err());
     }
 
@@ -3134,7 +3245,7 @@ mod tests {
         let _ = PointInTime::from_unix(0);
         for op in ops {
             let name = op.id().name();
-            assert!(op.to_wire().is_err(), "{name} did not bound its memo");
+            assert!(op.validate().is_err(), "{name} did not bound its memo");
         }
     }
 
@@ -3163,14 +3274,14 @@ mod tests {
         };
         let subj = "s".repeat(MAX_PROPOSAL_SUBJECT_LEN);
         assert!(
-            proposal(&subj, "p").to_wire().is_ok(),
+            proposal(&subj, "p").validate().is_ok(),
             "exactly 80 is allowed"
         );
         assert!(proposal(&"s".repeat(MAX_PROPOSAL_SUBJECT_LEN + 1), "p")
-            .to_wire()
+            .validate()
             .is_err());
         assert!(proposal(&subj, &"p".repeat(MAX_PERMLINK_LEN + 1))
-            .to_wire()
+            .validate()
             .is_err());
 
         let witness = |url: &str| {
@@ -3190,11 +3301,11 @@ mod tests {
             })
         };
         assert!(
-            witness(&"u".repeat(MAX_WITNESS_URL_LEN)).to_wire().is_ok(),
+            witness(&"u".repeat(MAX_WITNESS_URL_LEN)).validate().is_ok(),
             "2048 allowed"
         );
         assert!(witness(&"u".repeat(MAX_WITNESS_URL_LEN + 1))
-            .to_wire()
+            .validate()
             .is_err());
     }
 
@@ -3209,9 +3320,9 @@ mod tests {
                 extensions: NoExtensions,
             })
         };
-        assert!(votes(0).to_wire().is_err(), "empty is refused");
-        assert!(votes(MAX_PROPOSAL_IDS as u64).to_wire().is_ok());
-        assert!(votes(MAX_PROPOSAL_IDS as u64 + 1).to_wire().is_err());
+        assert!(votes(0).validate().is_err(), "empty is refused");
+        assert!(votes(MAX_PROPOSAL_IDS as u64).validate().is_ok());
+        assert!(votes(MAX_PROPOSAL_IDS as u64 + 1).validate().is_err());
     }
 
     /// The constants are hived's, restated. Pinned so a change has to be deliberate.
@@ -3278,7 +3389,7 @@ mod tests {
             ],
             extensions: NoExtensions,
         });
-        assert!(dup.to_wire().is_err());
+        assert!(dup.validate().is_err());
     }
 
     #[test]

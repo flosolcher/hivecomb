@@ -14,7 +14,10 @@
 //! real fuzzing target would be a good addition and is not here yet.
 
 use hivecomb::operations::{BlockId, HexBytes, Operation};
-use hivecomb::{BlockRef, Chain, ChainId, PrivateKey, PublicKey, Signature, Transaction};
+use hivecomb::{
+    BlockRef, Chain, ChainId, GrapheneDeserialize, GrapheneSerialize, PrivateKey, PublicKey,
+    Signature, Transaction,
+};
 
 /// A tiny deterministic PRNG. `rand` is a dependency of the crate, but a fixed
 /// generator keeps a failure reproducible from the seed printed in the message.
@@ -198,4 +201,66 @@ fn hex_parsers_do_not_panic_on_multibyte_text_of_the_right_byte_length() {
     assert!(PrivateKey::from_hex(&"11".repeat(32)).is_ok());
     assert!(BlockId::from_hex(&"ab".repeat(20)).is_ok());
     assert!(HexBytes::from_hex("00ff").is_ok());
+}
+
+/// Anything that parses must serialize back, and validity is a separate question.
+///
+/// The two inputs here are the exact bytes `fuzz_targets/reader.rs` and
+/// `fuzz_targets/transaction.rs` crashed on the first time the fuzz jobs ran: a
+/// `custom_json` with no auths at all, and an `update_proposal_votes` with no proposal
+/// ids. Both parse -- hived's deserializer would take them too -- and both used to fail
+/// to re-serialize, because this crate folded hived's `validate()` rules into its
+/// serializer. The bytes a digest is taken over were therefore not recoverable from the
+/// value they had been parsed into.
+///
+/// hived keeps the two apart and now so does this: reading and writing are structural,
+/// `validate()` is the semantic step, and `Transaction::sign` calls it. So both halves
+/// are asserted here -- that the round trip works, and that the operations are still
+/// refused where refusing them matters.
+#[test]
+fn parsing_and_serializing_are_inverses_even_for_operations_hived_would_reject() {
+    // custom_json, no required_auths and no required_posting_auths.
+    let no_auths: &[u8] = &[
+        0x12, 0x00, 0x00, 0x05, 0x61, 0x64, 0x69, 0x63, 0x65, 0x06, 0x6d, 0x79, 0x5f, 0x61, 0x70,
+        0x70, 0x07, 0x7b, 0x22, 0x61, 0x22, 0x3a, 0x31, 0x7d,
+    ];
+    let mut reader = hivecomb::Reader::new(no_auths, Chain::Hive);
+    let op = Operation::read_from(&mut reader).expect("this parses; hived parses it too");
+    let once = op.to_wire().expect("and must serialize back");
+    let reparsed = {
+        let mut r = hivecomb::Reader::new(&once, Chain::Hive);
+        Operation::read_from(&mut r).expect("our own output must parse")
+    };
+    assert_eq!(
+        once,
+        reparsed.to_wire().unwrap(),
+        "serialization must settle"
+    );
+    assert!(
+        op.validate().is_err(),
+        "and validity is still refused, just not by the serializer"
+    );
+
+    // update_proposal_votes with an empty proposal_ids list.
+    let no_ids: &[u8] = &[
+        0x13, 0x00, 0xaa, 0xbb, 0xcc, 0x13, 0x40, 0xf3, 0x1a, 0x6a, 0x01, 0x2d, 0x05, 0x61, 0x00,
+        0x41, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let tx = Transaction::from_body_bytes(no_ids, Chain::Hive).expect("this parses too");
+    let body = tx.body_bytes().expect("and must serialize back");
+    let again = Transaction::from_body_bytes(&body, Chain::Hive).expect("our own output parses");
+    assert_eq!(
+        body,
+        again.body_bytes().unwrap(),
+        "serialization must settle"
+    );
+    assert_eq!(
+        tx.digest(Chain::Hive).unwrap(),
+        again.digest(Chain::Hive).unwrap(),
+        "and the digest must not move across a round trip"
+    );
+    assert!(
+        tx.validate().is_err(),
+        "and validity is still refused, just not by the serializer"
+    );
 }

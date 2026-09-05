@@ -245,6 +245,17 @@ the bytes a signature must cover. It settles after one pass. A transaction parse
 that came from hived cannot contain such a character in the first place. Found by
 cargo-fuzz on its first run.
 
+**Validity is a separate step from serializing, as it is in hived.** `body_bytes`,
+`digest` and reading off the wire are structural and apply none of hived's `validate()`
+rules; `Transaction::validate` and `Operation::validate` apply them, and
+`Transaction::sign` calls the former, so the ordinary path is still checked before a
+signature exists. Anything that parses can therefore be written back unchanged, which is
+what the digest depends on. A caller who takes a digest and signs it by some other route
+should call `validate` first. Folding the two together previously meant a `custom_json`
+with no auths, or an `update_proposal_votes` with no ids, would parse off the wire and
+then fail to serialize — found by `cargo-fuzz` the first time the fuzz jobs got as far
+as running.
+
 ### Requirements
 
 Rust **1.88** or newer. That floor comes from dependencies rather than from this

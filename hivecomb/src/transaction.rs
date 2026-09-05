@@ -137,7 +137,6 @@ impl Transaction {
     /// the bytes, and putting the signatures back; a failure in between left the
     /// object without its signatures. Here the body simply never contains them.
     pub fn body_bytes(&self) -> Result<Vec<u8>> {
-        self.check_custom_op_budget()?;
         let mut out = Vec::with_capacity(64 + self.operations.len() * 64);
         write_u16(&mut out, self.ref_block_num);
         write_u32(&mut out, self.ref_block_prefix);
@@ -218,6 +217,25 @@ impl Transaction {
     /// If the account is shared, the budget needs an owner — a queue, a token bucket,
     /// anything that all the broadcasters go through. That is an application concern and
     /// this crate deliberately does not pretend otherwise.
+    /// Check everything hived's `validate()` would, without signing anything.
+    ///
+    /// [`Self::sign`] calls this, so the ordinary path is checked before a signature
+    /// exists. It is public because the other paths are not: serializing a transaction,
+    /// taking its digest or reading one off the wire all leave it alone, so a caller
+    /// doing any of those and then broadcasting by some other route can ask.
+    ///
+    /// Deliberately **not** called by [`Self::body_bytes`] or [`Self::digest`]. hived
+    /// separates deserializing from validating, and folding them together here meant a
+    /// transaction that parsed could fail to serialize back -- a `custom_json` with no
+    /// auths, an `update_proposal_votes` with no ids -- so the bytes a digest is taken
+    /// over were not recoverable from the value they had been parsed into.
+    pub fn validate(&self) -> Result<()> {
+        for op in &self.operations {
+            op.validate()?;
+        }
+        self.check_custom_op_budget()
+    }
+
     fn check_custom_op_budget(&self) -> Result<()> {
         // This runs inside `body_bytes`, so it is on the signing path of every
         // transaction. Counting first is a tag comparison per operation and no
@@ -314,6 +332,9 @@ impl Transaction {
         if keys.is_empty() {
             return Err(Error::field("no signing keys were provided"));
         }
+        // Before anything is signed, not after: a signature over a transaction hived
+        // will refuse is worse than an error, because it looks like it worked.
+        self.validate()?;
         let digest = self.digest(chain)?;
 
         let mut unique: Vec<&PrivateKey> = Vec::with_capacity(keys.len());
@@ -514,11 +535,46 @@ mod tests {
 
         let over = Transaction::new(block_ref, (0..3).map(op).collect(), 600).unwrap();
         let err = over
-            .body_bytes()
+            .validate()
             .expect_err("six of alice's five must be refused");
         assert!(
             err.to_string().contains("alice"),
             "the error should name the account: {err}"
+        );
+    }
+
+    /// Signing validates, because nothing else on the path does any more.
+    ///
+    /// `body_bytes` and `digest` are structural now -- that is what lets a transaction
+    /// read off the wire be written back unchanged. The whole guard therefore rests on
+    /// `sign` calling `validate`, so that is asserted directly rather than inferred
+    /// from the two being adjacent in the source.
+    #[test]
+    fn signing_refuses_a_transaction_hived_would_reject() {
+        use crate::operations::CustomJson;
+
+        let invalid = Operation::CustomJson(CustomJson {
+            required_auths: vec![],
+            required_posting_auths: vec![],
+            id: "my_app".into(),
+            json: "{}".into(),
+        });
+        let block_ref =
+            BlockRef::from_block_id("00000005aabbccdd00000000000000000000abcd").unwrap();
+        let tx = Transaction::new(block_ref, vec![invalid], 600).unwrap();
+
+        // It serializes and digests happily -- that is the point of the split.
+        assert!(tx.body_bytes().is_ok(), "serializing stays structural");
+        assert!(tx.digest(Chain::Hive).is_ok(), "and so does the digest");
+
+        let key =
+            PrivateKey::from_wif("5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST4cqQzDeyXtP79zkvFD3").unwrap();
+        let err = tx
+            .sign(&[key], Chain::Hive)
+            .expect_err("but signing must refuse it");
+        assert!(
+            err.to_string().contains("required_auths"),
+            "and say why: {err}"
         );
     }
 
@@ -544,7 +600,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            ok.body_bytes().is_ok(),
+            ok.validate().is_ok(),
             "exactly the limit is allowed, not one less"
         );
 
@@ -555,7 +611,7 @@ mod tests {
         )
         .unwrap();
         let err = over
-            .body_bytes()
+            .validate()
             .expect_err("one past the limit must be refused");
         let text = err.to_string();
         assert!(
@@ -593,7 +649,7 @@ mod tests {
         }
         let tx = Transaction::new(block_ref, ops, 600).unwrap();
         assert!(
-            tx.body_bytes().is_ok(),
+            tx.validate().is_ok(),
             "{} operations across three accounts is within the per-account limit",
             3 * MAX_CUSTOM_OPS_PER_BLOCK
         );
@@ -617,10 +673,7 @@ mod tests {
             })
             .collect();
         let tx = Transaction::new(block_ref, ops, 600).unwrap();
-        assert!(
-            tx.body_bytes().is_ok(),
-            "transfers are not custom operations"
-        );
+        assert!(tx.validate().is_ok(), "transfers are not custom operations");
     }
     use super::*;
     use crate::asset::Amount;
