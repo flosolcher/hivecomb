@@ -316,6 +316,16 @@ if (SCALING) {
   )
 
   sweep(
+    'serialization and digest alone, with no signing',
+    [1, 10, 50, 200],
+    {
+      'dhive 1.3.6': (n, i) => digesters['@hiveio/dhive'](n, i),
+      hivecomb: (n, i) => digesters.hivecomb(n, i),
+    },
+    9,
+  )
+
+  sweep(
     'the end-to-end task: the JSON body an application POSTs',
     [1, 2, 5, 10, 20, 30, 40, 50, 200],
     {

@@ -36,29 +36,45 @@ the four.
 
 ## How the measurements were taken
 
-Every benchmark here is reproducible from a script in `tests/`, named in its section.
+Every benchmark here is reproducible from a harness in this repository, named in its
+section: [`benches/rust-libraries`](benches/rust-libraries),
+[`benches/python-libraries`](benches/python-libraries) and
+[`benches/node-libraries`](benches/node-libraries), each with a `run.sh` that fixes the
+conditions. A number in this document that no committed harness reproduces is a defect,
+and has been treated as one.
 
-Runs are pinned to one core, and both sides are measured in the same process on the same
-inputs, alternating so that CPU frequency drift hits both equally. The payload varies on
-every iteration: signing grinds until the signature is canonical, and how many attempts
-that takes depends on the digest, so a fixed payload measures one payload's luck — and
-taking medians over a fixed payload makes that result *stable*, which hides the bias
-rather than removing it.
+Runs are pinned to one core, and every library is measured in the same process on the
+same inputs, in interleaved windows — each gets a window in turn rather than all of one
+library's windows and then the next, because this machine's governor ramps the clock
+during a run and whoever went first would be measured cold. The payload varies on every
+iteration: signing grinds until the signature is canonical, and how many attempts that
+takes depends on the digest, so a fixed payload measures one payload's luck — and taking
+medians over a fixed payload makes that result *stable*, which hides the bias rather
+than removing it.
 
-Two estimators appear, and the difference matters when reading across sections:
-
-| section | estimator | why |
-|---|---|---|
-| Python (beem, nectar) | median of seven one-second windows | matches how those harnesses have always reported |
-| Node (dhive) | minimum of 11–15 interleaved windows | interference can only make a window slower, so the fastest is closest to the true cost |
+All three harnesses use one estimator: **the minimum of 7–15 interleaved windows**.
+Interference can only ever make a window slower, so the fastest is the closest estimate
+of the true cost. The `spread` column reported beside it is `(median − minimum) /
+minimum` across the libraries in that row, and it is the yardstick for the row: **a
+difference smaller than the spread is not a difference.**
 
 **Do not compare a number from one table against a number from another.** They answer
-the same question with different estimators on different runtimes.
+the same question on different runtimes, and the language boundary is itself part of
+what is being measured.
 
-The machine's CPU governor is `powersave`, which is not fixable without root, so the Node
-harness prints its own window spread (3–8% on the runs quoted) rather than asking to be
-trusted. Nothing here was measured on a quiet, tuned benchmarking machine, and none of
-these gaps is small enough for that to change the ordering.
+Timing is **CPU time, not wall clock** — `CLOCK_THREAD_CPUTIME_ID` in Rust,
+`process.cpuUsage()` in Node, `time.process_time()` in Python. A neighbouring process
+that takes the core deschedules the benchmark, and a CPU clock does not tick while the
+thread is not running, so other work on the machine is subtracted out rather than
+charged to whichever library happened to be in its window.
+
+That handles being descheduled; it does not handle a sibling hyperthread competing for
+the same physical core, which no software clock can subtract. So the runs quoted here
+were pinned to one core with its SMT sibling measured for the duration: the benchmark
+core was busy 99.9–100% and the sibling 4–11%, on an otherwise ordinary desktop. The
+machine's CPU governor is `powersave`, which is not fixable without root. Nothing here
+was measured on a quiet, tuned benchmarking machine, and none of these gaps is small
+enough for that to change the ordering.
 
 **Before any timing, both sides are checked to produce the same result.** A benchmark of
 two implementations that disagree measures nothing. Every harness aborts on a mismatch
@@ -93,10 +109,10 @@ These are the Rust numbers, for everything named above.
 Same machine, same task, pinned to one core and run under a memory cap. Every version
 below is **read from the installed package at run time and printed with the results**,
 never written into this table by hand — a table naming a version it did not measure is
-worse than one with no version at all. Minimum of fifteen interleaved windows — each library gets a window in turn, rather than all of one
-library's windows and then the next, because this machine's governor ramps the clock
-during a run and whoever went first would be measured cold. The payload varies every
-iteration. Reproduce with [`benches/rust-libraries`](benches/rust-libraries).
+worse than one with no version at all. Minimum of fifteen interleaved windows, payload
+varying every iteration; see [How the measurements were
+taken](#how-the-measurements-were-taken). Reproduce with
+[`benches/rust-libraries`](benches/rust-libraries).
 
 Before anything is timed, all three are required to produce the **same transaction
 digest** for the same transaction. They do. That is worth more than the timings: it is
@@ -105,16 +121,21 @@ for byte, and it is the check that makes the rest of the table meaningful.
 
 | microseconds | hivecomb 0.1.0 | hive-xylem 0.1.6 | hive-rs 0.1.0 | spread |
 |---|---|---|---|---|
-| serialize + digest, 1 transfer | 1.06 | 1.87 | 1.39 | 2% |
-| serialize + digest, 10 `custom_json` | 4.61 | 7.05 | 4.57 | 5% |
-| sign a transfer | 68.79 | 68.17 | 102.70 | 5% |
-| encrypt a memo | 70.14 | `hive_memo` 0.1.2: 151.63 | — | 4% |
+| serialize + digest, 1 transfer | **1.07** | 1.82 | 1.35 | 1% |
+| serialize + digest, 10 `custom_json` | 5.97 | 7.65 | **5.15** | 8% |
+| sign a transfer | 64.58 | 65.11 | 96.58 | 3% |
+| encrypt a memo | 67.59 | `hive_memo` 0.1.2: 145.27 | — | 4% |
 
 **How to read this, because the numbers mislead if taken flat.**
 
 The `spread` column is `(median − minimum) / minimum` across that row. **A difference
-smaller than the spread is not a difference** — so the 10-operation row and the signing
-row are ties, not wins for anybody.
+smaller than the spread is not a difference** — so the signing row is a tie between
+hivecomb and `hive-xylem`, not a win for either.
+
+The 10-operation row is not a tie: **`hive-rs` is ahead of this crate there**, by about
+16% against a spread of 8%. It is behind at one operation and ahead at ten, which is a
+different shape of cost rather than a uniformly faster serializer, and at ten operations
+that shape is the one that pays. The row is reported as measured.
 
 Most of the digest rows is work every library does identically. The CPU here has no SHA
 extensions, so SHA-256 runs in software at about 180 MB/s: roughly 1.9 µs of a 344-byte
@@ -124,7 +145,7 @@ their spread suggests. On a CPU with SHA-NI the whole column would move, for all
 
 The signing row is dominated by elliptic curve arithmetic, which all three hand to
 libsecp256k1 — so it is close, and it should be. `hive-xylem`'s API takes the WIF and
-chain id as strings and therefore re-parses both on every call, which is 1.34 µs of its
+chain id as strings and therefore re-parses both on every call, which is 1.26 µs of its
 figure and an API choice rather than an implementation one; it is measured separately in
 the harness so a reader can account for it.
 
@@ -254,7 +275,7 @@ are true at once, and neither cancels the other.
 
 | | hive-xylem | hivecomb |
 |---|---|---|
-| Rust source | 4,556 lines | 17,866 lines |
+| Rust source | 4,556 lines | 17,887 lines |
 | Tests | 48 | 368 |
 | Published | crates.io, 5 releases | no |
 | Signable operations | 17 structs | **48** (all non-virtual except the two obsolete mining ops) |
@@ -363,10 +384,10 @@ All three produce the same digest, at one operation and at ten, before anything 
 
 | microseconds | hivecomb 0.1.0 | beem 0.24.26 | hive-nectar 1.0.7 | spread |
 |---|---|---|---|---|
-| serialize + digest, 1 op | 10.16 | 66.60 | 68.06 | 3% |
-| serialize + digest, 10 ops | 84.60 | 312.04 | 309.08 | 8% |
-| sign, 1 op | 89.74 | 21,678 | 261.50 | 7% |
-| sign, 10 ops | 191.61 | 19,460 | 509.21 | 8% |
+| serialize + digest, 1 op | 10.84 | 67.97 | 69.71 | 2% |
+| serialize + digest, 10 ops | 86.36 | 316.72 | 314.88 | 2% |
+| sign, 1 op | 89.85 | 19,716 | 257.93 | 12% |
+| sign, 10 ops | 192.92 | 19,993 | 507.82 | 10% |
 
 beem and hive-nectar build and serialize in Python where this crate does it in Rust, so
 the digest rows measure that and little else. The signing rows are about the ECDSA
@@ -395,10 +416,10 @@ public key, which it does.
 
 | microseconds | hivecomb 0.1.0 | dhive 1.3.6 | hive-tx 7.2.1 | hive-pollen 1.0.0 | hive-js 2.0.9 | spread |
 |---|---|---|---|---|---|---|
-| serialize + digest, 1 op | 9.28 | 8.70 | 43.80 | 10.53 | — | 9% |
-| serialize + digest, 10 ops | 43.36 | 21.81 | 255.58 | 42.61 | — | 6% |
-| sign, 1 op | 85.40 | 124.48 | 779.72 | 1,534.89 | 136,004 | 7% |
-| sign, 10 ops | 126.36 | 152.95 | 961.65 | 1,612.96 | 117,195 | 7% |
+| serialize + digest, 1 op | 11.11 | 10.01 | 50.28 | 12.94 | — | 11% |
+| serialize + digest, 10 ops | 51.44 | 24.45 | 285.16 | 48.93 | — | 6% |
+| sign, 1 op | 86.47 | 126.55 | 815.09 | 1,613.30 | 124,097 | 12% |
+| sign, 10 ops | 131.26 | 149.83 | 980.19 | 1,473.32 | 107,252 | 10% |
 
 **The signing spread is a design choice, not a quality difference,** and reading it
 without that is misleading. These libraries obtain secp256k1 differently:
@@ -474,17 +495,22 @@ verifier reads the timestamp out of the payload it was given.
 Both libraries installed side by side on CPython 3.12, signing identical operations from
 identical inputs. Method as described in
 [How the measurements were taken](#how-the-measurements-were-taken): pinned, varying
-payload, **median** of seven one-second windows.
+payload, minimum of seven interleaved one-second windows on a CPU clock.
 
 Reproduce with `tests/bench_vs_nectar.py`, which checks both produce the same digest
 before timing anything and aborts if they do not.
 
-|  | hivecomb | hive-nectar | |
-|---|---|---|---|
-| sign a message (raw ECDSA) | 75.6 µs | 155.8 µs | 2.1× |
-| sign a `custom_json` | 176.6 µs | 450.9 µs | 2.6× |
-| sign a `transfer` | 158.9 µs | 476.7 µs | 3.0× |
-| serialize and digest, no signing | **14.7 µs** | **121.1 µs** | **8.2×** |
+|  | hivecomb | hive-nectar | | spread |
+|---|---|---|---|---|
+| sign a message (raw ECDSA) | 71.7 µs | 149.1 µs | 2.1× | 2% |
+| sign a `custom_json` | 91.1 µs | 251.2 µs | 2.8× | 2% |
+| sign a `transfer` | 89.0 µs | 264.6 µs | 3.0× | 1% |
+| serialize and digest, no signing | **10.4 µs** | **65.9 µs** | **6.4×** | 4% |
+
+These agree with [the three-library Python table](#measured-against-the-python-libraries)
+to within about 2% on the rows the two have in common, which is the check worth having:
+two harnesses written independently, run in different processes, landing on the same
+numbers.
 
 The last row is the one that measures what actually differs *against Python*. Both
 libraries hand the elliptic curve arithmetic to libsecp256k1, so the signature itself
@@ -596,31 +622,33 @@ niche recorded here was backwards — see
 
 ### Signing a transaction — the call an application actually makes
 
-|  ops | dhive 1.3.2 | dhive 1.3.6 | hivecomb | |
-|---|---|---|---|---|
-| 1 | 119.8 µs | 121.0 µs | **88.7 µs** | **hivecomb 1.36×** |
-| 2 | 124.2 µs | 126.7 µs | **93.4 µs** | **hivecomb 1.36×** |
-| 5 | 132.5 µs | 134.3 µs | **107.6 µs** | **hivecomb 1.25×** |
-| 8 | 137.9 µs | 137.7 µs | **121.7 µs** | **hivecomb 1.13×** |
-| 10 | 145.3 µs | 145.0 µs | **130.3 µs** | **hivecomb 1.11×** |
-| 15 | 151.5 µs | 152.4 µs | 154.4 µs | dhive 1.01× |
-| 20 | 167.3 µs | 165.4 µs | 179.7 µs | dhive 1.08× |
-| 50 | 230.2 µs | 232.9 µs | 331.2 µs | dhive 1.43× |
+Reproduce every table in this section with `benches/node-libraries/run.sh --scaling`.
+Each is gated the same way the summary table is, plus one gate of its own: the two
+libraries must produce the same digest at *every* size swept, because a sweep that
+drifted into measuring different transactions at 200 operations would look exactly like
+a real crossover.
+
+|  ops | dhive 1.3.6 | hivecomb | |
+|---|---|---|---|
+| 1 | 122.9 µs | **87.6 µs** | **hivecomb 1.40×** |
+| 2 | 123.7 µs | **93.3 µs** | **hivecomb 1.33×** |
+| 5 | 132.6 µs | **106.9 µs** | **hivecomb 1.24×** |
+| 8 | 143.1 µs | **124.3 µs** | **hivecomb 1.15×** |
+| 10 | 148.3 µs | **134.4 µs** | **hivecomb 1.10×** |
+| 15 | 162.0 µs | **159.4 µs** | hivecomb 1.02× |
+| 20 | 176.4 µs | 185.6 µs | dhive 1.05× |
+| 50 | 241.2 µs | 333.9 µs | dhive 1.38× |
 
 **hivecomb is faster at small transactions and slower at large ones. Where exactly the
-two cross over depends on the machine**, so treat the number as a range rather than a constant:
-**between about 6 and 15 operations**. The table above crosses at 12–15; an independent
-evaluator running the same method on different hardware measured the crossing between 5
-and 8, with a faster dhive and a slower hivecomb at n=50 both pushing it left.
+two cross over depends on the machine**, so treat the number as a range rather than a
+constant: **between about 6 and 20 operations**. The table above crosses at 15–20; an
+independent evaluator running the same method on different hardware measured the
+crossing between 5 and 8, with a faster dhive and a slower hivecomb at n=50 both pushing
+it left.
 
 Essentially every real Hive transaction is one to four operations, so the common case is
 comfortably on the winning side of that range whichever end you land on. The crossover is
 stated here rather than left for someone to discover.
-
-Both dhive versions are in the table because the disagreement between those two runs
-looked at first like a dhive regression between 1.3.2 and 1.3.6. Measured on one machine
-in one run, it is not: the two versions are within noise of each other at every size. The
-difference is the hardware.
 
 ### The end-to-end task: producing the body you POST
 
@@ -640,18 +668,20 @@ POST, so dhive pays for its own `JSON.stringify` exactly as a real caller would:
 
 |  ops | dhive 1.3.6 | hivecomb, object | hivecomb, JSON string | |
 |---|---|---|---|---|
-| 1 | 123.7 µs | 89.8 µs | **82.2 µs** | **hivecomb 1.50×** |
-| 2 | 127.3 µs | 92.5 µs | **85.4 µs** | **hivecomb 1.49×** |
-| 5 | 135.1 µs | 108.8 µs | **98.0 µs** | **hivecomb 1.38×** |
-| 10 | 151.8 µs | 134.0 µs | **116.3 µs** | **hivecomb 1.30×** |
-| 20 | 177.3 µs | 188.7 µs | **156.7 µs** | **hivecomb 1.13×** |
-| 50 | 254.8 µs | 342.0 µs | 273.7 µs | dhive 1.07× |
-| 200 | 650.9 µs | 1097.3 µs | 861.7 µs | dhive 1.32× |
+| 1 | 128.5 µs | 92.3 µs | **86.7 µs** | **hivecomb 1.48×** |
+| 2 | 129.5 µs | 99.3 µs | **88.0 µs** | **hivecomb 1.47×** |
+| 5 | 137.9 µs | 116.1 µs | **103.8 µs** | **hivecomb 1.33×** |
+| 10 | 151.2 µs | 145.0 µs | **126.9 µs** | **hivecomb 1.19×** |
+| 20 | 183.4 µs | 207.8 µs | **175.9 µs** | hivecomb 1.04× |
+| 30 | 208.5 µs | 272.1 µs | 227.3 µs | dhive 1.09× |
+| 40 | 242.7 µs | 329.7 µs | 272.2 µs | dhive 1.12× |
+| 50 | 261.5 µs | 390.5 µs | 322.5 µs | dhive 1.23× |
+| 200 | 661.6 µs | 1360.8 µs | 1088.4 µs | dhive 1.65× |
 
 On the task that actually gets performed, **the crossover moves out to somewhere between
-twenty and forty operations** — 35–40 on this machine, 20–30 on the evaluator's, the same
-hardware spread as the object API — and fifty operations goes from a 1.34× loss to a
-near-tie. Reach for `signTransactionJson` when the result is going on the wire, and
+twenty and forty operations** — 20–30 on this run, 30–40 on the previous one and 20–30 on
+an independent evaluator's hardware, so treat it as a range rather than a threshold — and
+fifty operations goes from a 1.38× loss to a 1.23× one. Reach for `signTransactionJson` when the result is going on the wire, and
 `signTransaction` when you need to inspect or modify it.
 
 The improvement itself is not machine-dependent: both runs found the text form faster at
@@ -672,56 +702,58 @@ crate's curve arithmetic shows:
 
 |  keys | dhive 1.3.6 | hivecomb | |
 |---|---|---|---|
-| 1 | 120.8 µs | **82.6 µs** | **hivecomb 1.46×** |
-| 2 | 226.1 µs | **152.7 µs** | **hivecomb 1.48×** |
-| 3 | 335.5 µs | **223.5 µs** | **hivecomb 1.50×** |
-| 5 | 556.7 µs | **359.0 µs** | **hivecomb 1.55×** |
-| 8 | 879.8 µs | **569.2 µs** | **hivecomb 1.55×** |
+| 1 | 123.7 µs | **90.1 µs** | **hivecomb 1.37×** |
+| 2 | 226.2 µs | **157.0 µs** | **hivecomb 1.44×** |
+| 3 | 331.3 µs | **231.6 µs** | **hivecomb 1.43×** |
+| 5 | 555.2 µs | **369.6 µs** | **hivecomb 1.50×** |
+| 8 | 878.7 µs | **588.9 µs** | **hivecomb 1.49×** |
 
-The margin *grows* with the signature count, toward the 1.67× floor below, because each
-extra signature adds curve arithmetic and nothing else. There is no crossover on this axis.
-Independently reproduced: 1.48× at one key, 1.66× at three, 1.55× at eight — landing just
-under the floor, which is the consistency check you would want on the whole model.
-
-Reproduce with the harnesses named in
-[How the measurements were taken](#how-the-measurements-were-taken); every one checks that
-dhive recovers the correct public key from each hivecomb signature before timing anything.
+The margin *grows* with the signature count, toward the per-signature ratio below, because
+each extra signature adds curve arithmetic and nothing else. There is no crossover on this
+axis. Independently reproduced on other hardware: 1.48× at one key, 1.66× at three, 1.55×
+at eight.
 
 ### Why: the advantage is the curve, not the serializer
 
-|  | dhive | hivecomb | |
+Cost against signature count is a straight line, so fitting it separates the two
+components — the slope is one signature's curve arithmetic, the intercept is everything
+around it: building the transaction, decoding keys, crossing the language boundary,
+rendering the result.
+
+|  | dhive 1.3.6 | hivecomb | |
 |---|---|---|---|
-| one signature, raw ECDSA over a 32-byte digest | 103.9 µs | **62.0 µs** | **hivecomb 1.67×** |
-| overhead above that floor, at 1 operation | 17.5 µs | 23.4 µs | dhive 1.34× |
+| per signature — curve arithmetic | 108.4 µs | **71.3 µs** | **hivecomb 1.52×** |
+| fixed overhead — everything else | **11.2 µs** | 16.4 µs | dhive 1.46× |
 
 **The advantage is the curve arithmetic, and it is partly given back.** libsecp256k1
-through Rust is 1.67× faster at the signature itself; hivecomb then spends about 6 µs
-more than dhive on everything around it — building the transaction, crossing the napi
-boundary, rendering the result. Net at one operation: 1.36×.
+through Rust is about 1.52× faster at the signature itself; hivecomb then spends roughly
+5 µs more than dhive on everything around it, most of which is the napi boundary. Net at
+one operation: 1.40×.
 
-An earlier version of this table reported the floor as 1.45× and the overhead as
-"identical, 18.9 against 19.0". Both were wrong, and for the same reason: hivecomb's
-floor was measured with `signMessage`, which hashes its input, against dhive's
-`key.sign(digest)`, which does not. A sha256 was being counted on one side only, which
-understated the floor advantage and inflated hivecomb's apparent overhead into a false
-match. An evaluator flagged the subtraction as not cleanly separable; isolating the hash
-confirmed it and moved both numbers. The row above signs an identical pre-hashed digest
-on both sides.
+The fit is taken from the multi-signature table above rather than from a raw-ECDSA call,
+because this addon exports no entry point that signs a bare digest — and widening the
+public API to make a benchmark easier would be the wrong trade. The slope reproduces
+within about 3% across runs; the intercept is an extrapolation to zero signatures and
+moves considerably more — 16–24 µs for hivecomb across three runs — so read it as "the
+boundary costs something in the tens of microseconds" rather than as a precise figure.
 
 ### Serialization alone, with no signing, is a loss
 
 |  ops | dhive 1.3.6 | hivecomb | |
 |---|---|---|---|
-| 1 | 8.3 µs | 11.5 µs | dhive 1.38× |
-| 10 | 21.4 µs | 46.6 µs | dhive 2.18× |
-| 50 | 69.8 µs | 216.6 µs | dhive 3.10× |
-| 200 | 235.1 µs | 891.4 µs | dhive 3.79× |
+| 1 | 9.6 µs | 10.2 µs | dhive 1.06× |
+| 10 | 23.3 µs | 46.5 µs | dhive 2.00× |
+| 50 | 72.9 µs | 203.8 µs | dhive 2.80× |
+| 200 | 251.6 µs | 853.2 µs | dhive 3.39× |
 
 This is the **opposite** of the Python result, where serialization is where a compiled
-core pays. The reason is arithmetic rather than mystery: measured directly, hivecomb's
-Rust serializer is only about **1.4× faster than dhive's JavaScript** — dhive's
-serializer is good — and 1.4× is not enough headroom to also pay for marshalling
-operations across the napi boundary. Crossing costs more than compiling saves.
+core pays. The reason is arithmetic rather than mystery, and the table shows it: at one
+operation the two are level, and the gap opens purely with the operation count. What
+scales is not the serializing — it is moving each operation across the napi boundary.
+Measured on its own in `hivecomb/examples/bench_pipeline.rs`, this crate's Rust
+serializer costs about 0.13 µs per operation against 3–6 µs to marshal one across the
+boundary. **Crossing costs more than compiling saves**, and dhive's JavaScript serializer
+is good enough that there is no headroom to pay for the crossing out of.
 
 Two rounds of work went into narrowing this and are worth recording, because both were
 real and neither was sufficient:
@@ -856,8 +888,8 @@ a decision the caller did not ask for.
 Take `hivecomb-node` when **signing is your bottleneck**: a service signing many
 transactions a second, each the ordinary one to four operations, or anything signing with
 **several keys at once**. Both are on the winning side and the second one widens with
-scale — 1.50× at one key, 1.55× at eight. If the result is going onto the wire, use
-`signTransactionJson` and the margin at one operation is 1.50× rather than 1.38×.
+scale — 1.37× at one key, 1.49× at eight. If the result is going onto the wire, use
+`signTransactionJson` and the margin at one operation is 1.48× rather than 1.40×.
 
 Do not take it for a **latency-bound** path. An evaluator's verdict on their trading bot
 was no, and the arithmetic is worth repeating: their path is dominated by a mandatory
@@ -866,13 +898,14 @@ of a >9,000 ms path, so saving 40 µs is roughly 0.0004% — unmeasurable. The a
 also signing-only with no network layer, so it does not touch the part that actually
 costs them.
 
-Do not take it to **serialize without signing**. dhive wins that at every size and the
-gap widens: 1.38× at one operation, 3.79× at two hundred. Rust cannot pay for the
-boundary crossing there because there is no cryptography for it to win back.
+Do not take it to **serialize without signing**. The two are level at one operation and
+dhive pulls away from there: 2.00× at ten, 3.39× at two hundred. Rust cannot pay for the
+boundary crossing on that path because there is no cryptography for it to win back.
 
-Above about forty operations in a single transaction, dhive wins the signing case too. In
-practice that shape barely exists — Hive transactions are one to four operations — but the
-crossover is real and the tables above give it rather than leaving it to be discovered.
+Above roughly twenty to forty operations in a single transaction, dhive wins the signing
+case too — where in that band depends on the machine and on the run. In practice that
+shape barely exists — Hive transactions are one to four operations — but the crossover is
+real and the tables above give it rather than leaving it to be discovered.
 
 Two corrections worth recording, because the advice in this section has now been wrong
 twice. The first version recommended batch signing as the adoption niche; that was a guess
@@ -882,6 +915,14 @@ the crossover at fifteen operations as though it were a constant; two runs on di
 hardware disagreed (12–15 here, 5–8 there) against the same dhive version, so it is a
 range and depends on the machine. Both replacements came from someone re-running the
 numbers rather than from re-reading the code.
+
+A third correction is of a different kind, and it is the one this document was most at
+risk from. Every table in this section told the reader to reproduce it with "the
+harnesses named above", and for a time no harness in this repository produced any of
+them: the numbers came from a script that was never committed. They turned out to be
+accurate — re-measuring moved them by a few percent and changed no conclusion — but that
+was luck, not method, and an unreproducible number is not evidence however right it
+happens to be. `benches/node-libraries/bench.mjs --scaling` now produces all four.
 
 ## What hivecomb deliberately does not do
 

@@ -260,19 +260,20 @@ maturin build --release  # abi3 wheel, CPython 3.8+
 ## Speed, against beem
 
 Both libraries signing identical operations, same machine, same interpreter, pinned
-to one core. Medians of seven one-second windows, with the **payload varied on every
-call** — signing grinds until the signature is canonical, and how many attempts that
-takes depends on the digest, so a fixed payload measures one payload's luck over and
-over. CPython 3.12, beem 0.24.26 on the `ecdsa` backend a default install selects.
+to one core. Minimum of nine interleaved one-second windows on a CPU clock, with the
+**payload varied on every call** — signing grinds until the signature is canonical, and
+how many attempts that takes depends on the digest, so a fixed payload measures one
+payload's luck over and over. CPython 3.12, beem 0.24.26 on the `cryptography` backend a
+default install selects.
 
 Reproduce with `tests/bench_vs_beem.py`.
 
-|  | hivecomb | beem 0.24.26 | |
-|---|---|---|---|
-| sign a message | 72.9 µs | 24.4 ms | ~335× |
-| sign a `custom_json` | 90.5 µs | 27.9 ms | ~308× |
-| sign a `transfer` | 90.1 µs | 26.5 ms | ~294× |
-| serialize and digest, no signing | **9.8 µs** | **65.2 µs** | **~6.6×** |
+|  | hivecomb | beem 0.24.26 | | spread |
+|---|---|---|---|---|
+| sign a message | 70.2 µs | 20.2 ms | ~288× | 12% |
+| sign a `custom_json` | 89.3 µs | 20.6 ms | ~231× | 4% |
+| sign a `transfer` | 87.0 µs | 20.6 ms | ~237× | 6% |
+| serialize and digest, no signing | **10.2 µs** | **64.8 µs** | **~6.3×** | 2% |
 
 Both produce the same digest — `cef35a5b34…` — which is checked before anything is
 timed, and a mismatch aborts the run rather than printing a table. A benchmark of two
@@ -280,11 +281,11 @@ implementations that disagree measures nothing.
 
 **Those ratios need three caveats, and they matter more than the numbers.**
 
-**It is beem's ECDSA backend, not Python, that costs 30 ms.** beem picks a backend at
+**It is beem's ECDSA backend, not Python, that costs 20 ms.** beem picks a backend at
 import. On the `cryptography` one it grinds for a canonical signature and derives the
 recovery parameter by recovering the public key **in pure Python** on every attempt.
-That loop is the 30 ms. The gap in the last row — serialization only, no cryptography —
-is the honest measure of Rust against Python here, and it is ~8×, not ~300×.
+That loop is the 20 ms. The gap in the last row — serialization only, no cryptography —
+is the honest measure of Rust against Python here, and it is ~6×, not ~230×.
 
 **beem's fast backend no longer works.** It prefers `secp256k1` when importable, which
 would close most of the gap. Installed against a current binding (0.14.0) it raises

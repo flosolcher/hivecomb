@@ -25,15 +25,16 @@ It deliberately shadows beem's package names, so **do not install it alongside b
 ## What you get for switching
 
 Speed, measured on the same machine with both libraries signing identical operations,
-pinned to one core, payload varied on every call (CPython 3.12, medians of seven
-one-second windows, beem 0.24.26 on the `ecdsa` backend a default install selects):
+pinned to one core, payload varied on every call (CPython 3.12, minimum of nine
+interleaved one-second windows on a CPU clock, beem 0.24.26 on the `cryptography`
+backend a default install selects):
 
 | | hivecomb-beem | beem 0.24.26 | |
 |---|---|---|---|
-| sign a message | 72.9 µs | 24.4 ms | ~335× |
-| sign a `custom_json` | 90.5 µs | 27.9 ms | ~308× |
-| sign a `transfer` | 90.1 µs | 26.5 ms | ~294× |
-| serialize and digest, no signing | **9.8 µs** | **65.2 µs** | **~6.6×** |
+| sign a message | 70.2 µs | 20.2 ms | ~288× |
+| sign a `custom_json` | 89.3 µs | 20.6 ms | ~231× |
+| sign a `transfer` | 87.0 µs | 20.6 ms | ~237× |
+| serialize and digest, no signing | **10.2 µs** | **64.8 µs** | **~6.3×** |
 
 beem is the least favourable comparison in the set, because it is unmaintained; the
 project's [COMPARISON.md](https://github.com/flosolcher/hivecomb/blob/main/COMPARISON.md)
@@ -49,7 +50,7 @@ it raises `AttributeError: 'PrivateKey' object has no attribute 'ctx'`, because 
 pinned to an API that changed and has not been maintained since 2021. The fallback is
 what you actually get.
 
-The last row is the fair one: serialization alone, no cryptography, ~8×.
+The last row is the fair one: serialization alone, no cryptography, ~6×.
 
 **And correctness, which matters more.** beem 0.24.26's `known_chains["HIVE"]` is the
 all-zero pre-hardfork-24 chain id, so it signs against a chain that has not existed

@@ -84,14 +84,37 @@ def bdig(cls, f, i):
     t.deriveDigest(HIVE_CHAIN)      # sets t.digest rather than returning it
     return t.digest
 
-def med(fn, reps=9, secs=1.0):
-    out = []
+def bench_pair(a, b, reps=9, secs=1.0):
+    """Minimum of interleaved windows, on a CPU clock.
+
+    Three deliberate choices, each fixing something the earlier median-of-windows
+    version got wrong:
+
+    *Interleaved* -- each side gets a window in turn, rather than all of one side's
+    windows and then the other's. This machine's governor ramps the clock during a
+    run, so whoever went first was measured cold.
+
+    *Minimum* rather than median -- interference can only ever make a window slower,
+    so the fastest window is the closest estimate of the true cost. The spread
+    between minimum and median is returned alongside, as the yardstick for the
+    comparison: a difference smaller than the spread is not a difference.
+
+    *`process_time`* rather than `perf_counter` -- a CPU clock does not tick while
+    this process is descheduled, so a neighbour taking the core is subtracted out
+    instead of being charged to whichever library was in its window.
+    """
+    a(); b()
+    sa, sb = [], []
     for _ in range(reps):
-        fn(); n = 0; t0 = time.perf_counter()
-        while time.perf_counter() - t0 < secs:
-            fn(); n += 1
-        out.append((time.perf_counter() - t0) / n * 1e6)
-    return statistics.median(out)
+        for fn, out in ((a, sa), (b, sb)):
+            n = 0
+            t0 = time.process_time()
+            while time.process_time() - t0 < secs:
+                fn(); n += 1
+            out.append((time.process_time() - t0) / n * 1e6)
+    best_a, best_b = min(sa), min(sb)
+    spread = max((statistics.median(s) - min(s)) / min(s) for s in (sa, sb))
+    return best_a, best_b, spread
 
 # Agreement before timing: a benchmark of two things that disagree measures nothing.
 ours = hivecomb.transaction_digest([("custom_json", CJ)], REF, E).hex()
@@ -120,7 +143,7 @@ cases = [
      lambda: hivecomb.transaction_digest([("custom_json", cj())], REF, E),
      lambda: bdig(Custom_json, cj(), "custom_json")),
 ]
-print(f"  {'':34} {'hivecomb':>10} {'beem':>10} {'ratio':>8}")
+print(f"  {'':34} {'hivecomb':>10} {'beem':>10} {'ratio':>8} {'spread':>8}")
 for label, a, b in cases:
-    x, y = med(a), med(b)
-    print(f"  {label:34} {x:9.1f}us {y:9.1f}us {y/x:7.1f}x")
+    x, y, spread = bench_pair(a, b)
+    print(f"  {label:34} {x:9.1f}us {y:9.1f}us {y/x:7.1f}x {spread*100:7.0f}%")

@@ -18,7 +18,7 @@ nectar needs Python 3.10+ and does not build on 3.14, so it wants its own enviro
 It checks that both produce the same digest before timing anything: a benchmark of two
 implementations that disagree measures nothing.
 
-Medians of several timed windows, because signature grinding -- retrying until the
+Minimum of interleaved timed windows, because signature grinding -- retrying until the
 signature is canonical -- makes any single window bimodal.
 """
 
@@ -67,15 +67,37 @@ def ndig(cls,f,i):
     t.deriveDigest("HIVE")   # sets t.digest rather than returning it, as beem does
     return t.digest
 
-def med(fn, reps=7, secs=1.0):
-    """Median of several timed windows: signature grinding retries until the
-    signature is canonical, so any single window is noisy."""
-    out=[]
+def bench_pair(a, b, reps=7, secs=1.0):
+    """Minimum of interleaved windows, on a CPU clock.
+
+    Three deliberate choices, each fixing something the earlier median-of-windows
+    version got wrong:
+
+    *Interleaved* -- each side gets a window in turn, rather than all of one side's
+    windows and then the other's. This machine's governor ramps the clock during a
+    run, so whoever went first was measured cold.
+
+    *Minimum* rather than median -- interference can only ever make a window slower,
+    so the fastest window is the closest estimate of the true cost. The spread
+    between minimum and median is returned alongside, as the yardstick for the
+    comparison: a difference smaller than the spread is not a difference.
+
+    *`process_time`* rather than `perf_counter` -- a CPU clock does not tick while
+    this process is descheduled, so a neighbour taking the core is subtracted out
+    instead of being charged to whichever library was in its window.
+    """
+    a(); b()
+    sa, sb = [], []
     for _ in range(reps):
-        fn(); n=0; t0=time.perf_counter()
-        while time.perf_counter()-t0 < secs: fn(); n+=1
-        out.append((time.perf_counter()-t0)/n*1e6)
-    return statistics.median(out)
+        for fn, out in ((a, sa), (b, sb)):
+            n = 0
+            t0 = time.process_time()
+            while time.process_time() - t0 < secs:
+                fn(); n += 1
+            out.append((time.process_time() - t0) / n * 1e6)
+    best_a, best_b = min(sa), min(sb)
+    spread = max((statistics.median(s) - min(s)) / min(s) for s in (sa, sb))
+    return best_a, best_b, spread
 
 # Agreement before timing. The docstring above has always promised this check and
 # the file has never actually contained it -- a benchmark of two implementations that
@@ -103,7 +125,7 @@ cases=[
  ("serialize + digest, no signing", lambda: hivecomb.transaction_digest([("custom_json",cj())],REF,E),
                                 lambda: ndig(Custom_json,cj(),"custom_json")),
 ]
-print(f"  {'':34} {'hivecomb':>10} {'nectar':>10} {'ratio':>8}")
+print(f"  {'':34} {'hivecomb':>10} {'nectar':>10} {'ratio':>8} {'spread':>8}")
 for label, ours, theirs in cases:
-    a, b = med(ours), med(theirs)
-    print(f"  {label:34} {a:9.1f}us {b:9.1f}us {b/a:7.1f}x")
+    a, b, spread = bench_pair(ours, theirs)
+    print(f"  {label:34} {a:9.1f}us {b:9.1f}us {b/a:7.1f}x {spread*100:7.0f}%")
