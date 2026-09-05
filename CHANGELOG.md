@@ -14,6 +14,10 @@ would otherwise say, and it will be called out here in its own section.
 > `[Unreleased]` heading comes back above it once 0.1.0 ships — see
 > [RELEASING.md](RELEASING.md).
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.1.0] — 2026-09-05
 
 First release, so this section describes the initial contents rather than a delta.

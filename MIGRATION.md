@@ -40,9 +40,8 @@ Installing `hivecomb-beem` **in place of** beem makes existing `import beem` cod
 unchanged. It is not safe alongside beem: it provides the same four package names on
 purpose, and pip will let one silently overwrite the other.
 
-> **Not published yet.** Those two names are reserved for the first release; until it
-> happens, use the source build below. See
-> [RELEASING.md](RELEASING.md) for what is still outstanding.
+> Both are on PyPI as of 0.1.0 (2026-09-05). The source build below still works if you
+> want to track `main`.
 
 ### From source
 

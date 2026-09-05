@@ -64,15 +64,18 @@ const tx = signTransaction(
 
 ## Install
 
-**Nothing is published yet.** These are the names reserved for the first release; until
-then, build from this repository. See [RELEASING.md](RELEASING.md).
-
 ```bash
 cargo add hivecomb                  # Rust
 pip install hivecomb                # Python: keys, signing, memos, all operations
 pip install hivecomb-beem           # ...and the beem drop-in, including `beempy`
-npm install hivecomb                # Node.js: native addon, TypeScript types included
 ```
+
+**The Node addon is not on npm yet.** 0.1.0 went out to crates.io and PyPI on
+2026-09-05; the npm publish is held up by npm's automated spam detection on one of the
+five per-platform binary packages, which blocks the package that depends on them. Until
+it clears, build the addon from this repository — see
+[hivecomb-node](hivecomb-node/README.md). Nothing about the Rust or Python packages is
+affected.
 
 `hivecomb-beem` replaces `beem` in an existing program without changing that program.
 Uninstall `beem` first — the package names deliberately collide. See

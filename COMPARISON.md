@@ -24,7 +24,7 @@ inherited the same code, because the retraction happened first. That is the stan
 rest of this document is trying to meet, and the reason the claims here are checked
 against the other library rather than reasoned about.
 
-**Where another project is ahead, it says so.** xylem is published and this crate is not.
+**Where another project is ahead, it says so.** xylem has five releases behind it where this crate has one, published the day this was written.
 nectar is more mature than this project's Python side by every measure that can be
 counted. `hive-rs` serializes a ten-operation transaction faster than this crate does.
 dhive beats hivecomb at serializing large batches, and the reason there is structural
@@ -284,8 +284,8 @@ executor.
 ### Is xylem more mature than hivecomb?
 
 **On the one measure that matters most — production exposure — neither is mature, and
-xylem is slightly ahead of hivecomb.** It is published on crates.io with five releases;
-`hivecomb` is not published. 103 downloads (crates.io, 2026-09-05) is not adoption, but it is more than zero.
+xylem is slightly ahead of hivecomb.** It is published on crates.io with five releases against this crate's one, and 103
+downloads (crates.io, 2026-09-05) against a package that went up the same day. Neither number is adoption; xylem's is more than zero.
 
 `hivecomb` has now had a transaction accepted by the Hive network — block
 [109242605](https://hivehub.dev/tx/ebb44fb5dedd544b7deeb62f81660983233a559f), 2026-08-22 — so the signing path is no longer
