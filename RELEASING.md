@@ -53,6 +53,15 @@ click.
 4. Add it as an **environment secret** — `Settings → Environments → release →
    Add environment secret` — named **`CARGO_REGISTRY_TOKEN`**.
 
+   **crates.io gives you no way to check this token short of publishing.** The
+   release workflow only confirms it is set. `GET /api/v1/me` is session-only and
+   answers an API token with *"this action can only be performed on the crates.io
+   website"*; a `yank` probe cannot stand in either, because a crate that does not
+   exist returns 404 with a good token, a bad one, and no token at all. Both measured
+   on 2026-09-05, the first time a rehearsal reached that step. So a wrong token
+   surfaces as a failed `cargo publish` — the crate is not published, rather than
+   published wrongly, which is the safe direction for it to fail in.
+
    **A secret, not a variable.** GitHub environments hold both, and the difference
    matters here: secret values are never returned by the API and are automatically
    masked to `***` in workflow logs. Variable values are returned by the API and are
