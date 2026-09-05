@@ -517,6 +517,22 @@ impl HealthTracker {
         }
     }
 
+    /// Record a head-block reading with an explicit observation time.
+    ///
+    /// Test-only. [`Self::observe_head_block`] stamps the reading with `Instant::now()`,
+    /// which makes any test of the *sub-block* projection depend on how accurately
+    /// `thread::sleep` lands. A 6 ms sleep inside a 10 ms block interval does not
+    /// reliably stay under one block on a CI runner -- it overshot on macOS and turned
+    /// the freshest reading into the stale one, which is precisely the bug the test
+    /// exists to catch, reported against a tracker that was behaving correctly.
+    #[cfg(test)]
+    fn observe_head_block_at(&self, index: usize, head_block: u64, at: Instant) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = state.get_mut(index) {
+            s.head_block = Some((head_block, at));
+        }
+    }
+
     /// What the tracker believes about every node, in node-list order.
     pub fn snapshot(&self) -> Vec<NodeHealth> {
         let now = Instant::now();
@@ -696,9 +712,17 @@ mod tests {
                 ..Default::default()
             },
         );
-        t.observe_head_block(0, 100);
-        std::thread::sleep(Duration::from_millis(6)); // 0.6 of a block
-        t.observe_head_block(1, 100);
+        // The timestamps are handed in rather than produced by sleeping. This test needs
+        // the older reading to be *less than one block* old, and that is the one
+        // direction a sleep cannot be trusted in: overshoot credits a whole block that
+        // did not pass. `snapshot` still reads the real clock, so the two ages are
+        // 6 ms + epsilon and epsilon.
+        let now = Instant::now();
+        let a_fraction_of_a_block_ago = now
+            .checked_sub(Duration::from_millis(6))
+            .expect("the monotonic clock is more than 6ms past its origin");
+        t.observe_head_block_at(0, 100, a_fraction_of_a_block_ago);
+        t.observe_head_block_at(1, 100, now);
 
         let report = t.snapshot();
         assert!(
