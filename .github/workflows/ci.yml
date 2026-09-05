@@ -86,8 +86,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned, deliberately, where every other job floats on `stable`.
+      #
+      # Clippy gains lints every six weeks and rustfmt occasionally changes what it
+      # considers formatted. On a floating toolchain that turns this job red with no
+      # change to this repository -- 1.98 added `chunks_exact_to_as_chunks` and did
+      # exactly that -- so main can break while nobody is touching it, and a
+      # contributor cannot reproduce the gate without guessing which toolchain ran it.
+      #
+      # Tests stay on `stable` on purpose: there the floating version is the point,
+      # and a new compiler breaking the tests is a real finding rather than a lint
+      # opinion. `lint-latest` below keeps the early warning for this job without
+      # letting it block anyone.
+      #
+      # Bump this deliberately, when `lint-latest` says there is something to bump for.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
@@ -97,6 +112,24 @@ jobs:
         run: cargo doc --locked -p hivecomb --all-features --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+  lint-latest:
+    name: clippy on latest stable (advisory)
+    runs-on: ubuntu-latest
+    # Never blocks. Its whole job is to notice, before the pinned gate is bumped, that
+    # a newer clippy has an opinion about this code -- so the bump is a small deliberate
+    # commit rather than a surprise the next time someone pushes.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: rustc --version && cargo clippy --version
+      - run: cargo fmt --all --check
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked -p hivecomb --no-default-features -- -D warnings
 
   docs:
     name: documentation says what is true

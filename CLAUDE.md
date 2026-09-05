@@ -87,5 +87,12 @@ could only pass. See CONTRIBUTING.md.
 - `grep -c` exits non-zero on zero matches, which breaks `&&` chains.
 - The brain-key and BIP-39 word lists are pinned by SHA-256 and marked `-text` in
   `.gitattributes`. Never let a rename sweep or a line-ending conversion touch them.
-- CI's clippy is usually newer than the local one, so `cargo clippy` passing here does
-  not mean CI passes.
+- **CI's clippy is pinned; the local one usually is not.** The `fmt and clippy` job runs
+  an exact toolchain (`1.98.0` at the time of writing, set in `ci.yml`) precisely so it
+  cannot go red on its own when a new Rust ships. A local `cargo clippy` on some other
+  version is therefore an *approximation* of that gate, in both directions: it can pass
+  where CI fails, and it can fail where CI would not. If the versions differ, say so
+  rather than reporting the gate as verified.
+  A second job, `clippy on latest stable (advisory)`, runs the same lints unpinned and
+  never blocks. When it goes red, the pinned version wants bumping — a small deliberate
+  commit, rather than a surprise on someone else's push.
