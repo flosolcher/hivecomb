@@ -406,10 +406,10 @@ All three produce the same digest, at one operation and at ten, before anything 
 
 | microseconds | hivecomb 0.1.0 | beem 0.24.26 | hive-nectar 1.0.7 | spread |
 |---|---|---|---|---|
-| serialize + digest, 1 op | 10.84 | 67.97 | 69.71 | 2% |
-| serialize + digest, 10 ops | 86.36 | 316.72 | 314.88 | 2% |
-| sign, 1 op | 89.85 | 19,716 | 257.93 | 12% |
-| sign, 10 ops | 192.92 | 19,993 | 507.82 | 10% |
+| serialize + digest, 1 op | 10.70 | 66.39 | 67.64 | 2% |
+| serialize + digest, 10 ops | 86.50 | 299.55 | 302.25 | 2% |
+| sign, 1 op | 90.54 | 20,405 | 257.25 | 6% |
+| sign, 10 ops | 202.21 | 20,807 | 501.09 | 9% |
 
 beem and hive-nectar build and serialize in Python where this crate does it in Rust, so
 the digest rows measure that and little else. The signing rows are about the ECDSA
@@ -438,10 +438,10 @@ public key, which it does.
 
 | microseconds | hivecomb 0.1.0 | dhive 1.3.6 | hive-tx 7.2.1 | hive-pollen 1.0.0 | hive-js 2.0.9 | spread |
 |---|---|---|---|---|---|---|
-| serialize + digest, 1 op | 9.97 | 9.34 | 42.80 | 11.07 | — | 8% |
-| serialize + digest, 10 ops | 45.48 | 22.28 | 250.02 | 43.25 | — | 5% |
-| sign, 1 op | 81.72 | 121.94 | 771.72 | 1,490.74 | 118,146 | 7% |
-| sign, 10 ops | 127.47 | 145.37 | 962.54 | 1,385.60 | 103,203 | 5% |
+| serialize + digest, 1 op | 9.76 | 9.36 | 44.15 | 11.25 | — | 3% |
+| serialize + digest, 10 ops | 44.59 | 22.12 | 250.06 | 43.36 | — | 3% |
+| sign, 1 op | 83.58 | 122.33 | 776.54 | 1,489.25 | 118,619 | 4% |
+| sign, 10 ops | 128.84 | 147.71 | 963.23 | 1,409.13 | 108,264 | 3% |
 
 **The signing spread is a design choice, not a quality difference,** and reading it
 without that is misleading. These libraries obtain secp256k1 differently:
