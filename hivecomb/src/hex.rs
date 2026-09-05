@@ -39,7 +39,11 @@ pub(crate) fn decode_exact(s: &str, out: &mut [u8]) -> Result<(), HexError> {
     if s.len() != out.len() * 2 {
         return Err(HexError::Length);
     }
-    for (byte, pair) in out.iter_mut().zip(s.chunks_exact(2)) {
+    // `as_chunks` rather than `chunks_exact(2)`: the pair is a `[u8; 2]`, so indexing it
+    // is checked at compile time. The remainder is empty, the length having just been
+    // established as even.
+    let (pairs, _remainder) = s.as_chunks::<2>();
+    for (byte, pair) in out.iter_mut().zip(pairs) {
         *byte = digit(pair[0])? * 16 + digit(pair[1])?;
     }
     Ok(())
@@ -51,7 +55,9 @@ pub(crate) fn decode_vec(s: &str) -> Result<Vec<u8>, HexError> {
     if !s.len().is_multiple_of(2) {
         return Err(HexError::Length);
     }
-    s.chunks_exact(2)
+    let (pairs, _remainder) = s.as_chunks::<2>();
+    pairs
+        .iter()
         .map(|pair| Ok(digit(pair[0])? * 16 + digit(pair[1])?))
         .collect()
 }
