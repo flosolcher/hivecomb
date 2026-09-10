@@ -17,11 +17,25 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 
 ## One-time setup
 
-Status as of 2026-09-05: the repository is public and Actions run. The `release`
-environment exists, and both `CARGO_REGISTRY_TOKEN` and `NPM_TOKEN` are environment
-secrets on it. **PyPI is not configured**, and **no token has been proven to work** —
-`npm whoami` has never been run against `NPM_TOKEN`, and trusted publishing cannot be
-exercised at all except through TestPyPI (step 4b).
+Status as of 2026-09-10: **all of this is set up and every credential has now been
+exercised for real.** 0.1.0 published to crates.io and to both PyPI projects on
+2026-09-05. Trusted publishing works for `hivecomb` and `hivecomb-beem`, proven first
+against TestPyPI and then on the real index; `CARGO_REGISTRY_TOKEN` published the crate;
+`NPM_TOKEN` published four packages.
+
+The steps below are kept as the record of how it was set up, and as the checklist for
+doing it again on a new machine or a new registry.
+
+Two things the first release taught, both written up where they belong rather than only
+here:
+
+* **A crates.io token cannot be validated short of publishing** — see step 2. The
+  workflow's check for it could never pass, and failed the first release that reached it.
+* **npm is not fully published.** `hivecomb-win32-x64-msvc` is refused by npm's
+  automated spam detection, which stops napi-rs before the root package, so
+  `npm i hivecomb` finds nothing while four platform packages are live. A support ticket
+  is open. Nothing exists under the refused name, so clearing it is enough — one re-run
+  then publishes the remainder at 0.1.0.
 
 Until 2026-09-05 Actions could not start a job: every run failed in four seconds with
 *"recent account payments have failed or your spending limit needs to be increased"*.
@@ -253,10 +267,13 @@ the environment name is the usual culprit.
 - [ ] The version matches in **three** places: `Cargo.toml` (workspace),
       `hivecomb-node/package.json`, and `python/pyproject.toml`. The workflow checks
       this too, but fixing it before tagging is cheaper than a failed release run.
-- [ ] Delete the pre-release notices. Each package landing page carries a block
-      marked `<!-- PRE-RELEASE-NOTICE ... -->` saying the name is not published yet;
-      those pages become crates.io, PyPI and npm, where the statement would be false.
-      Find them with `grep -rl PRE-RELEASE-NOTICE .`
+- [ ] Delete any pre-release notices. Before 0.1.0 each package landing page carried a
+      block marked `<!-- PRE-RELEASE-NOTICE ... -->` saying the name was not published
+      yet; those pages become crates.io, PyPI and npm, where the statement would have
+      been false, and unlike this repository a published README cannot be edited
+      afterwards. They were removed at 0.1.0 and there should be none left — but check,
+      because the next one to be added will be added for the same reason:
+      `grep -rl PRE-RELEASE-NOTICE .`
 - [ ] Rehearse: **Actions → release → Run workflow**, dry run **true**. This builds
       every wheel, every addon, installs a wheel and checks the cross-binding digest
       vector, and runs `cargo publish --dry-run` and `npm publish --dry-run` — without

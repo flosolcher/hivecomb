@@ -180,7 +180,7 @@ are inert and the client is explicit.
 ```
 hivecomb/        the library                     — crates.io: hivecomb
 hivecomb-py/     PyO3 bindings                   — PyPI: hivecomb
-hivecomb-node/   napi-rs addon                   — npm: hivecomb
+hivecomb-node/   napi-rs addon                   — npm: hivecomb (not published yet)
 python/          the beem drop-in and beempy     — PyPI: hivecomb-beem
 
 hivecomb/examples/                  runnable: sign_offline, and the rest

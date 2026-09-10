@@ -97,12 +97,14 @@ at commit `2026-07-18`. Numbers move; re-measure before relying on them.
 
 ### The libraries
 
+Versions and download counts read from crates.io on 2026-09-10.
+
 | crate | version | downloads | what it is |
 |---|---|---|---|
-| [`hive-xylem`](https://github.com/srbde/hive-xylem) | 0.1.6 | 99 | An async Rust SDK by SRBDE, part of a cross-language suite (Pollen/TS, Anther/Go, Nectar/Python) |
-| [`hive_memo`](https://crates.io/crates/hive_memo) | 0.1.2 | 3,225 | Memo encryption and decryption only |
-| [`hive-rs`](https://crates.io/crates/hive-rs) | 0.1.0 | 28 | A client library, described as a 1:1 port |
-| `hivecomb` | 0.1.0 | unpublished | This crate |
+| [`hive-xylem`](https://github.com/srbde/hive-xylem) | 0.1.6 | 103 | An async Rust SDK by SRBDE, part of a cross-language suite (Pollen/TS, Anther/Go, Nectar/Python) |
+| [`hive_memo`](https://crates.io/crates/hive_memo) | 0.1.2 | 3,230 | Memo encryption and decryption only |
+| [`hive-rs`](https://crates.io/crates/hive-rs) | 0.1.0 | 32 | A client library, described as a 1:1 port |
+| [`hivecomb`](https://crates.io/crates/hivecomb) | 0.1.0 | 17 | This crate, published 2026-09-05 |
 
 `hive-xylem` is the closest comparison: a general-purpose SDK with overlapping goals.
 
@@ -323,7 +325,7 @@ writing a Tokio service and need transfers, votes, comments and `custom_json`, i
 do that today and it is a `cargo add` away.
 
 `hivecomb` covers far more of the protocol, is verified against a reference implementation
-rather than against its own expectations, and reaches Python. It is also unpublished
+rather than against its own expectations, and reaches Python. It is also five days old
 and unproven. **Breadth and testing are not the same thing as maturity**, and it would
 be dishonest to present them as such.
 
@@ -1038,4 +1040,5 @@ received a finding that turned out to be wrong, had the retraction not come firs
 measuring against it corrected an adoption recommendation this document had published.
 
 None of this is a scoreboard. Three of the four libraries here are maintained by people
-who were solving these problems before this one existed, and the fourth is unpublished.
+who were solving these problems before this one existed, and the fourth was published
+last week.
