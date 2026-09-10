@@ -41,3 +41,9 @@ build/
 wallet.json
 # whatever is newest and the floor moves on its own.
 *.wif
+
+# Drafts written for you, not for the repository: the npm support correspondence
+# and the Hive post. They live in the working tree and are deliberately not
+# tracked -- a `git add -A` swept them in once, which is what this prevents.
+npm-support-*.md
+artifact.md
