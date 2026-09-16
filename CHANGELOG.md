@@ -18,6 +18,24 @@ would otherwise say, and it will be called out here in its own section.
 
 Nothing yet.
 
+## [0.1.2] — 2026-09-16
+
+Housekeeping. Nothing in the library's behaviour changes.
+
+- **The npm landing page said the package was not on npm.** `hivecomb-node/README.md`
+  carried a note written while npm's spam filter was holding one of the platform
+  packages, and it was baked into the 0.1.1 tarball — so npmjs.com told visitors the
+  package did not exist. A published README cannot be edited, which is why this needed a
+  release.
+- **35 dependency updates**, all semver-compatible: patch-level fixes across the tree,
+  no API changes and no behaviour changes here.
+
+`secp256k1` is four release series behind (0.29 against 0.33) and the RustCrypto family
+is one each. Both are deliberately **not** in this release: the secp256k1 upgrade pulls
+`rand` from 0.8 to 0.9, which makes `OsRng` fallible, and that forces a decision about
+whether `PrivateKey::generate` starts returning a `Result` — a breaking change, and not
+something to fold into a packaging fix.
+
 ## [0.1.1] — 2026-09-16
 
 **The npm package in 0.1.0 could not be loaded.** It was published without its entry
@@ -358,6 +376,7 @@ that catches a stale installed build — source updated, package not reinstalled
 One accepted transaction is not production exposure. See [BROADCAST.md](BROADCAST.md)
 for what each stage establishes and what it does not.
 
-[Unreleased]: https://github.com/flosolcher/hivecomb/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/flosolcher/hivecomb/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/flosolcher/hivecomb/releases/tag/v0.1.2
 [0.1.1]: https://github.com/flosolcher/hivecomb/releases/tag/v0.1.1
 [0.1.0]: https://github.com/flosolcher/hivecomb/releases/tag/v0.1.0

@@ -40,7 +40,7 @@ Installing `hivecomb-beem` **in place of** beem makes existing `import beem` cod
 unchanged. It is not safe alongside beem: it provides the same four package names on
 purpose, and pip will let one silently overwrite the other.
 
-> Both are on PyPI as of 0.1.1. The source build below still works if you
+> Both are on PyPI as of 0.1.2. The source build below still works if you
 > want to track `main`.
 
 ### From source
@@ -59,7 +59,7 @@ Verify:
 
 ```python
 import beem, beemgraphenebase
-print(beem.__version__)          # hivecomb-compat-0.1.1, not 0.24.26
+print(beem.__version__)          # hivecomb-compat-0.1.2, not 0.24.26
 ```
 
 The version string is deliberately **not** `0.24.26`: anything that branches on the

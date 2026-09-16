@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hivecomb-beem"
-version = "0.1.1"
+version = "0.1.2"
 description = "beem-compatible API for Hive, backed by hivecomb. Install in place of beem."
 readme = "README.md"
 license = { text = "MIT" }
@@ -20,7 +20,7 @@ classifiers = [
 # The Rust extension module, and nothing else: the compatibility layer uses only
 # the standard library, where beem pulled in requests, websocket-client, Click,
 # click-shell and prettytable.
-dependencies = ["hivecomb>=0.1.1"]
+dependencies = ["hivecomb>=0.1.2"]
 
 [project.scripts]
 # The same console script beem installed, so `beempy` keeps working.
