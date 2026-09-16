@@ -17,25 +17,27 @@ npm only within 72 hours and under conditions, and PyPI never reuses a filename.
 
 ## One-time setup
 
-Status as of 2026-09-10: **all of this is set up and every credential has now been
-exercised for real.** 0.1.0 published to crates.io and to both PyPI projects on
-2026-09-05. Trusted publishing works for `hivecomb` and `hivecomb-beem`, proven first
-against TestPyPI and then on the real index; `CARGO_REGISTRY_TOKEN` published the crate;
-`NPM_TOKEN` published four packages.
+Status as of 2026-09-16: **all of this is set up, and every credential has been
+exercised against every registry.** 0.1.1 is published to crates.io, both PyPI projects
+and npm.
 
 The steps below are kept as the record of how it was set up, and as the checklist for
 doing it again on a new machine or a new registry.
 
-Two things the first release taught, both written up where they belong rather than only
+What the first two releases taught, each written up where it belongs rather than only
 here:
 
 * **A crates.io token cannot be validated short of publishing** — see step 2. The
   workflow's check for it could never pass, and failed the first release that reached it.
-* **npm is not fully published.** `hivecomb-win32-x64-msvc` is refused by npm's
-  automated spam detection, which stops napi-rs before the root package, so
-  `npm i hivecomb` finds nothing while four platform packages are live. A support ticket
-  is open. Nothing exists under the refused name, so clearing it is enough — one re-run
-  then publishes the remainder at 0.1.0.
+* **crates.io refuses to publish at all without a verified account email.** The token is
+  not the thing that has to be right.
+* **npm's spam filter can refuse one package name out of five.**
+  `hivecomb-win32-x64-msvc` was blocked for eleven days while its four siblings
+  published. Support cleared it; there is no way to predict or pre-empt it.
+* **A dry run cannot tell you the package works.** `npm publish --dry-run` passed twice
+  on a package that was missing its entry point, because publishing an incomplete
+  package *is* a successful publish. Only the "Afterwards" checklist at the end of this
+  file caught it — install what was published, and call it.
 
 Until 2026-09-05 Actions could not start a job: every run failed in four seconds with
 *"recent account payments have failed or your spending limit needs to be increased"*.

@@ -97,14 +97,14 @@ at commit `2026-07-18`. Numbers move; re-measure before relying on them.
 
 ### The libraries
 
-Versions and download counts read from crates.io on 2026-09-10.
+Versions and download counts read from crates.io on 2026-09-16.
 
 | crate | version | downloads | what it is |
 |---|---|---|---|
 | [`hive-xylem`](https://github.com/srbde/hive-xylem) | 0.1.6 | 103 | An async Rust SDK by SRBDE, part of a cross-language suite (Pollen/TS, Anther/Go, Nectar/Python) |
 | [`hive_memo`](https://crates.io/crates/hive_memo) | 0.1.2 | 3,230 | Memo encryption and decryption only |
 | [`hive-rs`](https://crates.io/crates/hive-rs) | 0.1.0 | 32 | A client library, described as a 1:1 port |
-| [`hivecomb`](https://crates.io/crates/hivecomb) | 0.1.0 | 17 | This crate, published 2026-09-05 |
+| [`hivecomb`](https://crates.io/crates/hivecomb) | 0.1.1 | 17 | This crate, first published 2026-09-05 |
 
 `hive-xylem` is the closest comparison: a general-purpose SDK with overlapping goals.
 

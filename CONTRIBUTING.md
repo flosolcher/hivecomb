@@ -130,8 +130,7 @@ what happened, and "signing is 2.3× faster" is what a reader needs.
 Only user-visible changes. CI fixes, refactors and new tests do not belong there
 unless they change what someone can rely on.
 
-While 0.1.0 is unreleased, entries go in its section; `[Unreleased]` returns above it
-after the first release.
+0.1.0 and 0.1.1 are released, so entries go under `[Unreleased]` until the next tag.
 
 ## Adding an operation
 

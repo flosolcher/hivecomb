@@ -10,12 +10,6 @@ library.
 npm install hivecomb
 ```
 
-> **Not on npm yet.** The four Linux and macOS binary packages are published, but
-> `hivecomb-win32-x64-msvc` is held by npm's automated spam detection, and napi-rs stops
-> at the first refused platform package — so the root package has never gone up and the
-> command above finds nothing. A support ticket is open. Build from source meanwhile
-> (below); the Rust crate and both PyPI packages are unaffected and published.
-
 Prebuilt binaries for linux x64/arm64, macOS x64/arm64 and Windows x64. Node 20+.
 TypeScript definitions are included; there is no `@types` package to install.
 
