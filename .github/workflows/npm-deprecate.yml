@@ -53,9 +53,20 @@ jobs:
       - name: confirm it took
         run: |
           set -euo pipefail
-          got=$(npm view "${{ inputs.spec }}" deprecated 2>/dev/null || true)
-          echo "registry now reports: ${got:-<not deprecated>}"
-          if [ -n "${{ inputs.message }}" ] && [ -z "$got" ]; then
-            echo "::error::npm accepted the command but the registry does not show it"
-            exit 1
-          fi
+          # Polled, not read once. npm accepts the change immediately and the registry
+          # takes a moment to serve it; reading straight away reported "<not deprecated>"
+          # for a deprecation that had in fact applied, and failed the job on a success.
+          want='${{ inputs.message }}'
+          for attempt in 1 2 3 4 5 6; do
+            got=$(npm view "${{ inputs.spec }}" deprecated 2>/dev/null || true)
+            if [ -z "$want" ] && [ -z "$got" ]; then
+              echo "deprecation lifted"; exit 0
+            fi
+            if [ -n "$want" ] && [ -n "$got" ]; then
+              echo "registry now reports: $got"; exit 0
+            fi
+            echo "attempt $attempt: registry not updated yet, waiting"
+            sleep 10
+          done
+          echo "::error::npm accepted the command but the registry still does not show it after a minute"
+          exit 1
