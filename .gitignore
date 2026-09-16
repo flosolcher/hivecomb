@@ -11,8 +11,14 @@ fuzz/artifacts/
 fuzz/corpus/
 fuzz/coverage/
 fuzz/target/
-hivecomb-node/index.d.ts
-hivecomb-node/index.js
+# NOT ignored, deliberately: `hivecomb-node/index.js` and `index.d.ts` are the
+# addon's entry point and its types. napi generates them at build time, and they
+# used to be ignored on the reasoning that generated files do not belong in git.
+# But the release job publishes without building -- it only downloads prebuilt
+# `.node` artifacts -- so they were absent from the checkout and `hivecomb@0.1.0`
+# went to npm containing nothing but a README, a LICENSE and a package.json
+# pointing at a `main` that was not there. Committing them is the napi-rs
+# convention for exactly this reason. CI checks they match a fresh build.
 .idea/
 # it finds are not — a crash artifact belongs in a bug report, not in git.
 # library is out of date: it is ignored by downstream consumers either way, and
