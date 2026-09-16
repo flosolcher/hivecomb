@@ -8,7 +8,7 @@ members = ["hivecomb", "hivecomb-py", "hivecomb-node"]
 exclude = ["fuzz", "benches/rust-libraries"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 # Measured, not aspirational: `cargo tree` puts the floor at 1.88 even with
 # --no-default-features, via the `time` crate. Several transitive dependencies
