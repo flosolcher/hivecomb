@@ -1,0 +1,61 @@
+# Mark a published npm version as deprecated.
+#
+# Separate from `release.yml` on purpose. Deprecation is not part of publishing: it is
+# something you do afterwards, to one version, once you know it is bad. Putting it in the
+# release job would mean either running it every time or carrying a list of bad versions
+# in a file nobody reads.
+#
+# It exists because `NPM_TOKEN` is an environment secret on `release` and is not available
+# anywhere else -- not locally, not to any other workflow.
+#
+# Deprecation is reversible: passing an empty message un-deprecates. It never removes a
+# version, and anyone who has already installed one is unaffected.
+name: npm deprecate
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: "Package and version, e.g. hivecomb@0.1.0"
+        type: string
+        required: true
+      message:
+        description: "Why. An empty string lifts an existing deprecation."
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deprecate:
+    name: ${{ inputs.spec }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+      - name: the version exists
+        run: |
+          set -euo pipefail
+          # Refuse a typo rather than deprecating something else, or nothing.
+          if ! npm view "${{ inputs.spec }}" version >/dev/null 2>&1; then
+            echo "::error::${{ inputs.spec }} is not published; nothing to deprecate"
+            exit 1
+          fi
+          echo "found $(npm view "${{ inputs.spec }}" version)"
+      - name: deprecate
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm deprecate "${{ inputs.spec }}" "${{ inputs.message }}"
+      - name: confirm it took
+        run: |
+          set -euo pipefail
+          got=$(npm view "${{ inputs.spec }}" deprecated 2>/dev/null || true)
+          echo "registry now reports: ${got:-<not deprecated>}"
+          if [ -n "${{ inputs.message }}" ] && [ -z "$got" ]; then
+            echo "::error::npm accepted the command but the registry does not show it"
+            exit 1
+          fi

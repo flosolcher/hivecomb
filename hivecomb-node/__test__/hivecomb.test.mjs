@@ -531,6 +531,12 @@ test('index.d.ts declares everything the module exports', async () => {
   const interfaces = new Set(
     [...dts.matchAll(/^export interface (\w+)/gm)].map((m) => m[1]),
   )
-  const phantom = [...declared].filter((n) => !runtime.includes(n) && !interfaces.has(n))
+  // The same `_` filter as the runtime side. napi emits internals such as
+  // `__napiBindingTarget`, which *is* exported at runtime but is filtered out above —
+  // so without the matching filter here it read as a declaration promising something
+  // that does not exist, and the test failed on a name that was present in both.
+  const phantom = [...declared].filter(
+    (n) => !n.startsWith('_') && !runtime.includes(n) && !interfaces.has(n),
+  )
   assert.deepEqual(phantom, [], 'declared in index.d.ts but not exported at runtime')
 })

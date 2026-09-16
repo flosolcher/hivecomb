@@ -36,7 +36,13 @@ Both rehearsals ran `npm publish --dry-run` and passed, because publishing an in
 package is a successful publish. What found it was installing from the registry in a
 scratch directory and calling it.
 
-crates.io and both PyPI packages are unaffected in substance and are republished only to
+**Also fixed: [RUSTSEC-2026-0285](https://rustsec.org/advisories/RUSTSEC-2026-0285).**
+`rustls` 0.23.43 accepted TLS 1.3 handshake messages across encryption level boundaries.
+It reaches this crate through `reqwest`, so it affects the RPC client under the `rpc`
+feature and nothing else — signing never opens a socket. Updated to 0.23.45. This one is
+a reason to upgrade if you use the RPC client.
+
+crates.io and both PyPI packages are otherwise unaffected in substance and are republished only to
 keep one version across all four artifacts. **If you are on 0.1.0 of the crate or either
 Python package, there is no reason to upgrade.** If you are on npm, 0.1.0 never worked.
 

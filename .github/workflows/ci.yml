@@ -226,6 +226,15 @@ jobs:
   audit:
     name: dependency advisories
     runs-on: ubuntu-latest
+    # `rustsec/audit-check` reports through a check run, which needs `checks: write`.
+    # Without it the action still finds advisories and still fails the job, but the last
+    # line of the log is "Resource not accessible by integration" rather than the name of
+    # the advisory -- which sends you looking for a permissions problem instead of the
+    # vulnerability it actually found. `contents: read` is repeated because a job-level
+    # block replaces the default rather than adding to it.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v5
       # A signing library inherits its dependencies' vulnerabilities. This checks the

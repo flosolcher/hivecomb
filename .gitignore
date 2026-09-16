@@ -27,6 +27,12 @@ fuzz/target/
 # Node addon build output and dependencies
 node_modules/
 package-lock.json
+# ...except the addon's, which pins @napi-rs/cli -- the tool that *generates* the
+# committed `index.js` and `index.d.ts`. Without it CI resolved a newer napi than the
+# working tree, generated a different entry point, and three CI jobs failed on the
+# difference. Committing a generated file while leaving its generator unpinned is
+# incoherent; this is the other half of that decision.
+!hivecomb-node/package-lock.json
 __pycache__/
 *.pyd
 **/*.rs.bk
