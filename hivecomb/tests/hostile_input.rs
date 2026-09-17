@@ -6,9 +6,21 @@
 //! a signing service, that process is the one holding the keys.
 //!
 //! So the contract is: **every one of these returns `Err`, and none of them panic.**
-//! Eight `unwrap()` calls survive in non-test code, all of them on `try_into()` after a
-//! length has been checked or after `Reader::take` has guaranteed one. This test is the
-//! evidence that the reasoning is right, rather than the reasoning itself.
+//!
+//! Fourteen `unwrap()`/`expect()` calls survive in non-test code, in three groups:
+//!
+//! * **Eight** `try_into().unwrap()`, after a length has been checked or `Reader::take`
+//!   has guaranteed one.
+//! * **Five** `expect()` where the line above guarantees it — `contains_key` before
+//!   `remove`, `len() == 2` before two `pop()`s, a `push` before `last_mut`.
+//! * **One** in [`hivecomb::PrivateKey::generate`], on the operating system CSPRNG
+//!   failing. That one is deliberate and is *not* reachable from input at all: it is an
+//!   environmental failure, and a failed draw means no key was produced rather than a
+//!   weak one. `try_generate` returns it as an error instead.
+//!
+//! The first two groups are facts the type system cannot express, guaranteed one line
+//! earlier. This test is the evidence that the reasoning is right, rather than the
+//! reasoning itself.
 //!
 //! Not a fuzzer. It is a deterministic sweep, cheap enough to run on every commit; a
 //! real fuzzing target would be a good addition and is not here yet.

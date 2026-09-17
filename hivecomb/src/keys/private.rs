@@ -30,7 +30,12 @@ impl PrivateKey {
                 bytes.len()
             )));
         }
-        let inner = SecretKey::from_slice(bytes)
+        // `from_byte_array` takes the array by value; the length was checked above, so
+        // the conversion cannot fail.
+        let array: [u8; SECRET_KEY_LEN] = bytes
+            .try_into()
+            .map_err(|_| Error::key("private key is not 32 bytes"))?;
+        let inner = SecretKey::from_secret_bytes(array)
             .map_err(|_| Error::key("scalar is zero or not below the curve order"))?;
         Ok(PrivateKey { inner })
     }
@@ -105,10 +110,30 @@ impl PrivateKey {
     /// long-lived key material that may guard funds for years. `OsRng` goes to
     /// `getrandom` every time, which is also what BIP-39 entropy uses here — one
     /// source for every secret this crate creates, rather than two.
+    ///
+    /// Panics if the operating system CSPRNG fails, which means no key was produced
+    /// rather than a weak one. Use [`Self::try_generate`] to handle that yourself.
     pub fn generate() -> Self {
-        use rand::rngs::OsRng;
-        let (inner, _) = secp256k1::SECP256K1.generate_keypair(&mut OsRng);
-        PrivateKey { inner }
+        Self::try_generate().expect("the operating system CSPRNG failed")
+    }
+
+    /// Generate a key, reporting a CSPRNG failure instead of panicking.
+    ///
+    /// The scalar is drawn here rather than through `secp256k1`'s own `rand`
+    /// integration, so that every secret this crate creates comes from one internal
+    /// source and a failure is visible at the call site.
+    pub fn try_generate() -> Result<Self> {
+        loop {
+            let mut bytes = Zeroizing::new([0u8; SECRET_KEY_LEN]);
+            crate::rng::fill(&mut *bytes)?;
+            // Rejected when the draw is zero or at/above the curve order. That happens
+            // with probability below 2^-128, so this loops essentially never -- but
+            // clamping instead of redrawing would bias the key, and a signing library
+            // does not get to be approximately right about this.
+            if let Ok(inner) = SecretKey::from_secret_bytes(*bytes) {
+                return Ok(PrivateKey { inner });
+            }
+        }
     }
 
     /// The matching compressed public key.
@@ -116,7 +141,7 @@ impl PrivateKey {
         // The process-wide context: `signing_only()` rebuilt the precomputation
         // tables on every call, and this is called for every key, every signature
         // check and every authority comparison.
-        let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, &self.inner);
+        let pk = secp256k1::PublicKey::from_secret_key(&self.inner);
         PublicKey::from_inner(pk)
     }
 
@@ -127,13 +152,13 @@ impl PrivateKey {
     pub fn to_wif(&self) -> Zeroizing<String> {
         let mut payload = Zeroizing::new(Vec::with_capacity(1 + SECRET_KEY_LEN));
         payload.push(WIF_VERSION);
-        payload.extend_from_slice(&self.inner.secret_bytes());
+        payload.extend_from_slice(&self.inner.to_secret_bytes());
         Zeroizing::new(base58::encode_check(&payload))
     }
 
     /// Export the raw 32-byte scalar.
     pub fn expose_secret(&self) -> Zeroizing<[u8; SECRET_KEY_LEN]> {
-        Zeroizing::new(self.inner.secret_bytes())
+        Zeroizing::new(self.inner.to_secret_bytes())
     }
 
     /// The underlying `secp256k1` key, for the signing path.
@@ -188,7 +213,7 @@ impl Drop for PrivateKey {
     /// The first implementation did:
     ///
     /// ```ignore
-    /// let mut bytes = self.inner.secret_bytes();
+    /// let mut bytes = self.inner.to_secret_bytes();
     /// bytes.zeroize();
     /// ```
     ///
@@ -266,9 +291,9 @@ mod tests {
         let before = key.to_wif().as_str().to_owned();
 
         let mut inner = key.inner;
-        let original = inner.secret_bytes();
+        let original = inner.to_secret_bytes();
         inner.non_secure_erase();
-        let after = inner.secret_bytes();
+        let after = inner.to_secret_bytes();
 
         assert_ne!(
             original, after,

@@ -60,14 +60,13 @@ impl Mnemonic {
     /// `strength` is in bits and must be one of 128, 160, 192, 224 or 256 — giving 12,
     /// 15, 18, 21 or 24 words.
     pub fn generate(strength: usize) -> Result<Self> {
-        use rand::RngCore;
         if !matches!(strength, 128 | 160 | 192 | 224 | 256) {
             return Err(Error::key(format!(
                 "strength must be 128, 160, 192, 224 or 256 bits, got {strength}"
             )));
         }
         let mut entropy = Zeroizing::new(vec![0u8; strength / 8]);
-        rand::rngs::OsRng.fill_bytes(&mut entropy);
+        crate::rng::fill(&mut entropy)?;
         Self::from_entropy(&entropy)
     }
 

@@ -236,8 +236,6 @@ impl BrainKey {
     /// Hive wallets conventionally use 16 words (~249.6 bits). Fewer than 12 is
     /// refused.
     pub fn suggest(word_count: usize) -> Result<String> {
-        use rand::RngCore;
-
         if word_count < 12 {
             return Err(Error::key(format!(
                 "a brain key of {word_count} words carries too little entropy; use at least 12"
@@ -256,11 +254,10 @@ impl BrainKey {
         // so the remaining range divides evenly and the modulo is unbiased.
         let limit = u32::MAX - (u32::MAX % n) - (n - 1);
 
-        let mut rng = rand::rngs::OsRng;
         let mut out = Vec::with_capacity(word_count);
         for _ in 0..word_count {
             let idx = loop {
-                let v = rng.next_u32();
+                let v = crate::rng::next_u32()?;
                 if v < limit {
                     break (v % n) as usize;
                 }

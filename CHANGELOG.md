@@ -16,7 +16,40 @@ would otherwise say, and it will be called out here in its own section.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **The minimum supported Rust version rises from 1.88 to 1.89**, because `aes` 0.9
+  raised its own. Measured from `cargo metadata` across the resolved tree rather than
+  guessed, and CI builds and tests against it.
+- **`thiserror` 1 → 2.** No source changes; the derive syntax this crate uses is
+  unchanged.
+- **The RustCrypto family, one series each**: `sha2` 0.11, `hmac` 0.13, `ripemd` 0.2,
+  `aes` 0.9, `cbc` 0.2, `aes-gcm` 0.11, `scrypt` 0.12, `pbkdf2` 0.13. They share the
+  `digest` and `cipher` trait crates, so they move together or not at all. No output
+  changes: BIP-32, BIP-38 and BIP-39 still match their published test vectors, and an
+  independent memo implementation still reads what this crate encrypts.
+- **`secp256k1` 0.29 → 0.33 and `rand` 0.8 → 0.9.** Four release series on the curve
+  library this crate signs with. No behaviour change: key derivation, digests and
+  signatures are unmoved, checked against hived rather than against this crate's own
+  tests — 57/57 operations byte-identical, 26/26 authorities, and the beem differential
+  oracle still accounts for every divergence.
+- **A CSPRNG failure is now an error rather than a panic**, everywhere it can be.
+  `rand` 0.9 makes `OsRng` fallible, which is the honest shape — `getrandom` can fail —
+  and five of the six places this crate draws randomness already returned `Result`, so
+  the failure propagates to the caller. They all go through one internal module now, so
+  there is a single answer to "where does this library get its randomness".
+
+Two direct dependencies are deliberately held, with the reason in `Cargo.toml` rather
+than only here: `rand` at 0.9, because `secp256k1` 0.33 requires `^0.9` and two `rand`
+versions would mean two CSPRNG paths in a signing library; and `reqwest` at 0.12,
+because 0.13 switches the TLS crypto provider to `aws-lc-rs`, which wants a C toolchain
+this workspace would have to cross-compile for five targets.
+
+### Added
+
+- **`PrivateKey::try_generate`**, which reports a CSPRNG failure instead of panicking.
+  `PrivateKey::generate` keeps its signature and panics, because a failed draw means no
+  key was produced rather than a weak one — but the choice is now the caller's.
 
 ## [0.1.2] — 2026-09-16
 

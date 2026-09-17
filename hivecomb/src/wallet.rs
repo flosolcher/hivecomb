@@ -30,22 +30,25 @@
 //!
 //! # What a passphrase buys you
 //!
-//! scrypt at `N = 32768, r = 8, p = 1` costs 32 MiB (`128 * r * N`) and, measured on a
-//! 2.4 GHz i9-10885H, about **70 milliseconds** per guess. That is a meaningful
-//! multiplier, not a substitute for entropy. A six-word diceware passphrase is fine; a
-//! dictionary word is not, whatever the work factor.
+//! scrypt at `N = 32768, r = 8, p = 1` costs 32 MiB (`128 * r * N`) -- that part is
+//! arithmetic -- and about **49 milliseconds** per guess, measured by
+//! `examples/bench_pipeline.rs` on a 2.4 GHz i9-10885H on 2026-09-17, on scrypt 0.12.
+//! It was ~70 ms before that series bump; the memory cost, which is what actually
+//! resists a GPU, has not moved. Either way it is a meaningful multiplier, not a
+//! substitute for entropy: a six-word diceware passphrase is fine, a dictionary word is
+//! not, whatever the work factor.
 //!
 //! That cost is paid **once, by [`Wallet::unlock`]**, and never again: unlocking caches
 //! the derived cipher, so fetching a key afterwards is a string comparison and one
 //! AES-GCM decryption -- microseconds. Unlock once and keep the wallet unlocked. A
-//! program that unlocked per transaction would add ~70 ms to a path where signing itself
-//! costs ~70 *micro*seconds, which is a thousandfold penalty for no security gain.
+//! program that unlocked per transaction would add ~49 ms to a path where signing itself
+//! costs ~70 *micro*seconds, which is still a factor of several hundred for no security
+//! gain.
 
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey, Role};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -194,7 +197,7 @@ impl Wallet {
         }
 
         let mut salt = [0u8; 16];
-        rand::rngs::OsRng.fill_bytes(&mut salt);
+        crate::rng::fill(&mut salt)?;
         let key = derive_key(passphrase, &salt, SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)?;
         let cipher = Aes256Gcm::new_from_slice(&*key)
             .map_err(|e| Error::key(format!("AES-GCM init failed: {e}")))?;
@@ -417,7 +420,7 @@ impl Wallet {
         }
 
         let mut salt = [0u8; 16];
-        rand::rngs::OsRng.fill_bytes(&mut salt);
+        crate::rng::fill(&mut salt)?;
         let derived = derive_key(new_passphrase, &salt, SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)?;
         let cipher = Aes256Gcm::new_from_slice(&*derived)
             .map_err(|e| Error::key(format!("AES-GCM init failed: {e}")))?;
@@ -485,7 +488,9 @@ fn derive_key(
     r: u32,
     p: u32,
 ) -> Result<Zeroizing<[u8; 32]>> {
-    let params = scrypt::Params::new(log_n, r, p, 32)
+    // scrypt 0.12 dropped the output-length argument from `Params::new`; the length is
+    // taken from the output buffer passed to `scrypt` below, which is the same 32 bytes.
+    let params = scrypt::Params::new(log_n, r, p)
         .map_err(|e| Error::key(format!("bad scrypt parameters: {e}")))?;
     let mut out = Zeroizing::new([0u8; 32]);
     scrypt::scrypt(passphrase.as_bytes(), salt, &params, &mut *out)
@@ -496,10 +501,14 @@ fn derive_key(
 /// Encrypt under a fresh random nonce, returning both base64-encoded.
 fn encrypt_with(cipher: &Aes256Gcm, plaintext: &[u8]) -> Result<(String, String)> {
     let mut nonce_bytes = [0u8; 12];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    crate::rng::fill(&mut nonce_bytes)?;
+    // `Array::from_slice` is deprecated in favour of `TryFrom`, which is honest: it
+    // panicked on a wrong length where this returns an error. The length is fixed here
+    // by the array above, so the conversion cannot fail.
+    let nonce =
+        Nonce::try_from(&nonce_bytes[..]).map_err(|_| Error::key("nonce is not 12 bytes"))?;
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(&nonce, plaintext)
         .map_err(|_| Error::key("wallet encryption failed"))?;
     Ok((b64(&nonce_bytes), b64(&ciphertext)))
 }
@@ -511,11 +520,13 @@ fn decrypt_with(cipher: &Aes256Gcm, nonce_b64: &str, ciphertext_b64: &str) -> Re
         return Err(Error::key("wallet entry has a malformed nonce"));
     }
     let ciphertext = unb64(ciphertext_b64)?;
-    cipher
-        .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
-        .map_err(|_| {
-            Error::key("wallet entry failed authentication: wrong passphrase or tampered file")
-        })
+    // Length checked just above, so this cannot fail -- but it returns an error rather
+    // than panicking, which is what `from_slice` used to do on a malformed wallet file.
+    let nonce = Nonce::try_from(&nonce_bytes[..])
+        .map_err(|_| Error::key("wallet entry has a malformed nonce"))?;
+    cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|_| {
+        Error::key("wallet entry failed authentication: wrong passphrase or tampered file")
+    })
 }
 
 #[cfg(test)]

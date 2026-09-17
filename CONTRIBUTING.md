@@ -50,7 +50,7 @@ PYTHONPATH=dist python3 tests/hived_authority_oracle.py
 PYTHONPATH=dist python3.8 tests/differential_beem.py
 ```
 
-CI runs all of the offline ones on Linux, macOS and Windows, at stable and at the 1.88
+CI runs all of the offline ones on Linux, macOS and Windows, at stable and at the 1.89
 MSRV. The live oracles run on a schedule instead, so a slow public node never fails a
 pull request.
 

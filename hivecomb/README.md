@@ -8,7 +8,7 @@ Rust.
 hivecomb = "0.1"
 ```
 
-Rust 1.88+. `#![forbid(unsafe_code)]`. Python and Node.js bindings live in the same
+Rust 1.89+. `#![forbid(unsafe_code)]`. Python and Node.js bindings live in the same
 [repository](https://github.com/flosolcher/hivecomb).
 
 ---

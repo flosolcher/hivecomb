@@ -273,21 +273,22 @@ fn grind_distribution(key: &PrivateKey) {
     use hivecomb::sign::is_canonical;
     use secp256k1::Message;
 
-    let secp = secp256k1::SECP256K1;
     // Reconstructed from the public accessor rather than reaching inside `PrivateKey`;
     // the benchmark has no business widening the library's API.
-    let secret = secp256k1::SecretKey::from_slice(&*key.expose_secret()).expect("valid key");
+    let secret = secp256k1::SecretKey::from_secret_bytes(*key.expose_secret()).expect("valid key");
     let mut attempts = [0u32; 8];
     let mut total = 0u64;
     const SAMPLES: u32 = 20_000;
 
     for sample in 0..SAMPLES {
         let digest = <[u8; 32]>::from(<sha2::Sha256 as sha2::Digest>::digest(sample.to_le_bytes()));
-        let msg = Message::from_digest_slice(&digest).expect("32 bytes");
+        let msg = Message::from_digest(digest);
         for counter in 1u32..=64 {
             let mut nonce = [0u8; 32];
             nonce[28..].copy_from_slice(&counter.to_be_bytes());
-            let sig = secp.sign_ecdsa_recoverable_with_noncedata(&msg, &secret, &nonce);
+            let sig = secp256k1::ecdsa::RecoverableSignature::sign_ecdsa_recoverable_with_noncedata(
+                msg, &secret, &nonce,
+            );
             let (_, compact) = sig.serialize_compact();
             if is_canonical(&compact) {
                 attempts[(counter as usize - 1).min(7)] += 1;

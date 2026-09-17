@@ -61,6 +61,7 @@ pub mod error;
 
 /// Hex decoding that cannot panic on the text a node or a user hands over.
 mod hex;
+
 pub mod keys;
 #[cfg(feature = "memo")]
 pub mod memo;
@@ -68,6 +69,8 @@ pub mod memo;
 #[allow(missing_docs)]
 pub mod operations;
 pub mod reader;
+/// The one place this crate draws randomness from.
+mod rng;
 #[cfg(feature = "rpc")]
 pub mod rpc;
 pub mod sign;

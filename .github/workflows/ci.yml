@@ -34,7 +34,7 @@ jobs:
           # The declared MSRV, which is only meaningful if something checks it.
           # Keep in step with `rust-version` in the workspace Cargo.toml.
           - os: ubuntu-latest
-            rust: "1.88"
+            rust: "1.89"
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master

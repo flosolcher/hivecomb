@@ -31,7 +31,9 @@
 
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey, Role};
-use hmac::{Hmac, Mac};
+// `KeyInit` carries `new_from_slice`. It used to come in through `Mac`; since
+// hmac 0.13 it has to be named.
+use hmac::{digest::KeyInit, Hmac, Mac};
 use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
 
@@ -183,7 +185,7 @@ impl ExtendedPrivateKey {
         chain_code.copy_from_slice(&i[32..]);
 
         Ok(ExtendedPrivateKey {
-            key: PrivateKey::from_bytes(&child.secret_bytes())?,
+            key: PrivateKey::from_bytes(&child.to_secret_bytes())?,
             chain_code,
             depth: self
                 .depth

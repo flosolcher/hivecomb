@@ -10,41 +10,57 @@ exclude = ["fuzz", "benches/rust-libraries"]
 [workspace.package]
 version = "0.1.2"
 edition = "2021"
-# Measured, not aspirational: `cargo tree` puts the floor at 1.88 even with
-# --no-default-features, via the `time` crate. Several transitive dependencies
-# are on edition 2024, which Cargo below 1.85 cannot even parse -- a 1.75
-# toolchain fails at manifest resolution, before compiling anything.
-# Re-measure before lowering this; CI builds and tests against it.
-rust-version = "1.88"
+# Measured, not aspirational: the highest `rust-version` in the resolved tree, read
+# from `cargo metadata` rather than guessed. 1.89 comes from `aes` 0.9, which raised it
+# in the RustCrypto series bump; before that the floor was 1.88 from `time`. Several
+# transitive dependencies are on edition 2024, which Cargo below 1.85 cannot even parse
+# -- a 1.75 toolchain fails at manifest resolution, before compiling anything.
+# Re-measure before changing this; CI builds and tests against it.
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/flosolcher/hivecomb"
 authors = ["The hivecomb contributors"]
 
 [workspace.dependencies]
-secp256k1 = { version = "0.29", features = ["recovery", "global-context", "rand-std"] }
-sha2 = "0.10"
-ripemd = "0.1"
+# No `rand` feature: nothing here uses secp256k1's own rand integration any more --
+# `PrivateKey::try_generate` draws the scalar through `crate::rng` so that every secret
+# comes from one source. Dropping it also removes a `rand::random()` call that 0.33 makes
+# on every signature while rerandomizing the context, though measuring says that call was
+# not the cost: 122 us either way.
+secp256k1 = { version = "0.33", features = ["recovery", "global-context", "std"] }
+sha2 = "0.11"
+ripemd = "0.2"
 bs58 = "0.5"
-hmac = "0.12"
-thiserror = "1"
+hmac = "0.13"
+thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 zeroize = { version = "1", features = ["derive"] }
 subtle = "2"
-rand = "0.8"
-aes = "0.8"
-cbc = { version = "0.1", features = ["alloc"] }
-aes-gcm = "0.10"
-scrypt = { version = "0.11", default-features = false }
+# Held at 0.9 by secp256k1 0.33, which requires ^0.9. Two `rand` versions in one tree
+# would mean two CSPRNG code paths in a signing library, which is worse than being a
+# series behind.
+rand = "0.9"
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+aes-gcm = "0.11"
+scrypt = { version = "0.12", default-features = false }
 # `hmac` is what provides `pbkdf2_hmac`, used by BIP-39 seed derivation. It is a
 # default feature, so `default-features = false` drops it -- and the build still
 # succeeded because `scrypt` (pulled in by `wallet` and `bip38`, both on by
 # default) enabled it through feature unification. `--features bip32` alone did
 # not compile. Named explicitly so the feature stands on its own.
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 unicode-normalization = "0.1"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# Held at 0.12 deliberately. 0.13 renames the `rustls-tls` feature to `rustls`, and
+# that feature now pulls in `rustls-platform-verifier` and switches the crypto provider
+# from ring to aws-lc-rs. Both are defensible on their own -- the platform verifier
+# respects an enterprise trust store, which bundled webpki roots do not -- but aws-lc-rs
+# wants a C toolchain, and this workspace cross-compiles wheels and addons for five
+# targets including two aarch64 ones. Revisit with a release that can afford to find out
+# the hard way; 0.12 is maintained and carries no advisory.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", default-features = false }
 
