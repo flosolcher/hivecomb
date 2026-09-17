@@ -22,7 +22,12 @@ repository = "https://github.com/flosolcher/hivecomb"
 authors = ["The hivecomb contributors"]
 
 [workspace.dependencies]
-secp256k1 = { version = "0.33", features = ["recovery", "global-context", "rand", "std"] }
+# No `rand` feature: nothing here uses secp256k1's own rand integration any more --
+# `PrivateKey::try_generate` draws the scalar through `crate::rng` so that every secret
+# comes from one source. Dropping it also removes a `rand::random()` call that 0.33 makes
+# on every signature while rerandomizing the context, though measuring says that call was
+# not the cost: 122 us either way.
+secp256k1 = { version = "0.33", features = ["recovery", "global-context", "std"] }
 sha2 = "0.11"
 ripemd = "0.2"
 bs58 = "0.5"
