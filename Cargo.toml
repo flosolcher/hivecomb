@@ -26,11 +26,14 @@ sha2 = "0.11"
 ripemd = "0.2"
 bs58 = "0.5"
 hmac = "0.13"
-thiserror = "1"
+thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 zeroize = { version = "1", features = ["derive"] }
 subtle = "2"
+# Held at 0.9 by secp256k1 0.33, which requires ^0.9. Two `rand` versions in one tree
+# would mean two CSPRNG code paths in a signing library, which is worse than being a
+# series behind.
 rand = "0.9"
 aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
@@ -45,6 +48,13 @@ pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 unicode-normalization = "0.1"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# Held at 0.12 deliberately. 0.13 renames the `rustls-tls` feature to `rustls`, and
+# that feature now pulls in `rustls-platform-verifier` and switches the crypto provider
+# from ring to aws-lc-rs. Both are defensible on their own -- the platform verifier
+# respects an enterprise trust store, which bundled webpki roots do not -- but aws-lc-rs
+# wants a C toolchain, and this workspace cross-compiles wheels and addons for five
+# targets including two aarch64 ones. Revisit with a release that can afford to find out
+# the hard way; 0.12 is maintained and carries no advisory.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", default-features = false }
 

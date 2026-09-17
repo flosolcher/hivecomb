@@ -18,6 +18,8 @@ would otherwise say, and it will be called out here in its own section.
 
 ### Changed
 
+- **`thiserror` 1 → 2.** No source changes; the derive syntax this crate uses is
+  unchanged.
 - **The RustCrypto family, one series each**: `sha2` 0.11, `hmac` 0.13, `ripemd` 0.2,
   `aes` 0.9, `cbc` 0.2, `aes-gcm` 0.11, `scrypt` 0.12, `pbkdf2` 0.13. They share the
   `digest` and `cipher` trait crates, so they move together or not at all. No output
@@ -33,6 +35,12 @@ would otherwise say, and it will be called out here in its own section.
   and five of the six places this crate draws randomness already returned `Result`, so
   the failure propagates to the caller. They all go through one internal module now, so
   there is a single answer to "where does this library get its randomness".
+
+Two direct dependencies are deliberately held, with the reason in `Cargo.toml` rather
+than only here: `rand` at 0.9, because `secp256k1` 0.33 requires `^0.9` and two `rand`
+versions would mean two CSPRNG paths in a signing library; and `reqwest` at 0.12,
+because 0.13 switches the TLS crypto provider to `aws-lc-rs`, which wants a C toolchain
+this workspace would have to cross-compile for five targets.
 
 ### Added
 
