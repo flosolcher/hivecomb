@@ -30,7 +30,7 @@
 use crate::base58;
 use crate::error::{Error, Result};
 use crate::keys::PrivateKey;
-use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
@@ -65,7 +65,9 @@ fn bitcoin_address(key: &PrivateKey) -> String {
 
 /// Derive the 64-byte scrypt output for a passphrase and salt.
 fn stretch(passphrase: &str, salt: &[u8; 4]) -> Result<Zeroizing<[u8; 64]>> {
-    let params = scrypt::Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P, 64)
+    // scrypt 0.12 dropped the output-length argument; the length comes from the output
+    // buffer below, which is the same 64 bytes BIP-38 specifies.
+    let params = scrypt::Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)
         .map_err(|e| Error::key(format!("bad scrypt parameters: {e}")))?;
     let mut out = Zeroizing::new([0u8; 64]);
     scrypt::scrypt(passphrase.as_bytes(), salt, &params, &mut *out)

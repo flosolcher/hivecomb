@@ -31,7 +31,9 @@
 
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey, Role};
-use hmac::{Hmac, Mac};
+// `KeyInit` carries `new_from_slice`. It used to come in through `Mac`; since
+// hmac 0.13 it has to be named.
+use hmac::{digest::KeyInit, Hmac, Mac};
 use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
 

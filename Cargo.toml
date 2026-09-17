@@ -22,26 +22,26 @@ authors = ["The hivecomb contributors"]
 
 [workspace.dependencies]
 secp256k1 = { version = "0.33", features = ["recovery", "global-context", "rand", "std"] }
-sha2 = "0.10"
-ripemd = "0.1"
+sha2 = "0.11"
+ripemd = "0.2"
 bs58 = "0.5"
-hmac = "0.12"
+hmac = "0.13"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 zeroize = { version = "1", features = ["derive"] }
 subtle = "2"
 rand = "0.9"
-aes = "0.8"
-cbc = { version = "0.1", features = ["alloc"] }
-aes-gcm = "0.10"
-scrypt = { version = "0.11", default-features = false }
+aes = "0.9"
+cbc = { version = "0.2", features = ["alloc"] }
+aes-gcm = "0.11"
+scrypt = { version = "0.12", default-features = false }
 # `hmac` is what provides `pbkdf2_hmac`, used by BIP-39 seed derivation. It is a
 # default feature, so `default-features = false` drops it -- and the build still
 # succeeded because `scrypt` (pulled in by `wallet` and `bip38`, both on by
 # default) enabled it through feature unification. `--features bip32` alone did
 # not compile. Named explicitly so the feature stands on its own.
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 unicode-normalization = "0.1"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }

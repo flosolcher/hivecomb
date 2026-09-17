@@ -484,7 +484,9 @@ fn derive_key(
     r: u32,
     p: u32,
 ) -> Result<Zeroizing<[u8; 32]>> {
-    let params = scrypt::Params::new(log_n, r, p, 32)
+    // scrypt 0.12 dropped the output-length argument from `Params::new`; the length is
+    // taken from the output buffer passed to `scrypt` below, which is the same 32 bytes.
+    let params = scrypt::Params::new(log_n, r, p)
         .map_err(|e| Error::key(format!("bad scrypt parameters: {e}")))?;
     let mut out = Zeroizing::new([0u8; 32]);
     scrypt::scrypt(passphrase.as_bytes(), salt, &params, &mut *out)
@@ -496,9 +498,13 @@ fn derive_key(
 fn encrypt_with(cipher: &Aes256Gcm, plaintext: &[u8]) -> Result<(String, String)> {
     let mut nonce_bytes = [0u8; 12];
     crate::rng::fill(&mut nonce_bytes)?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    // `Array::from_slice` is deprecated in favour of `TryFrom`, which is honest: it
+    // panicked on a wrong length where this returns an error. The length is fixed here
+    // by the array above, so the conversion cannot fail.
+    let nonce =
+        Nonce::try_from(&nonce_bytes[..]).map_err(|_| Error::key("nonce is not 12 bytes"))?;
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(&nonce, plaintext)
         .map_err(|_| Error::key("wallet encryption failed"))?;
     Ok((b64(&nonce_bytes), b64(&ciphertext)))
 }
@@ -510,11 +516,13 @@ fn decrypt_with(cipher: &Aes256Gcm, nonce_b64: &str, ciphertext_b64: &str) -> Re
         return Err(Error::key("wallet entry has a malformed nonce"));
     }
     let ciphertext = unb64(ciphertext_b64)?;
-    cipher
-        .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext.as_ref())
-        .map_err(|_| {
-            Error::key("wallet entry failed authentication: wrong passphrase or tampered file")
-        })
+    // Length checked just above, so this cannot fail -- but it returns an error rather
+    // than panicking, which is what `from_slice` used to do on a malformed wallet file.
+    let nonce = Nonce::try_from(&nonce_bytes[..])
+        .map_err(|_| Error::key("wallet entry has a malformed nonce"))?;
+    cipher.decrypt(&nonce, ciphertext.as_ref()).map_err(|_| {
+        Error::key("wallet entry failed authentication: wrong passphrase or tampered file")
+    })
 }
 
 #[cfg(test)]

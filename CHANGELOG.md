@@ -18,6 +18,11 @@ would otherwise say, and it will be called out here in its own section.
 
 ### Changed
 
+- **The RustCrypto family, one series each**: `sha2` 0.11, `hmac` 0.13, `ripemd` 0.2,
+  `aes` 0.9, `cbc` 0.2, `aes-gcm` 0.11, `scrypt` 0.12, `pbkdf2` 0.13. They share the
+  `digest` and `cipher` trait crates, so they move together or not at all. No output
+  changes: BIP-32, BIP-38 and BIP-39 still match their published test vectors, and an
+  independent memo implementation still reads what this crate encrypts.
 - **`secp256k1` 0.29 → 0.33 and `rand` 0.8 → 0.9.** Four release series on the curve
   library this crate signs with. No behaviour change: key derivation, digests and
   signatures are unmoved, checked against hived rather than against this crate's own

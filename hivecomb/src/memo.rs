@@ -44,7 +44,7 @@
 use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey};
 use crate::types::{read_varint32, write_varint32, GrapheneSerialize};
-use aes::cipher::{block_padding::NoPadding, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use aes::cipher::{block_padding::NoPadding, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 use sha2::{Digest, Sha256, Sha512};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
@@ -229,7 +229,7 @@ pub fn encode_with_nonce(
     pad(&mut plaintext);
 
     let encrypted =
-        Encryptor::new((&*key).into(), &iv.into()).encrypt_padded_vec_mut::<NoPadding>(&plaintext);
+        Encryptor::new((&*key).into(), &iv.into()).encrypt_padded_vec::<NoPadding>(&plaintext);
 
     EncryptedMemo {
         from: from_key.public_key(),
@@ -283,7 +283,7 @@ pub fn decode(key: &PrivateKey, memo: &str) -> Result<String> {
 
     let plaintext = Zeroizing::new(
         Decryptor::new((&*aes_key).into(), &iv.into())
-            .decrypt_padded_vec_mut::<NoPadding>(&parsed.encrypted)
+            .decrypt_padded_vec::<NoPadding>(&parsed.encrypted)
             .map_err(|e| Error::Memo(format!("decryption failed: {e}")))?,
     );
     let unpadded = unpad(&plaintext)?;
@@ -369,7 +369,7 @@ mod tests {
         let secret = shared_secret(&bob(), &parsed.from).unwrap();
         let (key, iv, _) = derive(&secret, parsed.nonce);
         let plain = Decryptor::new((&*key).into(), &iv.into())
-            .decrypt_padded_vec_mut::<NoPadding>(&parsed.encrypted)
+            .decrypt_padded_vec::<NoPadding>(&parsed.encrypted)
             .unwrap();
         let unpadded = unpad(&plain).unwrap();
         assert_eq!(
@@ -389,8 +389,8 @@ mod tests {
         let (key, iv, check) = derive(&secret, nonce);
         let mut plaintext = message.as_bytes().to_vec();
         pad(&mut plaintext);
-        let encrypted = Encryptor::new((&*key).into(), &iv.into())
-            .encrypt_padded_vec_mut::<NoPadding>(&plaintext);
+        let encrypted =
+            Encryptor::new((&*key).into(), &iv.into()).encrypt_padded_vec::<NoPadding>(&plaintext);
         let memo = EncryptedMemo {
             from: alice().public_key(),
             to: bob().public_key(),
