@@ -18,6 +18,9 @@ would otherwise say, and it will be called out here in its own section.
 
 ### Changed
 
+- **The minimum supported Rust version rises from 1.88 to 1.89**, because `aes` 0.9
+  raised its own. Measured from `cargo metadata` across the resolved tree rather than
+  guessed, and CI builds and tests against it.
 - **`thiserror` 1 → 2.** No source changes; the derive syntax this crate uses is
   unchanged.
 - **The RustCrypto family, one series each**: `sha2` 0.11, `hmac` 0.13, `ripemd` 0.2,

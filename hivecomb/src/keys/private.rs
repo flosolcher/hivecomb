@@ -120,8 +120,8 @@ impl PrivateKey {
     /// Generate a key, reporting a CSPRNG failure instead of panicking.
     ///
     /// The scalar is drawn here rather than through `secp256k1`'s own `rand`
-    /// integration, so that every secret this crate creates comes from the one source in
-    /// [`crate::rng`] and a failure is visible at the call site.
+    /// integration, so that every secret this crate creates comes from one internal
+    /// source and a failure is visible at the call site.
     pub fn try_generate() -> Result<Self> {
         loop {
             let mut bytes = Zeroizing::new([0u8; SECRET_KEY_LEN]);

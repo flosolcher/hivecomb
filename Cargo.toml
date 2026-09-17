@@ -10,12 +10,13 @@ exclude = ["fuzz", "benches/rust-libraries"]
 [workspace.package]
 version = "0.1.2"
 edition = "2021"
-# Measured, not aspirational: `cargo tree` puts the floor at 1.88 even with
-# --no-default-features, via the `time` crate. Several transitive dependencies
-# are on edition 2024, which Cargo below 1.85 cannot even parse -- a 1.75
-# toolchain fails at manifest resolution, before compiling anything.
-# Re-measure before lowering this; CI builds and tests against it.
-rust-version = "1.88"
+# Measured, not aspirational: the highest `rust-version` in the resolved tree, read
+# from `cargo metadata` rather than guessed. 1.89 comes from `aes` 0.9, which raised it
+# in the RustCrypto series bump; before that the floor was 1.88 from `time`. Several
+# transitive dependencies are on edition 2024, which Cargo below 1.85 cannot even parse
+# -- a 1.75 toolchain fails at manifest resolution, before compiling anything.
+# Re-measure before changing this; CI builds and tests against it.
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/flosolcher/hivecomb"
 authors = ["The hivecomb contributors"]

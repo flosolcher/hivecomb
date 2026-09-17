@@ -78,7 +78,7 @@ npm install hivecomb                # Node.js: native addon, TypeScript types in
 Uninstall `beem` first — the package names deliberately collide. See
 [MIGRATION.md](MIGRATION.md).
 
-Rust 1.88+, Python 3.8+ (abi3 wheels), Node 20+.
+Rust 1.89+, Python 3.8+ (abi3 wheels), Node 20+.
 
 ## Why
 
