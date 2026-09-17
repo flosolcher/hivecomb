@@ -61,10 +61,7 @@ fn shared_secret(private: &PrivateKey, public: &PublicKey) -> Result<Zeroizing<[
     // `mul_tweak` returns the scaled point; it does not mutate in place.
     let point = public
         .inner_ref()
-        .mul_tweak(
-            secp256k1::SECP256K1,
-            &secp256k1::Scalar::from(*private.inner()),
-        )
+        .mul_tweak(&secp256k1::Scalar::from(*private.inner()))
         .map_err(|e| Error::Memo(format!("ECDH failed: {e}")))?;
     // serialize_uncompressed is 0x04 || X(32) || Y(32); the secret is sha512(X).
     let uncompressed = Zeroizing::new(point.serialize_uncompressed());
@@ -201,9 +198,8 @@ pub fn is_encrypted(memo: &str) -> bool {
 
 /// Encrypt `message` from `from_key` to `to_key`, generating a random nonce.
 pub fn encode(from_key: &PrivateKey, to_key: &PublicKey, message: &str) -> Result<String> {
-    use rand::RngCore;
     let mut nonce_bytes = [0u8; 8];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    crate::rng::fill(&mut nonce_bytes)?;
     encode_with_nonce(from_key, to_key, message, u64::from_le_bytes(nonce_bytes))
 }
 

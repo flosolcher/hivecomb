@@ -16,7 +16,24 @@ would otherwise say, and it will be called out here in its own section.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **`secp256k1` 0.29 → 0.33 and `rand` 0.8 → 0.9.** Four release series on the curve
+  library this crate signs with. No behaviour change: key derivation, digests and
+  signatures are unmoved, checked against hived rather than against this crate's own
+  tests — 57/57 operations byte-identical, 26/26 authorities, and the beem differential
+  oracle still accounts for every divergence.
+- **A CSPRNG failure is now an error rather than a panic**, everywhere it can be.
+  `rand` 0.9 makes `OsRng` fallible, which is the honest shape — `getrandom` can fail —
+  and five of the six places this crate draws randomness already returned `Result`, so
+  the failure propagates to the caller. They all go through one internal module now, so
+  there is a single answer to "where does this library get its randomness".
+
+### Added
+
+- **`PrivateKey::try_generate`**, which reports a CSPRNG failure instead of panicking.
+  `PrivateKey::generate` keeps its signature and panics, because a failed draw means no
+  key was produced rather than a weak one — but the choice is now the caller's.
 
 ## [0.1.2] — 2026-09-16
 

@@ -183,7 +183,7 @@ impl ExtendedPrivateKey {
         chain_code.copy_from_slice(&i[32..]);
 
         Ok(ExtendedPrivateKey {
-            key: PrivateKey::from_bytes(&child.secret_bytes())?,
+            key: PrivateKey::from_bytes(&child.to_secret_bytes())?,
             chain_code,
             depth: self
                 .depth

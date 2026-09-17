@@ -21,7 +21,7 @@ repository = "https://github.com/flosolcher/hivecomb"
 authors = ["The hivecomb contributors"]
 
 [workspace.dependencies]
-secp256k1 = { version = "0.29", features = ["recovery", "global-context", "rand-std"] }
+secp256k1 = { version = "0.33", features = ["recovery", "global-context", "rand", "std"] }
 sha2 = "0.10"
 ripemd = "0.1"
 bs58 = "0.5"
@@ -31,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 zeroize = { version = "1", features = ["derive"] }
 subtle = "2"
-rand = "0.8"
+rand = "0.9"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 aes-gcm = "0.10"

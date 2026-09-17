@@ -145,7 +145,7 @@ impl Signature {
     }
 
     fn to_recoverable(self) -> Result<RecoverableSignature> {
-        let rec_id = RecoveryId::from_i32(self.recovery_id()?)
+        let rec_id = RecoveryId::try_from(self.recovery_id()?)
             .map_err(|e| Error::sig(format!("bad recovery id: {e}")))?;
         RecoverableSignature::from_compact(self.rs(), rec_id)
             .map_err(|e| Error::sig(format!("malformed compact signature: {e}")))
@@ -184,10 +184,10 @@ pub fn sign_digest(digest: &[u8; 32], key: &PrivateKey) -> Result<Signature> {
     // The process-wide context. `Secp256k1::new()` and `signing_only()` build
     // precomputation tables on every call, which dominated these paths -- a
     // signature cost more in table setup than in elliptic curve arithmetic. The
-    // `global-context` feature is already enabled; this is what it is for.
-    let secp = secp256k1::SECP256K1;
-    let msg =
-        Message::from_digest_slice(digest).map_err(|e| Error::sig(format!("bad digest: {e}")))?;
+    // `global-context` feature is still what makes that so: as of secp256k1 0.33 the
+    // context-taking methods are deprecated and the ones used here reach the same global
+    // context internally, so the table is built once either way.
+    let msg = Message::from_digest(*digest);
 
     // RFC 6979 extra entropy: a big-endian counter, matching libsecp256k1's `ndata`
     // and beem's secp256k1 backend, which started at 1 and incremented.
@@ -195,7 +195,11 @@ pub fn sign_digest(digest: &[u8; 32], key: &PrivateKey) -> Result<Signature> {
         let mut nonce_data = [0u8; 32];
         nonce_data[28..].copy_from_slice(&counter.to_be_bytes());
 
-        let rec_sig = secp.sign_ecdsa_recoverable_with_noncedata(&msg, key.inner(), &nonce_data);
+        let rec_sig = RecoverableSignature::sign_ecdsa_recoverable_with_noncedata(
+            msg,
+            key.inner(),
+            &nonce_data,
+        );
         let (rec_id, compact) = rec_sig.serialize_compact();
 
         if !is_canonical(&compact) {
@@ -203,9 +207,7 @@ pub fn sign_digest(digest: &[u8; 32], key: &PrivateKey) -> Result<Signature> {
         }
 
         let mut out = [0u8; SIGNATURE_LEN];
-        out[0] = u8::try_from(rec_id.to_i32())
-            .map_err(|_| Error::sig("recovery id out of range"))?
-            + HEADER_OFFSET;
+        out[0] = rec_id.to_u8() + HEADER_OFFSET;
         out[1..].copy_from_slice(&compact);
         return Ok(Signature(out));
     }
@@ -246,19 +248,19 @@ pub fn recover(digest: &[u8; 32], signature: &Signature) -> Result<PublicKey> {
     // The process-wide context. `Secp256k1::new()` and `signing_only()` build
     // precomputation tables on every call, which dominated these paths -- a
     // signature cost more in table setup than in elliptic curve arithmetic. The
-    // `global-context` feature is already enabled; this is what it is for.
-    let secp = secp256k1::SECP256K1;
-    let msg =
-        Message::from_digest_slice(digest).map_err(|e| Error::sig(format!("bad digest: {e}")))?;
+    // `global-context` feature is still what makes that so: as of secp256k1 0.33 the
+    // context-taking methods are deprecated and the ones used here reach the same global
+    // context internally, so the table is built once either way.
+    let msg = Message::from_digest(*digest);
     let rec_sig = signature.to_recoverable()?;
 
-    let recovered = secp
-        .recover_ecdsa(&msg, &rec_sig)
+    let recovered = rec_sig
+        .recover_ecdsa(msg)
         .map_err(|e| Error::sig(format!("could not recover a public key: {e}")))?;
 
     // Recovery is not verification. Check the standard signature against the
     // recovered key before handing it back.
-    secp.verify_ecdsa(&msg, &rec_sig.to_standard(), &recovered)
+    secp256k1::ecdsa::verify(&rec_sig.to_standard(), msg, &recovered)
         .map_err(|e| Error::sig(format!("signature does not verify: {e}")))?;
 
     Ok(PublicKey::from_inner(recovered))

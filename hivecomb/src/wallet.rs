@@ -45,7 +45,6 @@ use crate::error::{Error, Result};
 use crate::keys::{PrivateKey, PublicKey, Role};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -194,7 +193,7 @@ impl Wallet {
         }
 
         let mut salt = [0u8; 16];
-        rand::rngs::OsRng.fill_bytes(&mut salt);
+        crate::rng::fill(&mut salt)?;
         let key = derive_key(passphrase, &salt, SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)?;
         let cipher = Aes256Gcm::new_from_slice(&*key)
             .map_err(|e| Error::key(format!("AES-GCM init failed: {e}")))?;
@@ -417,7 +416,7 @@ impl Wallet {
         }
 
         let mut salt = [0u8; 16];
-        rand::rngs::OsRng.fill_bytes(&mut salt);
+        crate::rng::fill(&mut salt)?;
         let derived = derive_key(new_passphrase, &salt, SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)?;
         let cipher = Aes256Gcm::new_from_slice(&*derived)
             .map_err(|e| Error::key(format!("AES-GCM init failed: {e}")))?;
@@ -496,7 +495,7 @@ fn derive_key(
 /// Encrypt under a fresh random nonce, returning both base64-encoded.
 fn encrypt_with(cipher: &Aes256Gcm, plaintext: &[u8]) -> Result<(String, String)> {
     let mut nonce_bytes = [0u8; 12];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    crate::rng::fill(&mut nonce_bytes)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, plaintext)
